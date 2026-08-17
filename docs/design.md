@@ -137,7 +137,7 @@ outbound only (polling); no inbound ports.
 
 | # | Question | Notes |
 |---|---|---|
-| 6 | Nested-Docker vehicle: DinD/sysbox vs sbx-style microVM | the *pattern* is decided (below); the vehicle is not. Pilot proposed Docker Sandboxes-style microVMs; counter-proposal: `docker:dind` sidecar or sysbox runtime (Linux benches) + apple/container inside tart VMs (macOS benches). sbx itself is CLI-only, template-only, egress-only — not drivable headlessly by the coordinator |
+| 6 | Nested-Docker vehicle: DinD/sysbox vs Docker Sandboxes (sbx) | the *pattern* is decided (below); the vehicle resolves **per backend, by spike**. Correction 2026-08-18: sbx **does support custom images** — templates (Dockerfile → registry → pulled at creation) + kits (runtime YAML: install commands, files, network/credential rules, agent definition; experimental). Remaining unknowns the docs don't answer: programmatic/headless lifecycle (create → pty → assert → destroy), machine-readable output, subject mounting, and whether it runs on a headless Linux server (arf) or needs Docker Desktop + sign-in. **Day-1 spike on macminim decides**; DinD/sysbox (Linux) + apple/container-in-tart (macOS) remain the designed fallback. Likely end state: per-backend vehicles behind the transport interface |
 
 Decided 2026-08-17: ~~no-LLM smoke variants~~ → oracle-solution pattern
 from terminal-bench (every scenario ships a reference solution; the smoke
