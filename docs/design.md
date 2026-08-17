@@ -88,15 +88,63 @@ performance · docs-honesty · compatibility matrix
   explicit runtime env var on a throwaway, and the isolation claim becomes an
   executable security test.
 
+## Reuse map (decided 2026-08-17)
+
+Don't invent wheels that exist; build only the arena core. Survey of the OSS
+landscape found no product whose subject is *a product installed and used by
+an agent impersonating a human* — eval frameworks (Inspect, Vivaria,
+terminal-bench) evaluate **agents**; CI frameworks schedule **commands**.
+gentar inverts both: the agent is the simulated user, the product is under
+test.
+
+**Wheels adopted (proven OSS, embed as-is):**
+
+| Wheel | Used for |
+|---|---|
+| Docker Compose | arena substrate + nested stack-under-test; makes the arena forge-agnostic (`compose up` + exit code) |
+| otelcol-contrib + ClickHouse | telemetry substrate (ported schema from agent-gauntlet) |
+| pexpect / tmux control mode | pty primitives for the human-simulation driver |
+| **tart** (Cirrus Labs) | macOS bench backend — macOS VMs on Apple hardware, when a scenario needs real macOS |
+| **terminal-bench / harbor** patterns | agent adapters (claude-code, codex, agy → bench pty) and the **oracle-solution** concept = no-LLM smoke variants |
+| anthropics/claude-code-action | PR auto-review/fix loops (subject repos' own CI; separate concern from the arena) |
+| Allure (optional) | report format emitter for familiar test-report UX |
+
+**Core built (the missing wheel — ports from agent-gauntlet):** bench
+lifecycle, decisions-not-steps scenario renderer, pty impersonation policy,
+reality-based assertions joined with spans in one SQL, budget guard +
+flake quarantine.
+
+## Forge-agnostic trigger layer (decided 2026-08-17)
+
+The arena has zero GitHub dependencies inside it. The forge (GitHub now;
+Gitea/Forgejo both viable later) is only the button. Two rules keep it
+portable:
+
+- **Budget guard + quarantine live in the coordinator**, not in forge
+  features (GitHub "environment protection" has no Gitea/Forgejo
+  equivalent — and the coordinator owns the spend SQL anyway).
+- **Subject integration is the compose contract, not `workflow_call`:** a
+  subject's CI job is ~10 lines — checkout subject, run gentar's compose
+  with the checkout mounted. Identical on GitHub, Gitea, Forgejo, Jenkins,
+  cron, or a laptop.
+
+Runners must exist on whatever metal we use (self-hosted runner in an LXC on
+arf for Linux benches; a runner on a Mac for the tart/macOS tier — macOS
+VMs require Apple hardware, Proxmox cannot host them). Runners connect
+outbound only (polling); no inbound ports.
+
 ## Open decisions
 
 | # | Question | Notes |
 |---|---|---|
 | 1 | Driver transport: docker exec vs sshd-in-bench | exec is simpler; sshd preserves the gauntlet driver's ssh-shaped assumptions |
 | 2 | CI credential scoping | which secrets reach which bench; per-run throwaway keys |
-| 3 | No-LLM smoke variants | cost control: deterministic near-equivalents of agent-in-the-loop scenarios |
-| 4 | macOS-fidelity backend | optional, not a blocker |
 | 5 | agent-gauntlet retirement mechanics | and its TERMINOLOGY.md entry |
+
+Decided 2026-08-17: ~~no-LLM smoke variants~~ → oracle-solution pattern
+from terminal-bench (every scenario ships a reference solution; the smoke
+variant runs the oracle instead of an agent). ~~macOS-fidelity backend~~ →
+tart on a Mac runner; default remains the Linux-approximation bench.
 
 ## Provenance
 
