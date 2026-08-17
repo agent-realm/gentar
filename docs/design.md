@@ -138,13 +138,22 @@ outbound only (polling); no inbound ports.
 | # | Question | Notes |
 |---|---|---|
 | 1 | Driver transport: docker exec vs sshd-in-bench | exec is simpler; sshd preserves the gauntlet driver's ssh-shaped assumptions |
-| 2 | CI credential scoping | which secrets reach which bench; per-run throwaway keys |
 | 5 | agent-gauntlet retirement mechanics | and its TERMINOLOGY.md entry |
 
 Decided 2026-08-17: ~~no-LLM smoke variants~~ → oracle-solution pattern
 from terminal-bench (every scenario ships a reference solution; the smoke
 variant runs the oracle instead of an agent). ~~macOS-fidelity backend~~ →
 tart on a Mac runner; default remains the Linux-approximation bench.
+
+Decided 2026-08-18: ~~CI credential scoping~~ → **tiered credentials**
+(pattern stolen from Docker Sandboxes' proxy injection): cheap deterministic
+tiers get explicit runtime env vars on a throwaway bench; the **security
+tier routes bench egress through a credential-holding proxy** — keys are
+injected per-request at the proxy and never exist inside the bench's
+filesystem or environment, making "use-but-not-read" (keyhouse pattern)
+literally true and executably testable. Considered and rejected as a
+substrate: Docker Sandboxes itself (interactive CLI, no custom images, no
+custom networks, no headless CI) — wrong shape for the arena.
 
 ## Provenance
 
