@@ -81,6 +81,9 @@ contract.
 
 ## Status
 
-Design agreed (see [docs/design.md](docs/design.md)); implementation not yet
-started. Named by the pilot 2026-08-17; free of collision in
-`ultimagent/TERMINOLOGY.md` (canon entry pending).
+Design of record agreed and landed ([docs/design.md](docs/design.md));
+registered in the umbrella as `components/gentar.md`; implementation
+starting. First subjects, in order: **claude-playbooks** (the installer
+CLI) · **kommander-playbook** · **memhouse**. macOS tier: **tart** on the
+pilot's Mac (`macminim`). Bench home dir is a scenario decision
+(`pilot_user` → `/Users/<name>` on macOS, `/home/<name>` on Linux).
