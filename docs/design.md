@@ -137,7 +137,7 @@ outbound only (polling); no inbound ports.
 
 | # | Question | Notes |
 |---|---|---|
-| 6 | Nested-Docker vehicle: DinD/sysbox vs Docker Sandboxes (sbx) | the *pattern* is decided (below); the vehicle resolves **per backend, by spike**. Correction 2026-08-18: sbx **does support custom images** — templates (Dockerfile → registry → pulled at creation) + kits (runtime YAML: install commands, files, network/credential rules, agent definition; experimental). Remaining unknowns the docs don't answer: programmatic/headless lifecycle (create → pty → assert → destroy), machine-readable output, subject mounting, and whether it runs on a headless Linux server (arf) or needs Docker Desktop + sign-in. **Day-1 spike on macminim decides**; DinD/sysbox (Linux) + apple/container-in-tart (macOS) remain the designed fallback. Likely end state: per-backend vehicles behind the transport interface |
+| 6 | ~~Nested-Docker vehicle~~ **DECIDED by spike 2026-08-18: Docker Sandboxes (sbx)** | All unknowns resolved live on arf (VM 9100, Ubuntu 24.04, nested KVM): headless device-flow auth with on-disk persistent token; full programmatic lifecycle (`create`/`exec -t` pty/`cp`/`ls --json`/`rm`, `run -d`); custom templates (`-t`, tar load); workspace bind-mounts + `--clone` git wiring; **a full Docker Engine inside each sandbox** with hard two-way isolation from the host daemon; egress under policy; `shell` agent = no-LLM oracle vehicle; per-agent default images (claude, codex, …). Spike report: task artifact `sbx-spike-2026-08-18-02_41.md` |
 
 Decided 2026-08-17: ~~no-LLM smoke variants~~ → oracle-solution pattern
 from terminal-bench (every scenario ships a reference solution; the smoke
@@ -179,6 +179,17 @@ those containers are born inside the bench's *own* Docker daemon, never the
 arena's: the agent gets root over a throwaway daemon and provably cannot
 touch the host's, cross-run container/port/image collisions are impossible,
 and a wedged environment is discarded wholesale.
+
+Decided 2026-08-18 (spike, resolves #6's vehicle): **benches are sbx
+sandboxes, not compose services.** The compose file keeps coordinator +
+telemetry + dashboard; the coordinator spawns benches as sbx sandboxes on a
+bench-host (a VM or LXC with Engine + sbx, logged in once via device flow).
+Each bench = its own microVM with its own Docker daemon — the nested
+boundary comes free. Driver transport becomes `sbx exec -t` (Linux benches)
++ `ssh` (tart macOS tier) behind the same interface; sbx's per-agent
+default images replace part of the terminal-bench adapter work; DinD/sysbox
+and apple/container-in-tart drop to fallbacks only. tart on macminim
+remains the macOS backend (sbx itself cannot host macOS sandboxes).
 
 ## Provenance
 
