@@ -30,17 +30,27 @@ ORDER BY (run_id, ts)
 class Spans:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
-        self.client = clickhouse_connect.get_client(
-            dsn=cfg.clickhouse_url,
-            username=cfg.clickhouse_user,
-            password=cfg.clickhouse_password,
-        )
+        self.client = None
+        try:
+            self.client = clickhouse_connect.get_client(
+                dsn=cfg.clickhouse_url,
+                username=cfg.clickhouse_user,
+                password=cfg.clickhouse_password,
+            )
+            self.client.command(SCHEMA.format(db=self.cfg.clickhouse_db))
+        except Exception as exc:
+            # Telemetry never fails a test (gauntlet policy, ported):
+            # degrade to no-op spans rather than aborting the run.
+            print(f"warn: telemetry unavailable — spans will not be recorded: {exc}")
+            self.client = None
 
     def ensure_schema(self) -> None:
-        self.client.command(SCHEMA.format(db=self.cfg.clickhouse_db))
+        pass  # schema ensured at client setup; kept for call-site stability
 
     def emit(self, run_id: str, name: str, status: str = "ok",
              attrs: dict[str, str] | None = None, body: str = "") -> None:
+        if self.client is None:
+            return
         try:
             self.client.insert(
                 f"{self.cfg.clickhouse_db}.spans",

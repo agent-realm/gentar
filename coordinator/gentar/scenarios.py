@@ -39,3 +39,15 @@ def smoke(bench: BenchHost, run_id: str, spans: Spans) -> str:
         raise AssertionError(f"uname -a failed or unexpected: rc={code} out={out!r}")
 
     return f"smoke ok: {out.strip()}"
+
+
+@scenario("smoke-fail")
+def smoke_fail(bench: BenchHost, run_id: str, spans: Spans) -> str:
+    """Negative test for the verdict machinery itself: a bench command
+    fails → the run must FAIL with exit 1, emit run.end(fail), and still
+    tear the sandbox down."""
+    sandbox = run_id
+    bench.create(sandbox, agent="shell")
+    spans.emit(run_id, "bench.create", attrs={"sandbox": sandbox, "agent": "shell"})
+    bench.exec(sandbox, "exit 3")  # must raise BenchHostError
+    raise AssertionError("unreachable: exec should have failed")

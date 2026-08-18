@@ -1,8 +1,8 @@
-"""gentar CLI. Exit code = verdict."""
+"""gentar CLI. Exit codes: 0 pass · 1 fail · 2 usage/config error."""
 
 import argparse
 
-from gentar.coordinator import run
+from gentar.coordinator import RunError, run
 from gentar.scenarios import REGISTRY
 
 
@@ -20,4 +20,8 @@ def main() -> int:
         for name in sorted(REGISTRY):
             print(name)
         return 0
-    return run(args.scenario)
+    try:
+        return run(args.scenario)
+    except RunError as exc:
+        print(f"error: {exc}")
+        return 2
