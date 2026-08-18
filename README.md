@@ -79,56 +79,79 @@ contract.
 
 | Tier | When | Suites |
 |---|---|---|
-| PR gate | every pull request | deterministic: lifecycle, conformance, docs-honesty |
-| nightly | post-merge | agent-in-the-loop (real LLM calls — slow, costly, flaky → quarantine + budget guard) |
-| release | on release | upgrade, security, compatibility matrix |
+| PR gate | every PR / push to main | 6 deterministic subjectless suites (matrix in [.github/workflows/gentar.yml](.github/workflows/gentar.yml)); exit code is the verdict |
+| nightly | post-merge, cron 00:17 | `scripted-onboarding` + all subject suites, behind `GENTAR_SUBJECT_TOKEN` and the budget guard |
+| dispatch | manual / from a subject repo | one named scenario, arbitrary gentar ref + subject ref (see [docs/subject-integration.md](docs/subject-integration.md)) |
+
+## Scenario inventory
+
+14 suites today — every one oracle (no LLM), every verdict from reality.
+(`coordinator ls` also lists `smoke-fail`, the built-in sabotage probe
+that proves failure detection itself.)
+
+| Suite | Subject | What it proves |
+|---|---|---|
+| `smoke` | — | bench lifecycle: create → exec `uname -a` → span → destroy |
+| `bench-template-verify` | — | benches from `gentar-bench-v1` carry the pinned claude-code |
+| `otlp-selfreport` | — | agent self-report: OTLP drop-file relay joins harness spans in one SQL |
+| `budget-sim` | — | budget guard refuses over-cap runs (exit 2) |
+| `scripted-onboarding` | — | pty driver: answer / pick / confirm / expect turns |
+| `scripted-danger` | — | danger gate fires before any approval |
+| `claude-playbooks-install` | kommander-playbook | documented `claude-playbook` CLI install path, 9 reality assertions |
+| `kommander-install` | kommander-playbook | README standalone path: in-place install, alias, data dirs, helper |
+| `kommander-update` | kommander-playbook | upgrade: v3.4.0 → subject VERSION; data survives `reset --hard` |
+| `kommander-task-lock` | kommander-playbook | lock guard exit contract (0 acquired / 2 live / 3 stale) |
+| `memhouse-install` | memhouse | `npm install -g` from the checkout; schema claims via `install --print-sql` |
+| `memhouse-house` | memhouse | real `deploy --local` house in the bench; sql-count verdicts |
+| `docs-honesty-kommander` | kommander-playbook | README install + uninstall paths verbatim, drift-guarded |
+| `docs-honesty-gentar` | gentar itself | this README's own claims (quickstart targets, named suites, tiers) |
+
+List them live: `docker compose run --rm coordinator ls`.
 
 ## Status
 
 Design of record ([docs/design.md](docs/design.md)) and build plan
 ([docs/buildplan-2026-08-18-v1.md](docs/buildplan-2026-08-18-v1.md))
-landed. **Phases 0–6 done**: sbx spike · arena skeleton (compose:
-coordinator + ClickHouse + otelcol; benches = sbx sandboxes spawned over
-SSH) · TOML scenarios + oracle runner (`claude-playbooks-install` green,
-9/9 reality assertions) · **pty driver** — pexpect over
-`ssh -tt … sbx exec -t`, gauntlet policies ported (approval
-auto-approve, danger gate, picker navigation by ❯ cursor line),
-exercised scripted (no LLM): `scripted-onboarding` (answer / pick /
-confirm / expect), `scripted-danger` (gate fires before any approval) ·
-**bench templates** — `bench-template/build.sh` builds a deterministic
-template on the bench-host (claude-code pinned by `bench-template/VERSION`),
-scenarios opt in with `[scenario] template = "…"`, and the bench.create
-span records the template tag + image digest (`bench-template-verify`
-asserts the pinned CLI from inside benches created from the template) ·
-**telemetry + dashboard + guards** — gauntlet spans schema ported
-(subject-leading sort, two-row scenario spans, `latest_scenario_status`
-view, 14 provenance attrs incl. subject/engine/config hashes); agent
-self-report: benches drop OTLP-JSON at `$WORKSPACE_DIR/gentar-otlp.json`,
-the coordinator relays it to otelcol, and **one SQL joins harness spans
-with agent OTLP** on the `gentar.run_id` resource attribute;
-`docker compose run --rm dashboard` renders a stateless HTML dashboard
-(verdicts, timeline drill-down, agent-span counts); budget guard
-(`GENTAR_BUDGET_CAP` + `[budget] tokens`) refuses over-cap runs with
-exit 2; flake quarantine (`GENTAR_QUARANTINE=…`) skips, never fails ·
-**CI** — three tiers on the self-hosted `gentar-bench` runner:
-gate (6-suite deterministic matrix per PR; exit code is the verdict),
-nightly (subject suites behind `GENTAR_SUBJECT_TOKEN` + budget cap),
-dispatch (arbitrary scenario / gentar ref / subject ref; subject repos
-fire it with their PR head sha — see
-[docs/subject-integration.md](docs/subject-integration.md)).
-**Phase 7 — subject onboarding**: kommander-playbook suites (install,
-update = old release → new, task-lock guard), memhouse suites (install
-+ a real `deploy --local` house with sql-count verdicts), docs-honesty
-v1 (`docs-honesty-kommander` runs the README's recommended path
-verbatim; `docs-honesty-gentar` checks this README's own claims — the
-quickstart's `.env.example` exists because that suite demanded it).
-macOS tier: **tart** on the pilot's Mac (`macminim`). Bench home dir is
-a scenario decision (`pilot_user` → `/Users/<name>` on macOS,
-`/home/<name>` on Linux). Real-agent runs (claude-code in a bench) are
-next — they need API-key injection, which is a credential-tier
-decision, not a code gap.
+landed. **Phases 0–7 done — build plan v1 is exhausted.** What exists,
+all merged to main and gate-verified per PR:
 
-## Quickstart (phase 1)
+- **Arena skeleton** — one compose file: coordinator + ClickHouse +
+  otelcol (+ dashboard); benches = sbx sandboxes spawned over SSH on a
+  bench-host.
+- **TOML scenarios + oracle runner** — declarative suites, no LLM,
+  assertions from files / commands / SQL.
+- **pty driver** — pexpect over `ssh -tt … sbx exec -t`; gauntlet
+  policies ported (approval auto-approve, danger gate, picker
+  navigation by ❯ cursor line); exercised by the scripted pair.
+- **Bench templates** — `bench-template/build.sh` builds a
+  deterministic template on the bench-host (claude-code pinned by
+  `bench-template/VERSION`); the bench.create span records template
+  tag + image digest.
+- **Telemetry + dashboard + guards** — gauntlet spans schema ported
+  (subject-leading sort, two-row scenario spans,
+  `latest_scenario_status` view, 14 provenance attrs); agent
+  self-report: benches drop OTLP-JSON at
+  `$WORKSPACE_DIR/gentar-otlp.json`, the coordinator relays it to
+  otelcol, and **one SQL joins harness spans with agent OTLP** on the
+  `gentar.run_id` resource attribute; the dashboard renders via
+  `docker compose run --rm dashboard`; budget guard
+  (`GENTAR_BUDGET_CAP` + `[budget] tokens`) refuses over-cap runs with
+  exit 2; flake quarantine (`GENTAR_QUARANTINE=…`) skips, never fails.
+- **CI** — three tiers on the self-hosted `gentar-bench` runner (see
+  the CI contract table above).
+- **Subjects onboarded (phase 7)** — kommander-playbook (install /
+  update / task-lock), memhouse (install / real house), docs-honesty
+  v1 for both kommander-playbook and gentar itself — the quickstart's
+  `.env.example` exists because `docs-honesty-gentar` demanded it.
+
+**Not built yet** (deliberate, not forgotten): real-agent runs —
+claude-code driven by the pty driver inside a bench. The wiring exists
+(template, driver, env tier); what's missing is API-key injection, a
+credential-tier decision, not a code gap. Also deferred from plan v1:
+tart/macOS tier on the pilot's Mac (`macminim`), Forgejo/Gitea forge
+swap, `--kit` evaluation, multi-bench parallel matrices.
+
+## Quickstart
 
 Prereqs: a Docker host for the arena, and a **bench-host** — any Linux
 machine with `sbx` installed and logged in once (`sbx login`, device
@@ -143,4 +166,5 @@ docker compose exec clickhouse clickhouse-client \
   -q "SELECT span_name, status FROM gentar.spans ORDER BY ts"
 ```
 
-Phase-1 defaults point at the spike VM on arf (`10.10.10.200`).
+Defaults in `.env.example` point at the current bench-host — the VM on
+arf (`10.10.10.200`) the runner lives on.
