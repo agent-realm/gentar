@@ -1,0 +1,55 @@
+# Subject: kommander-playbook — the task-management playbook this arena
+# runs under. Oracle = the README's standalone install path, verbatim:
+# `./install.sh --name k` installs IN PLACE (data dirs + zsh alias
+# pointing CLAUDE_CONFIG_DIR at the checkout). The claude-playbook CLI
+# path (copy to ~/.claude-playbooks) is covered separately by
+# claude-playbooks-install and docs-honesty-kommander.
+
+[scenario]
+name = "kommander-install"
+subject = "kommander-playbook"
+agent = "shell"
+
+[oracle]
+steps = [
+  'cd "$WORKSPACE_DIR" && ./install.sh --name k',
+]
+
+# The install lives in the workspace (host path unknown inside the bench
+# except via $WORKSPACE_DIR), so filesystem assertions run as commands.
+
+[[verify.files]]
+path = "~/.zshrc"
+contains = "alias k="
+
+[[verify.files]]
+path = "~/.zshrc"
+contains = "KOMMANDER_NAME=k"
+
+[[verify.files]]
+path = "~/.zshrc"
+contains = "CLAUDE_CONFIG_DIR="
+
+[[verify.commands]]
+command = 'test -d "$WORKSPACE_DIR/data/tasks" && test -d "$WORKSPACE_DIR/data/todos" && test -d "$WORKSPACE_DIR/data/crons" && echo data-dirs-ok'
+contains = "data-dirs-ok"
+
+[[verify.commands]]
+command = 'test -x "$WORKSPACE_DIR/bin/kommander-helper" && echo helper-executable'
+contains = "helper-executable"
+
+[[verify.commands]]
+# tasks / lock status are the startup protocol's first calls; empty list
+# still exits 0.
+command = '"$WORKSPACE_DIR/bin/kommander-helper" tasks && "$WORKSPACE_DIR/bin/kommander-helper" lock status && echo helper-runs'
+contains = "helper-runs"
+
+[[verify.commands]]
+# settings.json seeded from the tracked template on first install.
+command = 'test -f "$WORKSPACE_DIR/settings.json" && test -d "$WORKSPACE_DIR/hooks" && echo install-tree-ok'
+contains = "install-tree-ok"
+
+[[verify.commands]]
+# VERSION floats from the subject checkout — never hardcoded.
+command = 'V=$(cat "$WORKSPACE_DIR/VERSION"); test -n "$V" && echo version-present="$V"'
+contains = "version-present=v"

@@ -137,8 +137,7 @@ outbound only (polling); no inbound ports.
 
 | # | Question | Notes |
 |---|---|---|
-| 1 | Driver transport: docker exec vs sshd-in-bench | exec is simpler; sshd preserves the gauntlet driver's ssh-shaped assumptions |
-| 5 | agent-gauntlet retirement mechanics | and its TERMINOLOGY.md entry |
+| 6 | ~~Nested-Docker vehicle~~ **DECIDED by spike 2026-08-18: Docker Sandboxes (sbx)** | All unknowns resolved live on arf (VM 9100, Ubuntu 24.04, nested KVM): headless device-flow auth with on-disk persistent token; full programmatic lifecycle (`create`/`exec -t` pty/`cp`/`ls --json`/`rm`, `run -d`); custom templates (`-t`, tar load); workspace bind-mounts + `--clone` git wiring; **a full Docker Engine inside each sandbox** with hard two-way isolation from the host daemon; egress under policy; `shell` agent = no-LLM oracle vehicle; per-agent default images (claude, codex, …). Spike report: task artifact `sbx-spike-2026-08-18-02_41.md` |
 
 Decided 2026-08-17: ~~no-LLM smoke variants~~ → oracle-solution pattern
 from terminal-bench (every scenario ships a reference solution; the smoke
@@ -155,10 +154,47 @@ literally true and executably testable. Considered and rejected as a
 substrate: Docker Sandboxes itself (interactive CLI, no custom images, no
 custom networks, no headless CI) — wrong shape for the arena.
 
+Decided 2026-08-18: ~~driver transport~~ → **one transport interface, two
+implementations**: `docker exec` for Linux benches (no sshd to run), `ssh`
+for tart VMs. The interface pays for itself the moment the macOS tier
+exists, and survives any nested-Docker vehicle choice unchanged.
+
+Decided 2026-08-18: ~~agent-gauntlet retirement~~ → mechanics recorded on
+its card (umbrella PR #9): port telemetry substrate + driver logic into
+gentar first, then archive the GitHub repo and move the checkout to
+`_archived/` (the memory-house precedent). Canon entry: gentar card in
+`ultimagent/components/`.
+
+Decided 2026-08-18: **bench shape** — the pilot home dir is a scenario
+decision: `pilot_user` renders as `/Users/<name>` on the macOS backend and
+`/home/<name>` on Linux (path-keyed session data stays valid; the testbed
+convention, generalized). **macOS tier is in scope now**: tart runs on the
+pilot's Mac (`macminim`) behind a `[gentar, macos]` runner. **First
+subjects, in order:** claude-playbooks (the installer CLI) ·
+kommander-playbook · memhouse.
+
+Decided 2026-08-18: **per-run nested Docker boundary** (the pattern; vehicle
+open as #6) — when a scenario lets the agent fire containers on demand,
+those containers are born inside the bench's *own* Docker daemon, never the
+arena's: the agent gets root over a throwaway daemon and provably cannot
+touch the host's, cross-run container/port/image collisions are impossible,
+and a wedged environment is discarded wholesale.
+
+Decided 2026-08-18 (spike, resolves #6's vehicle): **benches are sbx
+sandboxes, not compose services.** The compose file keeps coordinator +
+telemetry + dashboard; the coordinator spawns benches as sbx sandboxes on a
+bench-host (a VM or LXC with Engine + sbx, logged in once via device flow).
+Each bench = its own microVM with its own Docker daemon — the nested
+boundary comes free. Driver transport becomes `sbx exec -t` (Linux benches)
++ `ssh` (tart macOS tier) behind the same interface; sbx's per-agent
+default images replace part of the terminal-bench adapter work; DinD/sysbox
+and apple/container-in-tart drop to fallbacks only. tart on macminim
+remains the macOS backend (sbx itself cannot host macOS sandboxes).
+
 ## Provenance
 
 - Forked from task `agent-gauntlet` 2026-08-17-13_29; design conversation
   logged in that task's `sessions/2026-08-17.md`.
 - Name **gentar** (aGENT ARena) coined by the pilot 2026-08-17; verified free
-  in `ultimagent/TERMINOLOGY.md` (canon entry pending — names live in the
-  canon, not in habit).
+  in `ultimagent/TERMINOLOGY.md`; canon entry landed as the
+  `components/gentar.md` card (umbrella PR #9, 2026-08-18).

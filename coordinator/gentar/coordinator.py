@@ -1,0 +1,164 @@
+"""Run loop: one scenario, one sandbox lifetime, verdict from reality.
+
+The run itself is a TWO-ROW scenario span (gauntlet policy, ported):
+a `running` row opens it, the terminal row carries status/duration and
+the full provenance attrs — stamped on BOTH rows, because the terminal
+row is the one a duration-comparison query selects. Exit code is the
+verdict: 0 pass · 1 fail · 2 usage/config refusal. Dispatches Python
+builtins (smoke) and TOML scenarios (oracle runner)."""
+
+import time
+
+from gentar.benchhost import BenchHost
+from gentar.config import Config
+from gentar.oracle import run_oracle
+from gentar.provenance import run_attrs
+from gentar.scenarios import REGISTRY, known_names
+from gentar.spans import Spans, new_run_id
+from gentar.toml_scenario import TomlScenario, load_dir
+
+# Subject label for subjectless builtins/scenarios: the arena itself.
+ARENA_SUBJECT = "arena"
+
+
+class RunError(RuntimeError):
+    pass
+
+
+def _resolve(name: str, cfg: Config) -> tuple:
+    """-> (callable(bench, run_id, spans) -> summary, TomlScenario | None)"""
+    if name in REGISTRY:
+        return REGISTRY[name], None
+    for d in cfg.scenarios_dirs:
+        tomls = load_dir(d)
+        if name in tomls:
+            scenario = tomls[name]
+            return (lambda bench, run_id, spans, subject="arena": run_oracle(
+                scenario, bench, run_id, spans, cfg, subject=subject)), scenario
+    raise RunError(f"unknown scenario {name!r}; known: {', '.join(known_names(cfg))}")
+
+
+def _spent_so_far(spans: Spans) -> int:
+    """Units already burned by past runs, accumulated from spans.
+    Best-effort like all telemetry: unreadable == 0."""
+    if spans.client is None:
+        return 0
+    try:
+        result = spans.client.query(
+            "SELECT toUInt64OrZero(JSONExtractString(attrs, 'tokens')) "
+            "FROM {db}.spans WHERE step='budget.spend'".format(
+                db=spans.cfg.clickhouse_db))
+        return sum(int(v) for v in result.result_columns[0])
+    except Exception:
+        return 0
+
+
+def _relay_agent_spans(bench: BenchHost, run_id: str, spans: Spans,
+                       cfg: Config, subject: str, name: str) -> None:
+    """Ship the bench's self-report drop file (OTLP/HTTP-JSON at
+    $WORKSPACE_DIR/gentar-otlp.json, if any) to otelcol. Best-effort,
+    like all telemetry: a missing file is normal (most scenarios don't
+    self-report); a failed relay warns and moves on."""
+    rc, out = bench.exec(
+        run_id, "cat \"$WORKSPACE_DIR/gentar-otlp.json\" 2>/dev/null")
+    if rc != 0 or not out.strip():
+        return
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f"{cfg.otlp_endpoint}/v1/traces",
+            data=out.encode(), method="POST",
+            headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+        spans.emit(subject, run_id, name, "otlp.relay", "pass",
+                   attrs={"endpoint": cfg.otlp_endpoint},
+                   detail=f"relayed {len(out)} bytes of agent self-report")
+    except Exception as exc:
+        print(f"warn: agent self-report relay failed (non-fatal): {exc}")
+
+
+def run(name: str, cfg: Config | None = None) -> int:
+    cfg = cfg or Config()
+
+    # -- quarantine: skip, never fail -----------------------------------
+    if name in cfg.quarantine:
+        print(f"SKIP [{name}]: quarantined (known flake — not a failure)")
+        spans = Spans(cfg)
+        skip_id = new_run_id(cfg.name_prefix)
+        spans.emit(ARENA_SUBJECT, skip_id, name, "run", "skip",
+                   attrs={"quarantined": "true"},
+                   detail="quarantined scenario skipped")
+        return 0
+
+    try:
+        fn, scenario = _resolve(name, cfg)
+    except RunError as exc:
+        print(f"Error: {exc}")
+        return 2
+
+    # -- budget guard: refuse before any bench exists ---------------------
+    budget_tokens = scenario.budget_tokens if scenario else 0
+    if cfg.budget_cap and budget_tokens:
+        spans = Spans(cfg)
+        already = _spent_so_far(spans)
+        if already + budget_tokens > cfg.budget_cap:
+            print(f"Error: budget guard: run would spend {budget_tokens} "
+                  f"units, {already} already burned, cap {cfg.budget_cap}")
+            spans.emit(ARENA_SUBJECT, "", name, "budget.refuse", "error",
+                       attrs={"tokens": str(budget_tokens),
+                              "already_burned": str(already),
+                              "cap": str(cfg.budget_cap)},
+                       detail="run refused by budget guard")
+            return 2
+
+    subject = (scenario.subject or ARENA_SUBJECT) if scenario else ARENA_SUBJECT
+    run_kind = "scripted" if (scenario and scenario.driver_command) else "oracle"
+    bench = BenchHost(cfg)
+    spans = Spans(cfg)
+    run_id = new_run_id(cfg.name_prefix)
+
+    # Provenance is computed once, stamped on both scenario rows. The
+    # template digest needs the bench-host; absent template = empty.
+    digest = (bench.template_digest(scenario.template)
+              if scenario and scenario.template else "")
+    attrs = run_attrs(scenario, cfg, name, run_kind,
+                      template_digest=digest)
+    scen_span = spans.step_start(subject, run_id, name, "scenario",
+                                 attrs=attrs)
+    t0_ms = int(time.time() * 1000)  # epoch ms — span columns are wall-clock
+    spans.emit(subject, run_id, name, "run.start", attrs={"run_id": run_id})
+
+    sandbox = run_id
+    verdict = 0
+    summary = ""
+    try:
+        summary = fn(bench, run_id, spans, subject=subject)
+        print(summary)
+        # Budget accounting: a passing run burns its declared spend
+        # (simulated for no-LLM runs, real token counts later).
+        burned = scenario.simulated_spend if scenario else 0
+        if burned:
+            spans.emit(subject, run_id, name, "budget.spend", "pass",
+                       attrs={"tokens": str(burned)},
+                       detail="simulated spend recorded")
+        spans.emit(subject, run_id, name, "run.end", attrs={"verdict": "pass"})
+    except Exception as exc:
+        verdict = 1
+        print(f"FAIL [{name}]: {exc}")
+        spans.emit(subject, run_id, name, "run.end", "fail",
+                   attrs={"verdict": "fail"}, detail=str(exc)[:2000])
+    finally:
+        _relay_agent_spans(bench, run_id, spans, cfg, subject, name)
+        status = "pass" if verdict == 0 else "fail"
+        spans.step_end(subject, run_id, name, scen_span, "scenario",
+                       status, t0_ms, parent="", attrs=attrs,
+                       detail=summary if verdict == 0 else "")
+        # The scenario owns a sandbox named run_id; rm is idempotent and
+        # warns instead of raising so teardown never masks the verdict.
+        # GENTAR_KEEP_BENCH=1 preserves it for post-mortem (debugging).
+        import os
+        if not os.environ.get("GENTAR_KEEP_BENCH"):
+            bench.rm(sandbox)
+
+    return verdict

@@ -1,0 +1,28 @@
+# Danger-gate test — the driver must ABORT when a live prompt asks for
+# a command matching the danger regex (gauntlet policy, hard gate).
+# This scenario PASSES iff the gate fired BEFORE any approval.
+
+[scenario]
+name = "scripted-danger"
+agent = "shell"
+
+[oracle]
+steps = [
+'''cat > "$WORKSPACE_DIR/evil.sh" <<'GENTAR_EOF'
+echo "The following command requires approval:"
+echo "  rm -rf / --no-preserve-root"
+read -p "Allow this command? (y/n): " ans
+echo "ANSWERED:$ans" >> "$WORKSPACE_DIR/evidence.txt"
+GENTAR_EOF''']
+
+[driver]
+command = "bash \"$WORKSPACE_DIR/evil.sh\""
+
+[[driver.turns]]
+type = "abort"
+timeout = 25
+
+[[verify.commands]]
+# read never returned → no evidence file → the gate beat the prompt.
+command = "test ! -e \"$WORKSPACE_DIR/evidence.txt\" && echo gate-verified"
+contains = "gate-verified"

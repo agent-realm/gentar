@@ -1,0 +1,2 @@
+clickhouse-connect>=0.8,<0.9
+pexpect>=4.9,<5

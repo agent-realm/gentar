@@ -1,0 +1,44 @@
+# Docs-honesty, subject gentar itself: the README's quickstart and
+# status claims checked against the repo it ships in. Pure file/grep
+# reality — every claim the quickstart makes a reader act on must hold:
+# the files it names exist, the scenarios it names exist, the commands
+# it prints have their targets. Drift guards pair each executed check
+# with the README line that promises it.
+
+[scenario]
+name = "docs-honesty-gentar"
+subject = "gentar"
+agent = "shell"
+
+[oracle]
+steps = [
+  # --- quickstart drift guards: README still prints these ---
+  'grep -qF "cp .env.example .env" "$WORKSPACE_DIR/README.md" && grep -qF "docker compose run --rm coordinator run smoke" "$WORKSPACE_DIR/README.md" && echo quickstart-claims-present',
+  # --- quickstart targets exist ---
+  'test -f "$WORKSPACE_DIR/.env.example" && echo env-example-exists',
+  'test -f "$WORKSPACE_DIR/docker-compose.yml" && echo compose-exists',
+  # smoke is a builtin (registered in scenarios.py), not a TOML file.
+  'grep -q "@scenario(\"smoke\")" "$WORKSPACE_DIR/coordinator/gentar/scenarios.py" && echo smoke-defined',
+  # --- dashboard claim: "docker compose run --rm dashboard renders" ---
+  'grep -qF "docker compose run --rm dashboard" "$WORKSPACE_DIR/README.md" && grep -q "dashboard:" "$WORKSPACE_DIR/docker-compose.yml" && test -f "$WORKSPACE_DIR/dashboard/generate.py" && echo dashboard-claim-true',
+  # --- bench template claim: "claude-code pinned by bench-template/VERSION" ---
+  'grep -qF "bench-template/VERSION" "$WORKSPACE_DIR/README.md" && test -f "$WORKSPACE_DIR/bench-template/VERSION" && echo template-pin-true',
+  # --- README names scenarios by name; each must exist as a suite ---
+  '''cd "$WORKSPACE_DIR"
+for s in claude-playbooks-install scripted-onboarding scripted-danger bench-template-verify; do
+  test -f "coordinator/scenarios/$s.toml" || { echo "README names missing scenario: $s"; exit 1; }
+done
+echo named-scenarios-exist''',
+  # --- CI tier claim: the workflow file carries the three tiers ---
+  'grep -qF "gate:" "$WORKSPACE_DIR/.github/workflows/gentar.yml" && grep -qF "nightly:" "$WORKSPACE_DIR/.github/workflows/gentar.yml" && grep -qF "dispatch:" "$WORKSPACE_DIR/.github/workflows/gentar.yml" && echo tiers-claim-true',
+]
+
+[[verify.commands]]
+command = 'grep -qF "exit code = verdict" "$WORKSPACE_DIR/README.md" && echo verdict-contract-stated'
+contains = "verdict-contract-stated"
+
+[[verify.commands]]
+# Subject-integration doc referenced by the README's subject story exists
+# and names the subject-side trigger contract.
+command = 'grep -q "subject-integration" "$WORKSPACE_DIR/README.md" || true; test -f "$WORKSPACE_DIR/docs/subject-integration.md" && grep -qF "GENTAR_DISPATCH_TOKEN" "$WORKSPACE_DIR/docs/subject-integration.md" && echo integration-doc-true'
+contains = "integration-doc-true"

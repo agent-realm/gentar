@@ -10,11 +10,11 @@ Runs anywhere Docker runs: laptop, CI runner, Proxmox host. Proxmox is just
 another Docker host.
 
 > Part of the [ultimagent](https://github.com/agent-realm/ultimagent)
-> constellation. **gentar supersedes
-> [agent-gauntlet](https://github.com/agent-realm/agent-gauntlet)** as the
-> shared test engine; agent-gauntlet keeps its VM-era history as the pioneer.
-> The telemetry substrate and driver logic port over — only the environment
-> substrate is new.
+> constellation. **gentar is the successor line to
+> [agent-gauntlet](https://github.com/agent-realm/agent-gauntlet)** — same
+> driver logic and telemetry substrate, ported by copy onto a compose-native
+> substrate. agent-gauntlet stays in service for the projects using it;
+> subjects migrate to gentar when their owners choose.
 
 ## What it does
 
@@ -38,12 +38,16 @@ an internal network.
 
 ## The stack
 
-| Service | Role |
+| Piece | Role |
 |---|---|
-| `coordinator` | engine: matrix expansion, scheduling, driver transport, assertions |
-| `bench ×N` | disposable pilot machine: agents pre-installed, auth injected at runtime, subject mounted |
+| `coordinator` | engine: bench lifecycle, scheduling, driver transport, assertions, budget guard |
+| `bench ×N` | **sbx sandboxes** (Docker Sandboxes) spawned by the coordinator on a bench-host — per-run microVM, own Docker daemon each; macOS tier: tart VMs |
 | `telemetry` | ClickHouse + otelcol-contrib; spans schema ported from agent-gauntlet |
 | `dashboard` | stateless verdicts + span drill-down |
+
+Benches are not compose services. The compose file carries coordinator +
+telemetry (+ dashboard); the coordinator creates and destroys each bench
+over SSH (`sbx create/exec/rm` on Linux, `ssh` for tart macOS VMs).
 
 ## Test taxonomy (10 dimensions)
 
@@ -81,6 +85,62 @@ contract.
 
 ## Status
 
-Design agreed (see [docs/design.md](docs/design.md)); implementation not yet
-started. Named by the pilot 2026-08-17; free of collision in
-`ultimagent/TERMINOLOGY.md` (canon entry pending).
+Design of record ([docs/design.md](docs/design.md)) and build plan
+([docs/buildplan-2026-08-18-v1.md](docs/buildplan-2026-08-18-v1.md))
+landed. **Phases 0–6 done**: sbx spike · arena skeleton (compose:
+coordinator + ClickHouse + otelcol; benches = sbx sandboxes spawned over
+SSH) · TOML scenarios + oracle runner (`claude-playbooks-install` green,
+9/9 reality assertions) · **pty driver** — pexpect over
+`ssh -tt … sbx exec -t`, gauntlet policies ported (approval
+auto-approve, danger gate, picker navigation by ❯ cursor line),
+exercised scripted (no LLM): `scripted-onboarding` (answer / pick /
+confirm / expect), `scripted-danger` (gate fires before any approval) ·
+**bench templates** — `bench-template/build.sh` builds a deterministic
+template on the bench-host (claude-code pinned by `bench-template/VERSION`),
+scenarios opt in with `[scenario] template = "…"`, and the bench.create
+span records the template tag + image digest (`bench-template-verify`
+asserts the pinned CLI from inside benches created from the template) ·
+**telemetry + dashboard + guards** — gauntlet spans schema ported
+(subject-leading sort, two-row scenario spans, `latest_scenario_status`
+view, 14 provenance attrs incl. subject/engine/config hashes); agent
+self-report: benches drop OTLP-JSON at `$WORKSPACE_DIR/gentar-otlp.json`,
+the coordinator relays it to otelcol, and **one SQL joins harness spans
+with agent OTLP** on the `gentar.run_id` resource attribute;
+`docker compose run --rm dashboard` renders a stateless HTML dashboard
+(verdicts, timeline drill-down, agent-span counts); budget guard
+(`GENTAR_BUDGET_CAP` + `[budget] tokens`) refuses over-cap runs with
+exit 2; flake quarantine (`GENTAR_QUARANTINE=…`) skips, never fails ·
+**CI** — three tiers on the self-hosted `gentar-bench` runner:
+gate (6-suite deterministic matrix per PR; exit code is the verdict),
+nightly (subject suites behind `GENTAR_SUBJECT_TOKEN` + budget cap),
+dispatch (arbitrary scenario / gentar ref / subject ref; subject repos
+fire it with their PR head sha — see
+[docs/subject-integration.md](docs/subject-integration.md)).
+**Phase 7 — subject onboarding**: kommander-playbook suites (install,
+update = old release → new, task-lock guard), memhouse suites (install
++ a real `deploy --local` house with sql-count verdicts), docs-honesty
+v1 (`docs-honesty-kommander` runs the README's recommended path
+verbatim; `docs-honesty-gentar` checks this README's own claims — the
+quickstart's `.env.example` exists because that suite demanded it).
+macOS tier: **tart** on the pilot's Mac (`macminim`). Bench home dir is
+a scenario decision (`pilot_user` → `/Users/<name>` on macOS,
+`/home/<name>` on Linux). Real-agent runs (claude-code in a bench) are
+next — they need API-key injection, which is a credential-tier
+decision, not a code gap.
+
+## Quickstart (phase 1)
+
+Prereqs: a Docker host for the arena, and a **bench-host** — any Linux
+machine with `sbx` installed and logged in once (`sbx login`, device
+flow; the token persists).
+
+```bash
+cp .env.example .env          # point at your bench-host + SSH key
+export GENTAR_BENCH_KEY_FILE="$HOME/.ssh/id_ed25519"
+docker compose run --rm coordinator run smoke   # exit code = verdict
+docker compose exec clickhouse clickhouse-client \
+  --user gentar --password gentar \
+  -q "SELECT span_name, status FROM gentar.spans ORDER BY ts"
+```
+
+Phase-1 defaults point at the spike VM on arf (`10.10.10.200`).
