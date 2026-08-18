@@ -51,6 +51,9 @@ def run(name: str, cfg: Config | None = None) -> int:
     finally:
         # The scenario owns a sandbox named run_id; rm is idempotent and
         # warns instead of raising so teardown never masks the verdict.
-        bench.rm(sandbox)
+        # GENTAR_KEEP_BENCH=1 preserves it for post-mortem (debugging).
+        import os
+        if not os.environ.get("GENTAR_KEEP_BENCH"):
+            bench.rm(sandbox)
 
     return verdict

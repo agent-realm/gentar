@@ -87,13 +87,20 @@ contract.
 
 Design of record ([docs/design.md](docs/design.md)) and build plan
 ([docs/buildplan-2026-08-18-v1.md](docs/buildplan-2026-08-18-v1.md))
-landed. **Phase 0 (sbx spike) done; phase 1 (arena skeleton) done** —
-the smoke scenario creates an sbx bench on the bench-host, execs in it,
-writes spans to ClickHouse, tears it down. First subjects, in order:
-**claude-playbooks** (the installer CLI) · **kommander-playbook** ·
-**memhouse**. macOS tier: **tart** on the pilot's Mac (`macminim`).
-Bench home dir is a scenario decision (`pilot_user` → `/Users/<name>`
-on macOS, `/home/<name>` on Linux).
+landed. **Phases 0–3 done**: sbx spike · arena skeleton (compose:
+coordinator + ClickHouse + otelcol; benches = sbx sandboxes spawned over
+SSH) · TOML scenarios + oracle runner (`claude-playbooks-install` green,
+9/9 reality assertions) · **pty driver** — pexpect over
+`ssh -tt … sbx exec -t`, gauntlet policies ported (approval
+auto-approve, danger gate, picker navigation by ❯ cursor line),
+exercised scripted (no LLM): `scripted-onboarding` (answer / pick /
+confirm / expect), `scripted-danger` (gate fires before any approval).
+First subjects, in order: **claude-playbooks** (the installer CLI) ·
+**kommander-playbook** · **memhouse**. macOS tier: **tart** on the
+pilot's Mac (`macminim`). Bench home dir is a scenario decision
+(`pilot_user` → `/Users/<name>` on macOS, `/home/<name>` on Linux).
+Real-agent runs (claude-code in a bench) are next — they need API-key
+injection, which is a credential-tier decision, not a code gap.
 
 ## Quickstart (phase 1)
 

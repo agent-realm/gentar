@@ -45,8 +45,21 @@ class TomlScenario:
         self.files = list(verify.get("files", []))
         self.commands = list(verify.get("commands", []))
 
-        if not self.steps:
-            raise ScenarioError(f"{path}: [oracle].steps must not be empty")
+        driver = doc.get("driver") or {}
+        self.driver_command = driver.get("command")
+        self.turns = list(driver.get("turns", []))
+
+        if not self.steps and not self.driver_command:
+            raise ScenarioError(f"{path}: needs [oracle].steps or a [driver] command")
+        for i, t in enumerate(self.turns):
+            kind = t.get("type")
+            if kind not in ("answer", "expect", "pick", "abort"):
+                raise ScenarioError(
+                    f"{path}: driver.turns[{i}].type must be answer|expect|pick|abort")
+            if kind in ("answer", "expect") and not t.get(("prompt" if kind == "answer" else "pattern")):
+                raise ScenarioError(f"{path}: driver.turns[{i}] missing prompt/pattern")
+            if kind == "pick" and not t.get("label"):
+                raise ScenarioError(f"{path}: driver.turns[{i}] missing label")
         for i, f in enumerate(self.files):
             if "path" not in f:
                 raise ScenarioError(f"{path}: verify.files[{i}] missing path")
