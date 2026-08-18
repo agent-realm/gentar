@@ -153,8 +153,14 @@ passes.
 - Gitea/Forgejo forge swap (portability is designed, not exercised).
 - Kits evaluation (`--kit`), Allure emitter, LXC bench-host, multi-bench
   parallel matrices (coordinator supports it; CI sizing comes later).
-- agent-gauntlet repo archive + `_archived/` move — trigger: end of
-  phase 5 (telemetry + driver fully ported).
+
+## Standing boundary: agent-gauntlet stays in service
+
+gentar ports gauntlet's telemetry substrate and driver logic **by copy** —
+gauntlet itself is untouched, stays active, and keeps serving the projects
+already using it (pilot decision 2026-08-18). No archive, no
+`_archived/` move, no forced subject migration. A subject moves to gentar
+when its owner chooses, not on a schedule.
 
 ## Risks / watch items
 
