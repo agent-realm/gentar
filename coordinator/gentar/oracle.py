@@ -23,10 +23,15 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
         spans.emit(run_id, "subject.push",
                    attrs={"subject": scenario.subject, "into": workspace})
 
-    # 2. Fresh bench with the workspace bind-mounted.
-    bench.create(sandbox, agent=scenario.agent)
-    spans.emit(run_id, "bench.create",
-               attrs={"sandbox": sandbox, "agent": scenario.agent})
+    # 2. Fresh bench with the workspace bind-mounted. A scenario with a
+    # template creates from it (agent CLIs pre-installed); template tag +
+    # image digest land in the span for provenance.
+    bench.create(sandbox, agent=scenario.agent, template=scenario.template)
+    attrs = {"sandbox": sandbox, "agent": scenario.agent}
+    if scenario.template:
+        attrs["template"] = scenario.template
+        attrs["template_digest"] = bench.template_digest(scenario.template)
+    spans.emit(run_id, "bench.create", attrs=attrs)
 
     # 3. Reference solution, verbatim. A failing step fails the run.
     for i, step in enumerate(scenario.steps):

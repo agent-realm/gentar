@@ -9,6 +9,7 @@ oracle mode is phase 2's runner.
     name = "…"                # defaults to filename stem
     subject = "kommander-playbook"   # dir under the subjects root
     agent = "shell"           # oracle runs on a plain sandbox
+    template = "gentar-bench-v1"  # optional: sbx template to create from
 
     [oracle]
     steps = ["…", "…"]        # shell lines; each must exit 0
@@ -39,6 +40,7 @@ class TomlScenario:
         self.name = sc.get("name", path.stem)
         self.subject = sc.get("subject")
         self.agent = sc.get("agent", "shell")
+        self.template = sc.get("template")  # sbx template tag, e.g. gentar-bench-v1
 
         self.steps = list((doc.get("oracle") or {}).get("steps", []))
         verify = doc.get("verify") or {}

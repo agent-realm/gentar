@@ -1,0 +1,15 @@
+# Proves the bench template: a sandbox created from gentar-bench-v1 has
+# the pinned claude-code pre-installed. The pin lives in two places that
+# must move together — bench-template/VERSION (read by build.sh when the
+# template is built) and the contains check below (what this scenario
+# accepts). No subject: template itself is the thing under test.
+[scenario]
+name = "bench-template-verify"
+template = "gentar-bench-v1"
+
+[oracle]
+steps = ["claude --version"]
+
+[[verify.commands]]
+command = "claude --version"
+contains = "2.1.234"

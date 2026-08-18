@@ -66,12 +66,24 @@ class BenchHost:
     def workspace(self, name: str) -> str:
         return f"{self.cfg.bench_workspace_root}/{name}"
 
-    def create(self, name: str, agent: str = "shell") -> None:
+    def create(self, name: str, agent: str = "shell",
+               template: str | None = None) -> None:
         self._run(["mkdir", "-p", self.workspace(name)])
-        self._run(
-            [self.cfg.sbx_bin, "create", "--name", name, agent, self.workspace(name)],
-            timeout=600,
-        )
+        cmd = [self.cfg.sbx_bin, "create", "--name", name]
+        if template:
+            cmd += ["-t", template]
+        cmd += [agent, self.workspace(name)]
+        self._run(cmd, timeout=600)
+
+    def template_digest(self, tag: str) -> str:
+        """IMAGE ID of a template (provenance: which image a bench came
+        from). Empty string if absent."""
+        proc = self._run([self.cfg.sbx_bin, "template", "ls"], timeout=60)
+        for line in proc.stdout.splitlines():
+            if tag in line:
+                parts = line.split()
+                return parts[2] if len(parts) > 2 else ""
+        return ""
 
     def exec(self, name: str, command: str, timeout: int = 300) -> tuple[int, str]:
         """Run a command in the sandbox via `sh -lc`. Returns (exit_code,
