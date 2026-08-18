@@ -8,5 +8,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY gentar/ gentar/
+COPY scenarios/ /app/scenarios/
 
 ENTRYPOINT ["python", "-m", "gentar"]

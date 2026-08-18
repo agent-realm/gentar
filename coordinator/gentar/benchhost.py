@@ -37,7 +37,8 @@ class BenchHost:
         cmd.append(f"{self.cfg.bench_user}@{self.cfg.bench_host}")
         return cmd
 
-    def _run(self, remote_cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
+    def _run(self, remote_cmd: list[str], timeout: int = 300,
+             strict: bool = True) -> subprocess.CompletedProcess:
         # ssh flattens argv with shell word-splitting on the remote side,
         # so quote every word; sbx flags with values stay one word each.
         remote = " ".join(shlex.quote(w) for w in remote_cmd)
@@ -47,11 +48,17 @@ class BenchHost:
             text=True,
             timeout=timeout,
         )
-        if proc.returncode != 0:
+        # ssh itself exits 255 on transport errors; anything else is the
+        # remote command's own exit code.
+        transport_error = proc.returncode == 255 and "ssh" in proc.stderr.lower()
+        if strict and (proc.returncode != 0 or transport_error):
             raise BenchHostError(
                 f"remote {remote_cmd[0]} failed rc={proc.returncode}: "
                 f"{proc.stderr.strip()[:400]}"
             )
+        if transport_error:
+            raise BenchHostError(
+                f"ssh to bench-host failed: {proc.stderr.strip()[:400]}")
         return proc
 
     # -- sbx lifecycle ---------------------------------------------------
@@ -67,12 +74,35 @@ class BenchHost:
         )
 
     def exec(self, name: str, command: str, timeout: int = 300) -> tuple[int, str]:
-        """Run a command in the sandbox via `sh -lc`. Returns (exit_code, stdout)."""
+        """Run a command in the sandbox via `sh -lc`. Returns (exit_code,
+        stdout) — a nonzero command exit is a RESULT, not an error; only
+        ssh transport failures raise."""
         proc = self._run(
             [self.cfg.sbx_bin, "exec", name, "sh", "-lc", command],
             timeout=timeout,
+            strict=False,
         )
         return proc.returncode, proc.stdout
+
+    def push_dir(self, local_dir: str, remote_dir: str) -> None:
+        """Ship a local directory into the bench-host via tar over SSH.
+        Subjects travel this way — mounted into sandboxes, never baked."""
+        remote = f"mkdir -p {remote_dir} && tar -C {remote_dir} -xzf -"
+        proc = subprocess.run(
+            ["tar", "-C", local_dir, "-czf", "-", "."],
+            stdout=subprocess.PIPE,
+        )
+        if proc.returncode != 0:
+            raise BenchHostError(f"local tar of {local_dir} failed")
+        ssh = subprocess.run(
+            self._ssh_base() + [remote],
+            input=proc.stdout,
+            capture_output=True,
+            timeout=600,
+        )
+        if ssh.returncode != 0:
+            raise BenchHostError(
+                f"push to {remote_dir} failed: {ssh.stderr.decode()[:400]}")
 
     def rm(self, name: str) -> None:
         # Never raises: teardown must not mask the real verdict.

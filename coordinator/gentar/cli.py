@@ -2,8 +2,9 @@
 
 import argparse
 
+from gentar.config import Config
 from gentar.coordinator import RunError, run
-from gentar.scenarios import REGISTRY
+from gentar.scenarios import known_names
 
 
 def main() -> int:
@@ -17,7 +18,7 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.cmd == "ls":
-        for name in sorted(REGISTRY):
+        for name in known_names(Config()):
             print(name)
         return 0
     try:

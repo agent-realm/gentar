@@ -34,3 +34,12 @@ class Config:
 
         # Sandbox name prefix; run id is appended by the coordinator.
         self.name_prefix = _opt("GENTAR_NAME_PREFIX", "gentar")
+
+        # Subjects root: mounted read-only into the coordinator container
+        # (compose volume). A scenario's `subject` names a dir under it.
+        self.subjects_root = _opt("GENTAR_SUBJECTS_ROOT", "/subjects")
+        # TOML scenario dirs (baked /app/scenarios first, extras appended).
+        self.scenarios_dirs = ["/app/scenarios"]
+        extra = _opt("GENTAR_SCENARIOS_DIR")
+        if extra:
+            self.scenarios_dirs.append(extra)

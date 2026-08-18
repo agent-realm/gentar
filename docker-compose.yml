@@ -46,6 +46,10 @@ services:
       GENTAR_CLICKHOUSE_USER: ${GENTAR_CH_USER:-gentar}
       GENTAR_CLICKHOUSE_PASSWORD: ${GENTAR_CH_PASSWORD:-gentar}
       GENTAR_BENCH_KEY: /run/secrets/bench_ssh_key
+      GENTAR_SUBJECTS_ROOT: /subjects
+    volumes:
+      # Subject checkouts, mounted read-only — never baked into images.
+      - ${GENTAR_SUBJECTS_DIR:-./subjects}:/subjects:ro
     command: [run, smoke]
     secrets:
       - source: bench_ssh_key
