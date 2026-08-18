@@ -1,0 +1,34 @@
+# Agent self-report path: a span emitted from INSIDE the bench, tagged
+# with the run id, reaches ClickHouse via otelcol. Benches have no
+# inbound route to the arena's collector, so self-report is file-based:
+# the coordinator injects GENTAR_RUN_ID into every oracle step env, the
+# step writes an OTLP/HTTP-JSON body to $WORKSPACE_DIR/gentar-otlp.json
+# (the documented drop point any agent adapter can use), and the
+# coordinator relays that file to otelcol on the compose network. The
+# harness↔agent JOIN is proven by one SQL on run_id (README phase-5).
+[scenario]
+name = "otlp-selfreport"
+
+[oracle]
+steps = [
+  """node -e '
+    const r = process.env.GENTAR_RUN_ID;
+    const c = require("crypto");
+    const trace = c.createHash("sha256").update(r).digest("hex").slice(0, 32);
+    const span = c.randomBytes(8).toString("hex");
+    const now = process.hrtime.bigint().toString();
+    const body = { resourceSpans: [{ resource: { attributes: [
+        { key: "gentar.run_id", value: { stringValue: r } } ] },
+      scopeSpans: [{ spans: [{ traceId: trace, spanId: span,
+        name: "agent.selfreport", kind: 1,
+        startTimeUnixNano: now, endTimeUnixNano: now,
+        status: { code: 1 } }] }] }] };
+    require("fs").writeFileSync(
+      process.env.WORKSPACE_DIR + "/gentar-otlp.json", JSON.stringify(body));
+    console.log("selfreport written for", r);
+  '"""
+]
+
+[[verify.commands]]
+command = "test -s \"$WORKSPACE_DIR/gentar-otlp.json\" && echo selfreport-nonempty"
+contains = "selfreport-nonempty"

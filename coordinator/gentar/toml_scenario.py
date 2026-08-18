@@ -51,6 +51,13 @@ class TomlScenario:
         self.driver_command = driver.get("command")
         self.turns = list(driver.get("turns", []))
 
+        # Spend ceiling in "spend units" (tokens today). 0 = unbudgeted.
+        budget = doc.get("budget") or {}
+        self.budget_tokens = int(budget.get("tokens", 0) or 0)
+        # Simulated spend for no-LLM runs exercising the budget guard:
+        # after a passing run this many units are recorded as burned.
+        self.simulated_spend = int(budget.get("simulate_spend", 0) or 0)
+
         if not self.steps and not self.driver_command:
             raise ScenarioError(f"{path}: needs [oracle].steps or a [driver] command")
         for i, t in enumerate(self.turns):

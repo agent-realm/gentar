@@ -16,10 +16,12 @@ class TurnFailure(AssertionError):
     pass
 
 
-def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans) -> str:
+def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
+              subject: str = "arena") -> str:
+    name = scenario.name
     driver = PtyDriver(bench, run_id)
     driver.start(scenario.driver_command)
-    spans.emit(run_id, "driver.start",
+    spans.emit(subject, run_id, name, "driver.start",
                attrs={"command": scenario.driver_command[:120]})
     try:
         for i, turn in enumerate(scenario.turns):
@@ -29,29 +31,30 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans) -> str:
                 if not _await(driver, re.compile(prompt, re.IGNORECASE), turn.get("timeout", 60)):
                     raise TurnFailure(f"turn {i}: prompt {prompt!r} never appeared")
                 driver.send_line(turn.get("send", ""))
-                _ok(spans, run_id, i, f"answer {prompt!r}")
+                _ok(spans, subject, run_id, name, i, f"answer {prompt!r}")
             elif kind == "expect":
                 pattern = turn["pattern"]
                 if not driver.drive_until(pattern, turn.get("timeout", 90)):
                     raise TurnFailure(f"turn {i}: pattern {pattern!r} never appeared")
-                _ok(spans, run_id, i, f"expect {pattern!r}")
+                _ok(spans, subject, run_id, name, i, f"expect {pattern!r}")
             elif kind == "pick":
                 if not driver.pick_option(turn["label"], turn.get("tries", 8)):
                     raise TurnFailure(f"turn {i}: picker option /{turn['label']}/ not reachable")
-                _ok(spans, run_id, i, f"pick /{turn['label']}/")
+                _ok(spans, subject, run_id, name, i, f"pick /{turn['label']}/")
             elif kind == "abort":
                 try:
                     driver.drive_until("__never_matches__", turn.get("timeout", 30))
                 except DriverAbort as abort:
-                    _ok(spans, run_id, i, "danger gate fired")
-                    spans.emit(run_id, "driver.abort", attrs={"turn": str(i)},
-                               body=str(abort))
+                    _ok(spans, subject, run_id, name, i, "danger gate fired")
+                    spans.emit(subject, run_id, name, "driver.abort",
+                               attrs={"turn": str(i)}, detail=str(abort))
                     return f"danger gate ok: {abort}"
                 raise TurnFailure(f"turn {i}: danger gate did NOT fire")
         driver.wait_idle(60)
         return f"driver ok: {len(scenario.turns)} turns"
     finally:
-        spans.emit(run_id, "driver.transcript", body=driver.transcript[-8000:])
+        spans.emit(subject, run_id, name, "driver.transcript",
+                   detail=driver.transcript[-8000:])
         driver.close()
 
 
@@ -65,5 +68,7 @@ def _await(driver: PtyDriver, pattern: re.Pattern, max_seconds: int) -> bool:
     return False
 
 
-def _ok(spans: Spans, run_id: str, index: int, what: str) -> None:
-    spans.emit(run_id, "driver.turn", attrs={"turn": str(index)}, body=what)
+def _ok(spans: Spans, subject: str, run_id: str, name: str,
+        index: int, what: str) -> None:
+    spans.emit(subject, run_id, name, "driver.turn",
+               attrs={"turn": str(index)}, detail=what)

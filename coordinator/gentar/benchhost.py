@@ -85,10 +85,17 @@ class BenchHost:
                 return parts[2] if len(parts) > 2 else ""
         return ""
 
-    def exec(self, name: str, command: str, timeout: int = 300) -> tuple[int, str]:
+    def exec(self, name: str, command: str, timeout: int = 300,
+             env: dict[str, str] | None = None) -> tuple[int, str]:
         """Run a command in the sandbox via `sh -lc`. Returns (exit_code,
         stdout) — a nonzero command exit is a RESULT, not an error; only
-        ssh transport failures raise."""
+        ssh transport failures raise. `env` is exported ahead of the
+        command (run id / OTLP endpoint injection for agent self-report).
+        """
+        if env:
+            exports = "".join(
+                f"export {k}={shlex.quote(v)}; " for k, v in env.items())
+            command = exports + command
         proc = self._run(
             [self.cfg.sbx_bin, "exec", name, "sh", "-lc", command],
             timeout=timeout,

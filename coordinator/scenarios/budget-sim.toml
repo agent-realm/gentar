@@ -1,0 +1,17 @@
+# Budget-guard exercise (no LLM): declares a 100-unit budget and a
+# simulated burn of the same. With GENTAR_BUDGET_CAP=250 three runs must
+# pass, pass, then REFUSE (exit 2) — the guard counts spend accumulated
+# across runs from the budget.spend spans.
+[scenario]
+name = "budget-sim"
+
+[budget]
+tokens = 100
+simulate_spend = 100
+
+[oracle]
+steps = ["echo budget-sim step ok"]
+
+[[verify.commands]]
+command = "echo verified"
+contains = "verified"
