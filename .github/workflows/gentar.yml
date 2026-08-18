@@ -1,0 +1,161 @@
+# gentar arena CI (build plan phase 6).
+#
+# Tiers (design of record):
+#   PR gate   — deterministic, subjectless suites; every PR.
+#   nightly   — subject + budget-guarded suites, post-merge.
+#   dispatch  — arbitrary scenario/ref, manual or from a subject repo.
+#
+# Everything runs on the self-hosted `gentar-bench` runner (VM 9100 —
+# the arena's own bench-host: Docker + sbx + this compose stack in one
+# place; the coordinator spawns benches by SSHing to itself with the
+# GENTAR_BENCH_KEY repo secret). `docker compose run` exit code IS the
+# verdict — no test-report layer in between.
+
+name: gentar
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Off-round minute; nightly post-merge sweep.
+    - cron: "17 0 * * *"
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "scenario to run (dispatch tier; 'nightly' runs the nightly job)"
+        default: smoke
+      ref:
+        description: "gentar ref to test (default: default branch)"
+        default: ""
+      subject_ref:
+        description: "subject checkout ref (when GENTAR_SUBJECT_TOKEN is set)"
+        default: ""
+
+concurrency:
+  # One arena per ref — the bench-host is a single VM; two compose
+  # stacks spawning sandboxes there concurrently would race names.
+  group: gentar-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate / ${{ matrix.scenario }}
+    # Subjectless deterministic suites gate every PR and main push.
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: [self-hosted, gentar-bench]
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [smoke, bench-template-verify, otlp-selfreport, budget-sim, scripted-onboarding, scripted-danger]
+    env:
+      COMPOSE_PROJECT_NAME: gentar-ci
+      SCENARIO: ${{ matrix.scenario }}
+      GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bench key
+        run: |
+          umask 077
+          echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
+
+      - name: run scenario (exit code = verdict)
+        run: |
+          docker compose build coordinator
+          docker compose run --rm coordinator run "$SCENARIO"
+        # `run` propagates the coordinator's exit code; a failing
+        # scenario fails the job — that IS the contract.
+
+      - name: teardown
+        if: always()
+        run: |
+          docker compose down -v --remove-orphans || true
+          rm -f /tmp/gentar_ci_bench_key
+          # Anything a crashed run left on the bench-host (informational;
+          # the coordinator already rms its own sandbox best-effort).
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
+            -i "$HOME/.ssh/gentar_ci_key" polat@10.10.10.200 \
+            'sbx ls | grep gentar- || echo "bench-host clean"' || true
+
+  nightly:
+    name: nightly / subject suites
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.scenario == 'nightly')
+    runs-on: [self-hosted, gentar-bench]
+    env:
+      COMPOSE_PROJECT_NAME: gentar-nightly
+      GENTAR_BUDGET_CAP: "5000"
+      GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bench key + subject
+        run: |
+          umask 077
+          echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
+          # Subject suites need the subject repo checked out under
+          # subjects/. GENTAR_SUBJECT_TOKEN (PAT with read access) is
+          # opt-in; without it the nightly run covers subjectless suites
+          # only and says so. subject_ref pins what gets tested.
+          if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
+            REF="${{ github.event.inputs.subject_ref }}"
+            REF="${REF:-main}"
+            git clone --depth 1 \
+              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
+              -b "$REF" subjects/kommander-playbook
+          else
+            echo "GENTAR_SUBJECT_TOKEN absent — subject suites skipped"
+          fi
+
+      - name: subject suite (budget-guarded)
+        run: |
+          docker compose build coordinator
+          if [ -d subjects/kommander-playbook ]; then
+            docker compose run --rm coordinator run claude-playbooks-install
+          else
+            docker compose run --rm coordinator run smoke
+          fi
+
+      - name: teardown
+        if: always()
+        run: |
+          docker compose down -v --remove-orphans || true
+          rm -f /tmp/gentar_ci_bench_key
+
+  dispatch:
+    name: dispatch / ${{ github.event.inputs.scenario }}
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.scenario != 'nightly'
+    runs-on: [self-hosted, gentar-bench]
+    env:
+      COMPOSE_PROJECT_NAME: gentar-dispatch
+      GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: bench key + subject (opt-in)
+        run: |
+          umask 077
+          echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
+          # Subject scenarios need the subject mounted; clone only when
+          # the read token exists (otherwise such scenarios fail honestly).
+          if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
+            REF="${{ github.event.inputs.subject_ref }}"
+            REF="${REF:-main}"
+            git clone --depth 1 \
+              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
+              -b "$REF" subjects/kommander-playbook
+          fi
+
+      - name: run
+        run: |
+          docker compose build coordinator
+          docker compose run --rm coordinator run "${{ github.event.inputs.scenario }}"
+
+      - name: teardown
+        if: always()
+        run: |
+          docker compose down -v --remove-orphans || true
+          rm -f /tmp/gentar_ci_bench_key
