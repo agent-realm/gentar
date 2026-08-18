@@ -1,0 +1,60 @@
+# Subject: kommander-playbook — the task-lock guard, the playbook's core
+# invariant: two Claude sessions must never own one task. Exercised as a
+# live PID matrix against the real helper, verdicts from exit codes and
+# the append-only .lock history (TASK-OPS.md contract: 0=acquired,
+# 2=locked-live, 3=locked-stale).
+
+[scenario]
+name = "kommander-task-lock"
+subject = "kommander-playbook"
+agent = "shell"
+
+[oracle]
+steps = [
+  'cd "$WORKSPACE_DIR" && ./install.sh --name k',
+  'mkdir -p "$WORKSPACE_DIR/data/tasks/demo-task"',
+  # Guard matrix against a live holder PID. lock_state calls a holder
+  # live only when its process name looks like a Claude session (that IS
+  # the guard's shape: locks are held by agent sessions, and a holder
+  # that isn't one reads as stale). Sandbox kernels set comm from the
+  # executable, not argv[0], and coreutils multicall binaries refuse to
+  # run under a copied name — so the holder sets its own comm via
+  # prctl(PR_SET_NAME), the same mechanism a real session could use:
+  #   acquire(live pid)        -> 0
+  #   second acquire           -> 2  (locked-live — the guard)
+  #   acquire after holder die -> 3  (stale, refuses; force is explicit)
+  #   acquire --force          -> 0  (cleans stale, records reason)
+  #   release                  -> 0
+  '''KH="$WORKSPACE_DIR/bin/kommander-helper"
+python3 -c 'import ctypes,time; ctypes.CDLL(None).prctl(15, b"claude-session", 0,0,0); time.sleep(300)' & P=$!
+"$KH" lock acquire demo-task "$P"; A=$?
+"$KH" lock acquire demo-task 1; B=$?
+kill "$P"; wait "$P" 2>/dev/null
+"$KH" lock acquire demo-task 1; C=$?
+"$KH" lock acquire --force demo-task; D=$?
+"$KH" lock release demo-task; R=$?
+echo "acquire=$A live-block=$B stale=$C force=$D release=$R"
+test "$A" = 0 -a "$B" = 2 -a "$C" = 3 -a "$D" = 0 -a "$R" = 0''',
+]
+
+[[verify.commands]]
+# Two acquisitions in the append-only history (original + force), and the
+# stale cleanup was recorded with its reason.
+command = 'L="$WORKSPACE_DIR/data/tasks/demo-task/.lock"; test "$(grep -c "^acquired:" "$L")" = 2 && grep -q "reason=stale-cleanup" "$L" && echo lock-history-honest'
+contains = "lock-history-honest"
+
+[[verify.commands]]
+# Released = no held marker.
+command = 'test ! -e "$WORKSPACE_DIR/data/tasks/demo-task/.lock.held" && echo lock-free'
+contains = "lock-free"
+
+[[verify.commands]]
+# Unknown task refuses with usage error, never silently acquires.
+command = '"$WORKSPACE_DIR/bin/kommander-helper" lock acquire no-such-task 1; echo rc=$?'
+contains = "rc=1"
+
+[[verify.commands]]
+# A released lock re-acquires cleanly (no residue from the force path);
+# PID 1 is always alive in the sandbox, so this acquires (rc 0).
+command = '"$WORKSPACE_DIR/bin/kommander-helper" lock acquire demo-task 1; R=$?; "$WORKSPACE_DIR/bin/kommander-helper" lock release demo-task >/dev/null; echo reacquire=$R'
+contains = "reacquire=0"

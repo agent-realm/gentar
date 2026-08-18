@@ -87,7 +87,7 @@ contract.
 
 Design of record ([docs/design.md](docs/design.md)) and build plan
 ([docs/buildplan-2026-08-18-v1.md](docs/buildplan-2026-08-18-v1.md))
-landed. **Phases 0–5 done**: sbx spike · arena skeleton (compose:
+landed. **Phases 0–6 done**: sbx spike · arena skeleton (compose:
 coordinator + ClickHouse + otelcol; benches = sbx sandboxes spawned over
 SSH) · TOML scenarios + oracle runner (`claude-playbooks-install` green,
 9/9 reality assertions) · **pty driver** — pexpect over
@@ -109,13 +109,24 @@ with agent OTLP** on the `gentar.run_id` resource attribute;
 `docker compose run --rm dashboard` renders a stateless HTML dashboard
 (verdicts, timeline drill-down, agent-span counts); budget guard
 (`GENTAR_BUDGET_CAP` + `[budget] tokens`) refuses over-cap runs with
-exit 2; flake quarantine (`GENTAR_QUARANTINE=…`) skips, never fails.
-First subjects, in order: **claude-playbooks** (the installer CLI) ·
-**kommander-playbook** · **memhouse**. macOS tier: **tart** on the
-pilot's Mac (`macminim`). Bench home dir is a scenario decision
-(`pilot_user` → `/Users/<name>` on macOS, `/home/<name>` on Linux).
-Real-agent runs (claude-code in a bench) are next — they need API-key
-injection, which is a credential-tier decision, not a code gap.
+exit 2; flake quarantine (`GENTAR_QUARANTINE=…`) skips, never fails ·
+**CI** — three tiers on the self-hosted `gentar-bench` runner:
+gate (6-suite deterministic matrix per PR; exit code is the verdict),
+nightly (subject suites behind `GENTAR_SUBJECT_TOKEN` + budget cap),
+dispatch (arbitrary scenario / gentar ref / subject ref; subject repos
+fire it with their PR head sha — see
+[docs/subject-integration.md](docs/subject-integration.md)).
+**Phase 7 — subject onboarding**: kommander-playbook suites (install,
+update = old release → new, task-lock guard), memhouse suites (install
++ a real `deploy --local` house with sql-count verdicts), docs-honesty
+v1 (`docs-honesty-kommander` runs the README's recommended path
+verbatim; `docs-honesty-gentar` checks this README's own claims — the
+quickstart's `.env.example` exists because that suite demanded it).
+macOS tier: **tart** on the pilot's Mac (`macminim`). Bench home dir is
+a scenario decision (`pilot_user` → `/Users/<name>` on macOS,
+`/home/<name>` on Linux). Real-agent runs (claude-code in a bench) are
+next — they need API-key injection, which is a credential-tier
+decision, not a code gap.
 
 ## Quickstart (phase 1)
 

@@ -1,0 +1,52 @@
+# Subject: kommander-playbook — the documented UPGRADE path (README:
+# "Update Kommander to the latest (or a specific) version").
+#
+# kommander-playbook is a PRIVATE repo, so the bench cannot clone GitHub
+# anonymously — the subject's own .git travels with the mounted checkout
+# and the old release is cloned LOCALLY from it (full history + tags).
+# update.sh's `git fetch --tags origin` then hits the workspace path and
+# succeeds without leaving the bench. Everything downstream is the real
+# documented flow:
+#
+#   old tag (v3.4.0) -> install -> update.sh --version <subject VERSION>
+#
+# The target floats from the mounted subject's VERSION file, so this pins
+# "latest release"; a checkout whose VERSION outruns its own tags fails
+# honestly ("Version … not found") until the tag exists.
+#
+# Proven on the way: tag listing, clean-tree gate, data/ survives the
+# reset --hard, settings.json preserved, migrations run.
+
+[scenario]
+name = "kommander-update"
+subject = "kommander-playbook"
+agent = "shell"
+
+[oracle]
+steps = [
+  # Old release, cloned from the subject's own history (full clone: tags
+  # + a real checkout for update.sh's clean-tree gate).
+  'git clone -q "$WORKSPACE_DIR" "$HOME/kp-old" && git -C "$HOME/kp-old" checkout -q v3.4.0',
+  'cd "$HOME/kp-old" && ./install.sh --name k',
+  # The upgrade under test — target floats from the subject checkout.
+  'cd "$HOME/kp-old" && ./update.sh --version "$(cat "$WORKSPACE_DIR/VERSION")"',
+]
+
+[[verify.commands]]
+# Landed exactly on the subject's version.
+command = 'test "$(cat "$HOME/kp-old/VERSION")" = "$(cat "$WORKSPACE_DIR/VERSION")" && echo version-bumped'
+contains = "version-bumped"
+
+[[verify.commands]]
+# Runtime data outlives the reset --hard (update.sh's core promise).
+command = 'test -d "$HOME/kp-old/data/tasks" && test -d "$HOME/kp-old/data/todos" && echo data-survived'
+contains = "data-survived"
+
+[[verify.commands]]
+# The helper runs from the updated tree.
+command = '"$HOME/kp-old/bin/kommander-helper" tasks && echo helper-works-at-new-version'
+contains = "helper-works-at-new-version"
+
+[[verify.commands]]
+# Documented check mode exits 0 on a healthy install.
+command = 'cd "$HOME/kp-old" && ./update.sh --check'

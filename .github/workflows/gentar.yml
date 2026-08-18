@@ -90,30 +90,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: bench key + subject
+      - name: bench key + subjects
         run: |
           umask 077
           echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
-          # Subject suites need the subject repo checked out under
+          # Subject suites need the subject repos checked out under
           # subjects/. GENTAR_SUBJECT_TOKEN (PAT with read access) is
           # opt-in; without it the nightly run covers subjectless suites
           # only and says so. subject_ref pins what gets tested.
           if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
             REF="${{ github.event.inputs.subject_ref }}"
             REF="${REF:-main}"
-            git clone --depth 1 \
+            # Full clone (no --depth): kommander-update clones the old
+            # release locally from this checkout's history — it needs tags.
+            git clone \
               https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
               -b "$REF" subjects/kommander-playbook
+            git clone --depth 1 \
+              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/agent-realm/memhouse \
+              subjects/memhouse 2>/dev/null || \
+              echo "memhouse clone failed — its suites will fail honestly"
           else
             echo "GENTAR_SUBJECT_TOKEN absent — subject suites skipped"
           fi
 
-      - name: subject suite (budget-guarded)
+      - name: subject suites (budget-guarded)
         run: |
           docker compose build coordinator
+          # Agent-tier suite always: pty driver, scripted agent (no LLM).
+          docker compose run --rm coordinator run scripted-onboarding
           if [ -d subjects/kommander-playbook ]; then
-            docker compose run --rm coordinator run claude-playbooks-install
-          else
+            for s in claude-playbooks-install \
+                     kommander-install kommander-task-lock kommander-update \
+                     docs-honesty-kommander; do
+              docker compose run --rm coordinator run "$s"
+            done
+          fi
+          if [ -d subjects/memhouse ]; then
+            for s in memhouse-install memhouse-house; do
+              docker compose run --rm coordinator run "$s"
+            done
+          fi
+          # gentar's own docs-honesty: self-subject, cloned from the very
+          # checkout under test — no token needed (public repo, local clone).
+          git clone -q --depth 1 "$GITHUB_WORKSPACE" subjects/gentar 2>/dev/null || true
+          if [ -d subjects/gentar ]; then
+            docker compose run --rm coordinator run docs-honesty-gentar
+          elif [ ! -d subjects/kommander-playbook ]; then
             docker compose run --rm coordinator run smoke
           fi
 
@@ -135,7 +158,7 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
-      - name: bench key + subject (opt-in)
+      - name: bench key + subjects (opt-in)
         run: |
           umask 077
           echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
@@ -147,6 +170,10 @@ jobs:
             git clone --depth 1 \
               https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
               -b "$REF" subjects/kommander-playbook
+            git clone --depth 1 \
+              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/agent-realm/memhouse \
+              subjects/memhouse 2>/dev/null || true
+            git clone -q --depth 1 "$GITHUB_WORKSPACE" subjects/gentar 2>/dev/null || true
           fi
 
       - name: run

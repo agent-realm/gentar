@@ -1,0 +1,49 @@
+# Docs-honesty, subject kommander-playbook: the README's documented
+# install AND uninstall paths, verbatim, plus drift guards — each command
+# this suite runs is first grepped out of the README, so if the docs
+# change a path, this scenario fails until the suite (or the docs) is
+# re-reviewed. A docs-honesty failure means "README and reality
+# diverged" — that is the finding, not a false alarm.
+#
+# The README's RECOMMENDED path (claude-playbook install <github url>)
+# is drift-checked but not executed: the repo is private and the bench
+# holds no GitHub credential. Exercising it is the dispatch tier's job
+# once GENTAR_SUBJECT_TOKEN-backed checkouts reach the bench.
+
+[scenario]
+name = "docs-honesty-kommander"
+subject = "kommander-playbook"
+agent = "shell"
+
+[oracle]
+steps = [
+  # --- drift guards: the README must still say what we run below ---
+  'grep -qF "./install.sh --name k" "$WORKSPACE_DIR/README.md" && grep -qF "./uninstall.sh" "$WORKSPACE_DIR/README.md" && echo standalone-paths-documented',
+  # --- drift guard for the recommended path (see header note) ---
+  'grep -qF "claude-playbook install https://github.com/ramazanpolat/kommander-playbook" "$WORKSPACE_DIR/README.md" && echo recommended-path-documented',
+  # --- documented standalone install ---
+  'cd "$WORKSPACE_DIR" && ./install.sh --name k',
+  # README claim: "install.sh and uninstall.sh write the alias to
+  # ~/.zshrc only" — the alias must be there before uninstall removes it.
+  'grep -q "^alias k=" "$HOME/.zshrc" && echo alias-added-to-zshrc',
+  # --- documented uninstall (alias removal + optional --purge);
+  # --purge asks for confirmation — answer it, as a user at the terminal
+  # would ---
+  'cd "$WORKSPACE_DIR" && printf "y\n" | ./uninstall.sh --name k --purge',
+]
+
+[[verify.commands]]
+# README claim: uninstall removes the alias from ~/.zshrc.
+command = 'grep -q "alias k=" "$HOME/.zshrc" && echo alias-still-there || echo alias-removed'
+contains = "alias-removed"
+
+[[verify.commands]]
+# --purge removes the data directory (README usage: "Also delete the
+# data/ directory").
+command = 'test ! -d "$WORKSPACE_DIR/data" && echo data-purged'
+contains = "data-purged"
+
+[[verify.commands]]
+# Uninstall is alias+data only — the playbook files themselves stay.
+command = 'test -f "$WORKSPACE_DIR/CLAUDE.md" && test -x "$WORKSPACE_DIR/bin/kommander-helper" && echo tree-intact'
+contains = "tree-intact"
