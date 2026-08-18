@@ -1,8 +1,8 @@
-"""Scenario registry. Phase 1 scenarios are Python callables; phase 2
-replaces this with the TOML schema + oracle runner (same registry shape).
+"""Scenario registry. Python builtins (arena self-tests) + TOML
+scenarios discovered from the configured dirs.
 
-A scenario receives (bench, run_id, spans) and drives the bench. Its
-return value is the verdict summary; raising fails the run.
+A scenario receives (bench, run_id, spans, subject) and drives the
+bench. Its return value is the verdict summary; raising fails the run.
 """
 
 from collections.abc import Callable
@@ -12,7 +12,7 @@ from gentar.config import Config
 from gentar.spans import Spans
 from gentar.toml_scenario import load_dir
 
-ScenarioFn = Callable[[BenchHost, str, Spans], str]
+ScenarioFn = Callable[..., str]
 
 REGISTRY: dict[str, ScenarioFn] = {}
 
@@ -32,17 +32,18 @@ def scenario(name: str) -> Callable[[ScenarioFn], ScenarioFn]:
 
 
 @scenario("smoke")
-def smoke(bench: BenchHost, run_id: str, spans: Spans) -> str:
-    """Phase-1 acceptance: create a shell sandbox, exec, destroy."""
-    sandbox = run_id
-    bench.create(sandbox, agent="shell")
-    spans.emit(run_id, "bench.create", attrs={"sandbox": sandbox, "agent": "shell"})
+def smoke(bench: BenchHost, run_id: str, spans: Spans,
+          subject: str = "arena") -> str:
+    """Arena self-test: create a shell sandbox, exec, destroy."""
+    spans.emit(subject, run_id, "smoke", "bench.create",
+               attrs={"sandbox": run_id, "agent": "shell"})
+    bench.create(run_id, agent="shell")
 
-    code, out = bench.exec(sandbox, "uname -a")
+    code, out = bench.exec(run_id, "uname -a")
     spans.emit(
-        run_id, "bench.exec",
-        attrs={"sandbox": sandbox, "command": "uname -a", "exit_code": str(code)},
-        body=out.strip(),
+        subject, run_id, "smoke", "bench.exec",
+        attrs={"sandbox": run_id, "command": "uname -a", "exit_code": str(code)},
+        detail=out.strip(),
     )
     if code != 0 or "Linux" not in out:
         raise AssertionError(f"uname -a failed or unexpected: rc={code} out={out!r}")
@@ -51,15 +52,17 @@ def smoke(bench: BenchHost, run_id: str, spans: Spans) -> str:
 
 
 @scenario("smoke-fail")
-def smoke_fail(bench: BenchHost, run_id: str, spans: Spans) -> str:
+def smoke_fail(bench: BenchHost, run_id: str, spans: Spans,
+               subject: str = "arena") -> str:
     """Negative test for the verdict machinery itself: a bench command
     fails → the run must FAIL with exit 1, emit run.end(fail), and still
     tear the sandbox down."""
-    sandbox = run_id
-    bench.create(sandbox, agent="shell")
-    spans.emit(run_id, "bench.create", attrs={"sandbox": sandbox, "agent": "shell"})
-    rc, out = bench.exec(sandbox, "exit 3")
-    spans.emit(run_id, "bench.exec", attrs={"exit_code": str(rc)})
+    spans.emit(subject, run_id, "smoke-fail", "bench.create",
+               attrs={"sandbox": run_id, "agent": "shell"})
+    bench.create(run_id, agent="shell")
+    rc, out = bench.exec(run_id, "exit 3")
+    spans.emit(subject, run_id, "smoke-fail", "bench.exec",
+               attrs={"exit_code": str(rc)})
     if rc == 0:
         raise AssertionError("unreachable: exec should have failed")
     raise AssertionError(f"intentional failure: bench command exited {rc}")

@@ -24,20 +24,31 @@ services:
       - "127.0.0.1:8123:8123" # dashboard/debug access from the host only
 
   otelcol:
-    # OTLP receiver for agent self-report (phase 3+). Harness spans are
-    # written direct by the coordinator until phase 5 flips it.
-    image: otel/opentelemetry-collector-contrib:0.129.0
+    # OTLP receiver for agent self-report (phase 5): benches POST their
+    # spans here; the collector exports them into ClickHouse where one
+    # SQL joins them with harness spans on gentar.run_id. Published on
+    # all interfaces — benches live on the bench-host, not this network.
+    image: otel/opentelemetry-collector-contrib:0.159.0
     command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      GENTAR_CH_USER: ${GENTAR_CH_USER:-gentar}
+      GENTAR_CH_PASSWORD: ${GENTAR_CH_PASSWORD:-gentar}
+      GENTAR_CH_DB: ${GENTAR_CH_DB:-gentar}
+    depends_on:
+      clickhouse:
+        condition: service_healthy
     volumes:
       - ./otelcol/config.yaml:/etc/otelcol/config.yaml:ro
     ports:
-      - "127.0.0.1:4318:4318"
+      - "4318:4318"
 
   coordinator:
     build: ./coordinator
     depends_on:
       clickhouse:
         condition: service_healthy
+      otelcol:
+        condition: service_started
     env_file:
       - path: .env
         required: false
@@ -55,6 +66,24 @@ services:
       - source: bench_ssh_key
         target: bench_ssh_key
         mode: 0444
+
+  dashboard:
+    # Stateless generator (phase 5): renders spans into ONE self-contained
+    # HTML file. Not a server — `docker compose run --rm dashboard` writes
+    # dashboard/out/dashboard.html on the host.
+    image: python:3.12-slim
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      GENTAR_CLICKHOUSE_URL: http://clickhouse:8123
+      GENTAR_CLICKHOUSE_USER: ${GENTAR_CH_USER:-gentar}
+      GENTAR_CLICKHOUSE_PASSWORD: ${GENTAR_CH_PASSWORD:-gentar}
+      GENTAR_CLICKHOUSE_DB: ${GENTAR_CH_DB:-gentar}
+    volumes:
+      - ./dashboard:/dashboard:ro
+      - ./dashboard/out:/out
+    command: [python, /dashboard/generate.py, --out, /out/dashboard.html]
 
 secrets:
   bench_ssh_key:

@@ -87,7 +87,7 @@ contract.
 
 Design of record ([docs/design.md](docs/design.md)) and build plan
 ([docs/buildplan-2026-08-18-v1.md](docs/buildplan-2026-08-18-v1.md))
-landed. **Phases 0–4 done**: sbx spike · arena skeleton (compose:
+landed. **Phases 0–5 done**: sbx spike · arena skeleton (compose:
 coordinator + ClickHouse + otelcol; benches = sbx sandboxes spawned over
 SSH) · TOML scenarios + oracle runner (`claude-playbooks-install` green,
 9/9 reality assertions) · **pty driver** — pexpect over
@@ -99,7 +99,17 @@ confirm / expect), `scripted-danger` (gate fires before any approval) ·
 template on the bench-host (claude-code pinned by `bench-template/VERSION`),
 scenarios opt in with `[scenario] template = "…"`, and the bench.create
 span records the template tag + image digest (`bench-template-verify`
-asserts the pinned CLI from inside benches created from the template).
+asserts the pinned CLI from inside benches created from the template) ·
+**telemetry + dashboard + guards** — gauntlet spans schema ported
+(subject-leading sort, two-row scenario spans, `latest_scenario_status`
+view, 14 provenance attrs incl. subject/engine/config hashes); agent
+self-report: benches drop OTLP-JSON at `$WORKSPACE_DIR/gentar-otlp.json`,
+the coordinator relays it to otelcol, and **one SQL joins harness spans
+with agent OTLP** on the `gentar.run_id` resource attribute;
+`docker compose run --rm dashboard` renders a stateless HTML dashboard
+(verdicts, timeline drill-down, agent-span counts); budget guard
+(`GENTAR_BUDGET_CAP` + `[budget] tokens`) refuses over-cap runs with
+exit 2; flake quarantine (`GENTAR_QUARANTINE=…`) skips, never fails.
 First subjects, in order: **claude-playbooks** (the installer CLI) ·
 **kommander-playbook** · **memhouse**. macOS tier: **tart** on the
 pilot's Mac (`macminim`). Bench home dir is a scenario decision

@@ -13,3 +13,6 @@
 # subjects are external checkouts/symlinks, mounted at run time
 subjects/*
 !subjects/README.md
+dashboard/out/
+__pycache__/
+*.pyc

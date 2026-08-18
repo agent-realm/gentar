@@ -43,3 +43,28 @@ class Config:
         extra = _opt("GENTAR_SCENARIOS_DIR")
         if extra:
             self.scenarios_dirs.append(extra)
+
+        # Flake quarantine: comma-separated scenario names. A quarantined
+        # scenario is SKIPPED (exit 0, span skip), never failed — a known
+        # flake must not paint the suite red while its owner investigates.
+        self.quarantine = {
+            s.strip() for s in _opt("GENTAR_QUARANTINE").split(",") if s.strip()
+        }
+
+        # Budget guard. Scenarios declare [budget] tokens; the coordinator
+        # refuses (exit 2) a run whose declared spend would exceed the cap
+        # given what past runs already burned (accumulated from spans —
+        # telemetry-down means spend reads as 0, same best-effort policy).
+        # Caps are in "spend units" (tokens today; dollars if you prefer).
+        self.budget_cap = int(_opt("GENTAR_BUDGET_CAP", "0") or 0)  # 0 = off
+
+        # Engine provenance: the coordinator image has no .git — the sha
+        # is injected at deploy time (CI sets it; local runs say "dev").
+        self.engine_sha = _opt("GENTAR_ENGINE_SHA", "dev")
+        self.engine_dirty = _opt("GENTAR_ENGINE_DIRTY", "")
+
+        # OTLP endpoint for agent self-report relay (otelcol, compose
+        # network). Benches have no inbound route to the arena, so agents
+        # drop OTLP-JSON at $WORKSPACE_DIR/gentar-otlp.json and the
+        # coordinator relays it here.
+        self.otlp_endpoint = _opt("GENTAR_OTLP_ENDPOINT", "http://otelcol:4318")

@@ -1,6 +1,11 @@
-# OTLP receiver for agent self-report from inside benches (phase 3+).
-# Harness spans are written direct by the coordinator until phase 5;
-# this collector exists so the topology and ports are fixed from day one.
+# OTLP receiver for agent self-report from inside benches (phase 5).
+# Harness spans go direct coordinator→ClickHouse; agent spans arrive
+# here (relayed by the coordinator from the bench's
+# $WORKSPACE_DIR/gentar-otlp.json drop file) and land in otel_traces,
+# where one SQL joins them with harness spans on gentar.run_id.
+#
+# Credentials come from env (compose sets them from the same variables
+# as the ClickHouse service) — never hardcoded.
 
 receivers:
   otlp:
@@ -11,7 +16,9 @@ receivers:
 exporters:
   clickhouse:
     endpoint: tcp://clickhouse:9000
-    database: gentar
+    database: ${env:GENTAR_CH_DB}
+    username: ${env:GENTAR_CH_USER}
+    password: ${env:GENTAR_CH_PASSWORD}
     ttl: 336h
 
 service:
