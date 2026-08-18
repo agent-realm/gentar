@@ -10,11 +10,11 @@ Runs anywhere Docker runs: laptop, CI runner, Proxmox host. Proxmox is just
 another Docker host.
 
 > Part of the [ultimagent](https://github.com/agent-realm/ultimagent)
-> constellation. **gentar supersedes
-> [agent-gauntlet](https://github.com/agent-realm/agent-gauntlet)** as the
-> shared test engine; agent-gauntlet keeps its VM-era history as the pioneer.
-> The telemetry substrate and driver logic port over — only the environment
-> substrate is new.
+> constellation. **gentar is the successor line to
+> [agent-gauntlet](https://github.com/agent-realm/agent-gauntlet)** — same
+> driver logic and telemetry substrate, ported by copy onto a compose-native
+> substrate. agent-gauntlet stays in service for the projects using it;
+> subjects migrate to gentar when their owners choose.
 
 ## What it does
 
@@ -38,12 +38,16 @@ an internal network.
 
 ## The stack
 
-| Service | Role |
+| Piece | Role |
 |---|---|
-| `coordinator` | engine: matrix expansion, scheduling, driver transport, assertions |
-| `bench ×N` | disposable pilot machine: agents pre-installed, auth injected at runtime, subject mounted |
+| `coordinator` | engine: bench lifecycle, scheduling, driver transport, assertions, budget guard |
+| `bench ×N` | **sbx sandboxes** (Docker Sandboxes) spawned by the coordinator on a bench-host — per-run microVM, own Docker daemon each; macOS tier: tart VMs |
 | `telemetry` | ClickHouse + otelcol-contrib; spans schema ported from agent-gauntlet |
 | `dashboard` | stateless verdicts + span drill-down |
+
+Benches are not compose services. The compose file carries coordinator +
+telemetry (+ dashboard); the coordinator creates and destroys each bench
+over SSH (`sbx create/exec/rm` on Linux, `ssh` for tart macOS VMs).
 
 ## Test taxonomy (10 dimensions)
 
@@ -81,9 +85,29 @@ contract.
 
 ## Status
 
-Design of record agreed and landed ([docs/design.md](docs/design.md));
-registered in the umbrella as `components/gentar.md`; implementation
-starting. First subjects, in order: **claude-playbooks** (the installer
-CLI) · **kommander-playbook** · **memhouse**. macOS tier: **tart** on the
-pilot's Mac (`macminim`). Bench home dir is a scenario decision
-(`pilot_user` → `/Users/<name>` on macOS, `/home/<name>` on Linux).
+Design of record ([docs/design.md](docs/design.md)) and build plan
+([docs/buildplan-2026-08-18-v1.md](docs/buildplan-2026-08-18-v1.md))
+landed. **Phase 0 (sbx spike) done; phase 1 (arena skeleton) done** —
+the smoke scenario creates an sbx bench on the bench-host, execs in it,
+writes spans to ClickHouse, tears it down. First subjects, in order:
+**claude-playbooks** (the installer CLI) · **kommander-playbook** ·
+**memhouse**. macOS tier: **tart** on the pilot's Mac (`macminim`).
+Bench home dir is a scenario decision (`pilot_user` → `/Users/<name>`
+on macOS, `/home/<name>` on Linux).
+
+## Quickstart (phase 1)
+
+Prereqs: a Docker host for the arena, and a **bench-host** — any Linux
+machine with `sbx` installed and logged in once (`sbx login`, device
+flow; the token persists).
+
+```bash
+cp .env.example .env          # point at your bench-host + SSH key
+export GENTAR_BENCH_KEY_FILE="$HOME/.ssh/id_ed25519"
+docker compose run --rm coordinator run smoke   # exit code = verdict
+docker compose exec clickhouse clickhouse-client \
+  --user gentar --password gentar \
+  -q "SELECT span_name, status FROM gentar.spans ORDER BY ts"
+```
+
+Phase-1 defaults point at the spike VM on arf (`10.10.10.200`).

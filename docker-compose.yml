@@ -1,0 +1,60 @@
+# gentar arena — compose of record (build plan phase 1).
+# Benches are NOT compose services: the coordinator spawns them as sbx
+# sandboxes on a bench-host (design.md, decision #6).
+#
+# CI contract (phase 6): `docker compose run --rm coordinator gentar run <scenario>`
+# — exit code is the verdict.
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.3
+    environment:
+      CLICKHOUSE_DB: gentar
+      # Arena-internal dev credentials (compose network + localhost only).
+      CLICKHOUSE_USER: ${GENTAR_CH_USER:-gentar}
+      CLICKHOUSE_PASSWORD: ${GENTAR_CH_PASSWORD:-gentar}
+    volumes:
+      - clickhouse:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    ports:
+      - "127.0.0.1:8123:8123" # dashboard/debug access from the host only
+
+  otelcol:
+    # OTLP receiver for agent self-report (phase 3+). Harness spans are
+    # written direct by the coordinator until phase 5 flips it.
+    image: otel/opentelemetry-collector-contrib:0.129.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otelcol/config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "127.0.0.1:4318:4318"
+
+  coordinator:
+    build: ./coordinator
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      GENTAR_CLICKHOUSE_URL: http://clickhouse:8123
+      GENTAR_CLICKHOUSE_USER: ${GENTAR_CH_USER:-gentar}
+      GENTAR_CLICKHOUSE_PASSWORD: ${GENTAR_CH_PASSWORD:-gentar}
+      GENTAR_BENCH_KEY: /run/secrets/bench_ssh_key
+    command: [run, smoke]
+    secrets:
+      - source: bench_ssh_key
+        target: bench_ssh_key
+        mode: 0444
+
+secrets:
+  bench_ssh_key:
+    file: ${GENTAR_BENCH_KEY_FILE:-~/.ssh/id_ed25519}
+
+volumes:
+  clickhouse:

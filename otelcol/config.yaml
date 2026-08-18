@@ -1,0 +1,21 @@
+# OTLP receiver for agent self-report from inside benches (phase 3+).
+# Harness spans are written direct by the coordinator until phase 5;
+# this collector exists so the topology and ports are fixed from day one.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  clickhouse:
+    endpoint: tcp://clickhouse:9000
+    database: gentar
+    ttl: 336h
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [clickhouse]
