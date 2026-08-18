@@ -1,0 +1,85 @@
+# Driver mechanics test — no LLM. A fake onboarding CLI exercises the
+# pty driver's answer / pick / expect turns; verdicts from reality.
+
+[scenario]
+name = "scripted-onboarding"
+agent = "shell"
+
+[oracle]
+steps = [
+'''cat > "$WORKSPACE_DIR/onboarding.py" <<'GENTAR_EOF'
+import sys, termios, tty
+
+def logk(msg):
+    with open("keys.log", "a") as f:
+        f.write(msg + "\n"); f.flush()
+
+def pick(options, cursor=0):
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    tty.setcbreak(fd)
+    try:
+        drawn = False
+        while True:
+            if drawn:
+                sys.stdout.write("\x1b[%dA" % (len(options) + 1))
+            print("Choose your workspace mode:")
+            for i, opt in enumerate(options):
+                mark = "❯" if i == cursor else " "
+                print(f" {mark} {i+1}. {opt}")
+            sys.stdout.flush()
+            drawn = True
+            logk(f"wait:cursor={cursor}")
+            key = sys.stdin.read(1)
+            logk(f"key:{key!r}")
+            if key == "\x1b":
+                seq = sys.stdin.read(2)
+                logk(f"seq:{seq!r}")
+                if seq == "[B" and cursor < len(options) - 1:
+                    cursor += 1
+            elif key in ("\r", "\n"):   # pty ICRNL may deliver either
+                logk("return:" + options[cursor])
+                print()
+                return options[cursor]
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        logk("cbreak-off")
+
+name = input("Enter your pilot name: ")
+mode = pick(["personal", "work", "archive"])
+open("debug.txt", "a").write(f"stage:post-pick:{mode}\n")
+sys.stdout.write(f"Install for {name} in {mode} mode? (y/n): ")
+sys.stdout.flush()
+confirm = sys.stdin.readline()
+open("debug.txt", "a").write(f"stage:confirm:{confirm.strip()}\n")
+if confirm.strip().lower() != "y":
+    print("ABORTED BY USER"); sys.exit(1)
+with open("result.txt", "w") as f:
+    f.write(f"{name}:{mode}:installed\n")
+print(f"✔ setup complete for {name} ({mode})")
+GENTAR_EOF''']
+
+[driver]
+command = "python3 \"$WORKSPACE_DIR/onboarding.py\""
+
+[[driver.turns]]
+type = "answer"
+prompt = "pilot name"
+send = "gentar-pilot"
+
+[[driver.turns]]
+type = "pick"
+label = "work"
+
+[[driver.turns]]
+type = "answer"
+prompt = "\\(y/n\\)"
+send = "y"
+
+[[driver.turns]]
+type = "expect"
+pattern = "setup complete"
+
+[[verify.commands]]
+command = "cat \"$WORKSPACE_DIR/result.txt\""
+contains = "gentar-pilot:work:installed"

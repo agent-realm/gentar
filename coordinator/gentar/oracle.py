@@ -38,6 +38,13 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
             raise AssertionError(
                 f"oracle step {i} failed rc={rc}: {step}\n{out.strip()[:400]}")
 
+    # 3b. Interactive driver turns (scripted phase 3; agents phase 3+).
+    if scenario.driver_command:
+        from gentar.scripted import run_turns
+        summary = run_turns(scenario, bench, run_id, spans)
+        if not scenario.files and not scenario.commands:
+            return summary
+
     # 4. Verdicts from reality.
     rc, home = bench.exec(sandbox, "echo $HOME")
     home = home.strip()
