@@ -108,6 +108,30 @@ that proves failure detection itself.)
 
 List them live: `docker compose run --rm coordinator ls`.
 
+## Integrating your repo (becoming a subject)
+
+Full contract: [docs/subject-integration.md](docs/subject-integration.md).
+The short version — three moves, two of them in your repo:
+
+1. **State your scenarios as decisions, not steps.** A TOML per suite:
+   what to install, what reality to assert. Either carry them in your
+   repo under `gentar/`, or PR them into `coordinator/scenarios/`
+   (how every current subject suite lives).
+2. **Add the ~10-line trigger job** to your repo (`.github/workflows/gentar.yml`)
+   that fires `workflow_dispatch` on `agent-realm/gentar` with the
+   scenario name and your PR head sha as `subject_ref` — the arena then
+   tests exactly the code under review. Needs `GENTAR_DISPATCH_TOKEN`
+   (PAT, `actions:write` on gentar) as a secret in your repo.
+3. **Nothing else on your side.** The arena clones your checkout itself
+   (needs `GENTAR_SUBJECT_TOKEN`, a `repo:read` PAT, as a gentar
+   secret), mounts it into the coordinator, and verdicts land in the
+   dashboard. No sandbox images, no baked checkouts — subjects mount,
+   arenas run.
+
+Kommander-playbook is the reference subject: its suites run
+`claude-playbooks-install`, `kommander-install`/`-update`/`-task-lock`,
+and `docs-honesty-kommander` from the same trigger.
+
 ## Status
 
 Design of record ([docs/design.md](docs/design.md)) and build plan
