@@ -23,10 +23,13 @@ on:
   workflow_dispatch:
     inputs:
       scenario:
-        description: "scenario to run (dispatch tier)"
+        description: "scenario to run (dispatch tier; 'nightly' runs the nightly job)"
         default: smoke
       ref:
         description: "gentar ref to test (default: default branch)"
+        default: ""
+      subject_ref:
+        description: "subject checkout ref (when GENTAR_SUBJECT_TOKEN is set)"
         default: ""
 
 concurrency:
@@ -94,11 +97,13 @@ jobs:
           # Subject suites need the subject repo checked out under
           # subjects/. GENTAR_SUBJECT_TOKEN (PAT with read access) is
           # opt-in; without it the nightly run covers subjectless suites
-          # only and says so.
+          # only and says so. subject_ref pins what gets tested.
           if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
+            REF="${{ github.event.inputs.subject_ref }}"
+            REF="${REF:-main}"
             git clone --depth 1 \
               https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
-              subjects/kommander-playbook
+              -b "$REF" subjects/kommander-playbook
           else
             echo "GENTAR_SUBJECT_TOKEN absent — subject suites skipped"
           fi
@@ -130,10 +135,19 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
-      - name: bench key
+      - name: bench key + subject (opt-in)
         run: |
           umask 077
           echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
+          # Subject scenarios need the subject mounted; clone only when
+          # the read token exists (otherwise such scenarios fail honestly).
+          if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
+            REF="${{ github.event.inputs.subject_ref }}"
+            REF="${REF:-main}"
+            git clone --depth 1 \
+              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
+              -b "$REF" subjects/kommander-playbook
+          fi
 
       - name: run
         run: |

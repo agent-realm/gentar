@@ -44,10 +44,11 @@ jobs:
 ```
 
 `GENTAR_DISPATCH_TOKEN` is a PAT (or fine-grained token) with
-`actions:write` on `agent-realm/gentar`. The dispatch runs the whole
-gate matrix on the arena's self-hosted runner; the subject's own job
+`actions:write` on `agent-realm/gentar`. The dispatch runs the requested
+scenario on the arena's self-hosted runner; the subject's own job
 then polls the resulting run (or simply fires-and-forgets — the arena's
-dashboard is the record).
+dashboard is the record). Passing the PR head sha as `subject_ref` makes
+the arena test exactly the code under review.
 
 For **subject suites** (scenarios that mount the subject repo), the
 arena side also needs read access to the subject checkout:
