@@ -8,11 +8,20 @@ return value is the verdict summary; raising fails the run.
 from collections.abc import Callable
 
 from gentar.benchhost import BenchHost
+from gentar.config import Config
 from gentar.spans import Spans
+from gentar.toml_scenario import load_dir
 
 ScenarioFn = Callable[[BenchHost, str, Spans], str]
 
 REGISTRY: dict[str, ScenarioFn] = {}
+
+
+def known_names(cfg: Config) -> list[str]:
+    names = list(REGISTRY)
+    for d in cfg.scenarios_dirs:
+        names.extend(load_dir(d))
+    return sorted(set(names))
 
 
 def scenario(name: str) -> Callable[[ScenarioFn], ScenarioFn]:
@@ -49,5 +58,8 @@ def smoke_fail(bench: BenchHost, run_id: str, spans: Spans) -> str:
     sandbox = run_id
     bench.create(sandbox, agent="shell")
     spans.emit(run_id, "bench.create", attrs={"sandbox": sandbox, "agent": "shell"})
-    bench.exec(sandbox, "exit 3")  # must raise BenchHostError
-    raise AssertionError("unreachable: exec should have failed")
+    rc, out = bench.exec(sandbox, "exit 3")
+    spans.emit(run_id, "bench.exec", attrs={"exit_code": str(rc)})
+    if rc == 0:
+        raise AssertionError("unreachable: exec should have failed")
+    raise AssertionError(f"intentional failure: bench command exited {rc}")
