@@ -13,6 +13,7 @@ from gentar.benchhost import BenchHost
 from gentar.config import Config
 from gentar.oracle import run_oracle
 from gentar.provenance import run_attrs
+from gentar.report import RunReport
 from gentar.scenarios import REGISTRY, known_names
 from gentar.spans import Spans, new_run_id
 from gentar.toml_scenario import TomlScenario, load_dir
@@ -25,6 +26,18 @@ class RunError(RuntimeError):
     pass
 
 
+def _write_report(report: RunReport, cfg: Config) -> None:
+    """Best-effort, like all artifacts: a report failure must never
+    change the verdict. Empty report_dir disables writing."""
+    if not cfg.report_dir:
+        return
+    try:
+        path = report.write(cfg.report_dir)
+        print(f"report: {path}")
+    except Exception as exc:
+        print(f"warn: report write failed (non-fatal): {exc}")
+
+
 def _resolve(name: str, cfg: Config) -> tuple:
     """-> (callable(bench, run_id, spans) -> summary, TomlScenario | None)"""
     if name in REGISTRY:
@@ -33,8 +46,10 @@ def _resolve(name: str, cfg: Config) -> tuple:
         tomls = load_dir(d)
         if name in tomls:
             scenario = tomls[name]
-            return (lambda bench, run_id, spans, subject="arena": run_oracle(
-                scenario, bench, run_id, spans, cfg, subject=subject)), scenario
+            return (lambda bench, run_id, spans, subject="arena",
+                    report=None: run_oracle(
+                scenario, bench, run_id, spans, cfg, subject=subject,
+                report=report)), scenario
     raise RunError(f"unknown scenario {name!r}; known: {', '.join(known_names(cfg))}")
 
 
@@ -103,13 +118,22 @@ def run(name: str, cfg: Config | None = None) -> int:
         spans = Spans(cfg)
         already = _spent_so_far(spans)
         if already + budget_tokens > cfg.budget_cap:
-            print(f"Error: budget guard: run would spend {budget_tokens} "
-                  f"units, {already} already burned, cap {cfg.budget_cap}")
+            msg = (f"budget guard: run would spend {budget_tokens} units, "
+                   f"{already} already burned, cap {cfg.budget_cap}")
+            print(f"Error: {msg}")
             spans.emit(ARENA_SUBJECT, "", name, "budget.refuse", "error",
                        attrs={"tokens": str(budget_tokens),
                               "already_burned": str(already),
                               "cap": str(cfg.budget_cap)},
                        detail="run refused by budget guard")
+            report = RunReport(
+                scenario=name,
+                run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+                subject=ARENA_SUBJECT,
+                reproduce=f"docker compose run --rm coordinator run {name}",
+                error=msg)
+            report.mark("refuse", 2)
+            _write_report(report, cfg)
             return 2
 
     subject = (scenario.subject or ARENA_SUBJECT) if scenario else ARENA_SUBJECT
@@ -117,6 +141,13 @@ def run(name: str, cfg: Config | None = None) -> int:
     bench = BenchHost(cfg)
     spans = Spans(cfg)
     run_id = new_run_id(cfg.name_prefix)
+    report = RunReport(
+        scenario=name, run_id=run_id, subject=subject,
+        agent=(scenario.agent if scenario else "shell"),
+        template=(scenario.template or "") if scenario else "",
+        sandbox=run_id,
+        started=time.strftime("%Y-%m-%d %H:%M:%S %z"),
+        reproduce=f"docker compose run --rm coordinator run {name}")
 
     # Provenance is computed once, stamped on both scenario rows. The
     # template digest needs the bench-host; absent template = empty.
@@ -133,7 +164,7 @@ def run(name: str, cfg: Config | None = None) -> int:
     verdict = 0
     summary = ""
     try:
-        summary = fn(bench, run_id, spans, subject=subject)
+        summary = fn(bench, run_id, spans, subject=subject, report=report)
         print(summary)
         # Budget accounting: a passing run burns its declared spend
         # (simulated for no-LLM runs, real token counts later).
@@ -145,15 +176,19 @@ def run(name: str, cfg: Config | None = None) -> int:
         spans.emit(subject, run_id, name, "run.end", attrs={"verdict": "pass"})
     except Exception as exc:
         verdict = 1
+        report.error = str(exc)
         print(f"FAIL [{name}]: {exc}")
         spans.emit(subject, run_id, name, "run.end", "fail",
                    attrs={"verdict": "fail"}, detail=str(exc)[:2000])
     finally:
         _relay_agent_spans(bench, run_id, spans, cfg, subject, name)
         status = "pass" if verdict == 0 else "fail"
+        report.mark(status, verdict)
+        report.summary = summary
         spans.step_end(subject, run_id, name, scen_span, "scenario",
                        status, t0_ms, parent="", attrs=attrs,
                        detail=summary if verdict == 0 else "")
+        _write_report(report, cfg)
         # The scenario owns a sandbox named run_id; rm is idempotent and
         # warns instead of raising so teardown never masks the verdict.
         # GENTAR_KEEP_BENCH=1 preserves it for post-mortem (debugging).

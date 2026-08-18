@@ -185,6 +185,7 @@ flow; the token persists).
 cp .env.example .env          # point at your bench-host + SSH key
 export GENTAR_BENCH_KEY_FILE="$HOME/.ssh/id_ed25519"
 docker compose run --rm coordinator run smoke   # exit code = verdict
+ls out/   # report-<run_id>.md per run — failure reports are agent-feedable
 docker compose exec clickhouse clickhouse-client \
   --user gentar --password gentar \
   -q "SELECT span_name, status FROM gentar.spans ORDER BY ts"

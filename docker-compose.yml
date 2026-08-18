@@ -61,6 +61,9 @@ services:
     volumes:
       # Subject checkouts, mounted read-only — never baked into images.
       - ${GENTAR_SUBJECTS_DIR:-./subjects}:/subjects:ro
+      # Run reports land here (report-<run_id>.md per run) — the
+      # agent-feedable artifact.
+      - ./out:/out
     command: [run, smoke]
     secrets:
       - source: bench_ssh_key

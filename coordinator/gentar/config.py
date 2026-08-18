@@ -68,3 +68,7 @@ class Config:
         # drop OTLP-JSON at $WORKSPACE_DIR/gentar-otlp.json and the
         # coordinator relays it here.
         self.otlp_endpoint = _opt("GENTAR_OTLP_ENDPOINT", "http://otelcol:4318")
+
+        # Run reports: every run writes a markdown report here (bind
+        # ./out:/out in compose). Empty string disables reporting.
+        self.report_dir = _opt("GENTAR_REPORT_DIR", "/out")

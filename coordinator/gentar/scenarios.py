@@ -33,7 +33,7 @@ def scenario(name: str) -> Callable[[ScenarioFn], ScenarioFn]:
 
 @scenario("smoke")
 def smoke(bench: BenchHost, run_id: str, spans: Spans,
-          subject: str = "arena") -> str:
+          subject: str = "arena", report=None) -> str:
     """Arena self-test: create a shell sandbox, exec, destroy."""
     spans.emit(subject, run_id, "smoke", "bench.create",
                attrs={"sandbox": run_id, "agent": "shell"})
@@ -53,7 +53,7 @@ def smoke(bench: BenchHost, run_id: str, spans: Spans,
 
 @scenario("smoke-fail")
 def smoke_fail(bench: BenchHost, run_id: str, spans: Spans,
-               subject: str = "arena") -> str:
+               subject: str = "arena", report=None) -> str:
     """Negative test for the verdict machinery itself: a bench command
     fails → the run must FAIL with exit 1, emit run.end(fail), and still
     tear the sandbox down."""
