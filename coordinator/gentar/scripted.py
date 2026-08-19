@@ -17,10 +17,12 @@ class TurnFailure(AssertionError):
 
 
 def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
-              subject: str = "arena") -> str:
+              subject: str = "arena",
+              env: dict[str, str] | None = None,
+              report=None) -> str:
     name = scenario.name
     driver = PtyDriver(bench, run_id)
-    driver.start(scenario.driver_command)
+    driver.start(scenario.driver_command, env=env)
     spans.emit(subject, run_id, name, "driver.start",
                attrs={"command": scenario.driver_command[:120]})
     try:
@@ -50,11 +52,17 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                                attrs={"turn": str(i)}, detail=str(abort))
                     return f"danger gate ok: {abort}"
                 raise TurnFailure(f"turn {i}: danger gate did NOT fire")
-        driver.wait_idle(60)
+        # Wait for the command itself to finish (EOF), not for a quiet
+        # screen — headless agents are silent mid-run. Headless
+        # scenarios bound themselves (`timeout` in the command); 300s
+        # covers the tail of a scripted one.
+        driver.wait_done(300)
         return f"driver ok: {len(scenario.turns)} turns"
     finally:
         spans.emit(subject, run_id, name, "driver.transcript",
                    detail=driver.transcript[-8000:])
+        if report is not None:
+            report.transcript = driver.transcript
         driver.close()
 
 

@@ -7,6 +7,7 @@ row is the one a duration-comparison query selects. Exit code is the
 verdict: 0 pass · 1 fail · 2 usage/config refusal. Dispatches Python
 builtins (smoke) and TOML scenarios (oracle runner)."""
 
+import os
 import time
 
 from gentar.benchhost import BenchHost
@@ -136,6 +137,33 @@ def run(name: str, cfg: Config | None = None) -> int:
             _write_report(report, cfg)
             return 2
 
+    # -- credential guard: refuse before any bench exists ----------------
+    # Declared credentials (env var names) must be present in the
+    # coordinator's environment; a missing one is a usage error (exit 2),
+    # not a test failure. Names only in the report — a value must never
+    # reach a span, a report, or a log line.
+    if scenario and scenario.credentials:
+        missing = [c for c in scenario.credentials if not os.environ.get(c)]
+        if missing:
+            msg = (f"credential guard: scenario {name!r} needs "
+                   f"{', '.join(missing)} — not provided (refusing before "
+                   f"any bench exists)")
+            print(f"Error: {msg}")
+            spans = Spans(cfg)
+            spans.emit(ARENA_SUBJECT, "", name, "credential.refuse", "error",
+                       attrs={"credentials": ",".join(scenario.credentials)},
+                       detail="run refused: missing credentials")
+            report = RunReport(
+                scenario=name,
+                run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+                subject=(scenario.subject or ARENA_SUBJECT),
+                credentials=scenario.credentials,
+                reproduce=f"docker compose run --rm coordinator run {name}",
+                error=msg)
+            report.mark("refuse", 2)
+            _write_report(report, cfg)
+            return 2
+
     subject = (scenario.subject or ARENA_SUBJECT) if scenario else ARENA_SUBJECT
     run_kind = "scripted" if (scenario and scenario.driver_command) else "oracle"
     bench = BenchHost(cfg)
@@ -145,6 +173,7 @@ def run(name: str, cfg: Config | None = None) -> int:
         scenario=name, run_id=run_id, subject=subject,
         agent=(scenario.agent if scenario else "shell"),
         template=(scenario.template or "") if scenario else "",
+        credentials=(scenario.credentials if scenario else []),
         sandbox=run_id,
         started=time.strftime("%Y-%m-%d %H:%M:%S %z"),
         reproduce=f"docker compose run --rm coordinator run {name}")
@@ -192,7 +221,6 @@ def run(name: str, cfg: Config | None = None) -> int:
         # The scenario owns a sandbox named run_id; rm is idempotent and
         # warns instead of raising so teardown never masks the verdict.
         # GENTAR_KEEP_BENCH=1 preserves it for post-mortem (debugging).
-        import os
         if not os.environ.get("GENTAR_KEEP_BENCH"):
             bench.rm(sandbox)
 

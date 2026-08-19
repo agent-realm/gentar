@@ -12,6 +12,7 @@ incident 2026-07-13):
 """
 
 import re
+import shlex
 import time
 
 import pexpect
@@ -47,11 +48,14 @@ class PtyDriver:
 
     # -- lifecycle -------------------------------------------------------
 
-    def start(self, command: str) -> None:
+    def start(self, command: str, env: dict[str, str] | None = None) -> None:
         ssh = self.bench._ssh_base() + ["-tt", "--"]
+        # Extra env (credential transport, tier 1) is quoted per
+        # assignment — a value with spaces/metachars stays one word.
         remote = " ".join([
             self.bench.cfg.sbx_bin, "exec", "-t", self.sandbox,
             "env", f"COLUMNS={self.columns}", f"LINES={self.lines}",
+            *([shlex.quote(f"{k}={v}") for k, v in (env or {}).items()]),
             "bash", "-c", _sq(command),
         ])
         self.child = pexpect.spawn(ssh[0], ssh[1:] + [remote],
@@ -127,6 +131,20 @@ class PtyDriver:
                 self.send_key("enter"); time.sleep(2); waited += 2; continue
             time.sleep(3); waited += 3
         return False
+
+    def wait_done(self, max_seconds: int = 300) -> bool:
+        """Wait for the driver COMMAND to finish (ssh EOF when the
+        remote bash exits). Headless agents print nothing until they
+        are done — wait_idle would return early and race the verify
+        step against work still in flight."""
+        if self.child is None:
+            return True
+        try:
+            self.child.expect(pexpect.EOF, timeout=max_seconds)
+            self._pump()
+            return True
+        except pexpect.TIMEOUT:
+            return False
 
     def wait_idle(self, max_seconds: int = 60) -> bool:
         prev, waited = None, 0.0
