@@ -1,0 +1,32 @@
+# First agent-in-the-loop suite: a REAL claude-code (from the pinned
+# bench template) does a trivial task headlessly; the verdict comes
+# from reality (the file), never from the agent's word.
+#
+# Credentials are tier-1 (env vars on a throwaway bench): the scenario
+# declares ANTHROPIC_API_KEY by NAME; the coordinator refuses (exit 2)
+# before any bench exists when it is not in its environment, and
+# exports it into the bench when it is. The plumbing is provable
+# without a valid key — an invalid key fails auth INSIDE the bench and
+# fails this suite honestly with the transcript as evidence.
+[scenario]
+name = "agent-smoke"
+template = "gentar-bench-v1"
+credentials = ["ANTHROPIC_API_KEY"]
+
+[driver]
+# Headless -p mode: no human simulation, no turns. The driver runs the
+# agent and waits for process exit (EOF), and the file is the verdict.
+# Bound the CLI itself: an invalid/expired key makes claude-code
+# 2.1.234 print "Execution error" and hang retrying — `timeout` turns
+# that into an honest bounded failure with the transcript as evidence.
+# Startup update/telemetry checks are disabled (bench egress hangs on
+# them; proven live).
+command = 'cd "$WORKSPACE_DIR" && DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 240 claude -p "Create a file named hello.txt in the current working directory with exactly this content: gentar-agent-smoke" --dangerously-skip-permissions'
+
+[budget]
+# Declared ceiling for the guard, not measured usage. Nightly's cap
+# (GENTAR_BUDGET_CAP) must be >= this for the suite to run there.
+tokens = 20000
+
+[[verify.commands]]
+command = 'test -f "$WORKSPACE_DIR/hello.txt" && grep -F gentar-agent-smoke "$WORKSPACE_DIR/hello.txt"'

@@ -85,8 +85,12 @@ jobs:
     runs-on: [self-hosted, gentar-bench]
     env:
       COMPOSE_PROJECT_NAME: gentar-nightly
-      GENTAR_BUDGET_CAP: "5000"
+      GENTAR_BUDGET_CAP: "50000"
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
+      # Tier-1 credential for the agent suite; empty when the secret
+      # is absent — agent-smoke then skips with a notice (or refuses
+      # honestly if dispatched directly).
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -119,6 +123,14 @@ jobs:
           docker compose build coordinator
           # Agent-tier suite always: pty driver, scripted agent (no LLM).
           docker compose run --rm coordinator run scripted-onboarding
+          # Real-agent suite when the credential exists (refuses with
+          # exit 2 otherwise — guard, not silent).
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            docker compose run --rm -e ANTHROPIC_API_KEY \
+              coordinator run agent-smoke
+          else
+            echo "ANTHROPIC_API_KEY absent — agent-smoke skipped"
+          fi
           if [ -d subjects/kommander-playbook ]; then
             for s in claude-playbooks-install \
                      kommander-install kommander-task-lock kommander-update \
@@ -153,6 +165,9 @@ jobs:
     env:
       COMPOSE_PROJECT_NAME: gentar-dispatch
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
+      # Pass-through for credential-declaring scenarios (agent-smoke):
+      # -e forwards it into the coordinator; absent → honest refuse 2.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -179,7 +194,8 @@ jobs:
       - name: run
         run: |
           docker compose build coordinator
-          docker compose run --rm coordinator run "${{ github.event.inputs.scenario }}"
+          docker compose run --rm -e ANTHROPIC_API_KEY \
+            coordinator run "${{ github.event.inputs.scenario }}"
 
       - name: teardown
         if: always()

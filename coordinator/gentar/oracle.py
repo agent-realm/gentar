@@ -3,6 +3,7 @@ bench workspace, runs the scenario's reference solution verbatim, then
 asserts verdicts from reality. The same assertions are reused unchanged
 by the agent driver; only the executor differs."""
 
+import os
 import time
 
 from gentar.asserts import AssertResult, check_commands, check_files
@@ -34,6 +35,15 @@ def _step(bench: BenchHost, subject: str, run_id: str, scenario_name: str,
             f"oracle step {index} failed rc={rc}: {command}\n{out.strip()[:400]}")
 
 
+def cred_env(scenario: TomlScenario) -> dict[str, str]:
+    """Declared credentials present in the coordinator's environment —
+    the tier-1 transport (env vars on a throwaway bench). The guard in
+    coordinator.run refused already when any was missing, so presence
+    here is expected; the `if` keeps direct library use safe."""
+    return {c: os.environ[c] for c in scenario.credentials
+            if os.environ.get(c)}
+
+
 def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
                spans: Spans, cfg: Config, subject: str = "arena",
                report: RunReport | None = None) -> str:
@@ -63,6 +73,7 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
     step_env = {"GENTAR_RUN_ID": run_id}
     if cfg.otlp_endpoint:
         step_env["OTEL_EXPORTER_OTLP_ENDPOINT"] = cfg.otlp_endpoint
+    step_env.update(cred_env(scenario))
     for i, step_text in enumerate(scenario.steps):
         _step(bench, subject, run_id, name, spans, i, step_text, env=step_env,
               report=report)
@@ -70,7 +81,8 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
     # 3b. Interactive driver turns (scripted today; agents phase 6).
     if scenario.driver_command:
         from gentar.scripted import run_turns
-        summary = run_turns(scenario, bench, run_id, spans, subject=subject)
+        summary = run_turns(scenario, bench, run_id, spans, subject=subject,
+                            env=cred_env(scenario), report=report)
         if not scenario.files and not scenario.commands:
             return summary
 

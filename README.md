@@ -80,12 +80,13 @@ contract.
 | Tier | When | Suites |
 |---|---|---|
 | PR gate | every PR / push to main | 6 deterministic subjectless suites (matrix in [.github/workflows/gentar.yml](.github/workflows/gentar.yml)); exit code is the verdict |
-| nightly | post-merge, cron 00:17 | `scripted-onboarding` + all subject suites, behind `GENTAR_SUBJECT_TOKEN` and the budget guard |
+| nightly | post-merge, cron 00:17 | `scripted-onboarding`, `agent-smoke` (when `ANTHROPIC_API_KEY` is set) + all subject suites, behind `GENTAR_SUBJECT_TOKEN` and the budget guard |
 | dispatch | manual / from a subject repo | one named scenario, arbitrary gentar ref + subject ref (see [docs/subject-integration.md](docs/subject-integration.md)) |
 
 ## Scenario inventory
 
-14 suites today — every one oracle (no LLM), every verdict from reality.
+15 suites today — every verdict from reality; one (`agent-smoke`)
+puts a real claude-code in the loop, behind a declared credential.
 (`coordinator ls` also lists `smoke-fail`, the built-in sabotage probe
 that proves failure detection itself.)
 
@@ -97,6 +98,7 @@ that proves failure detection itself.)
 | `budget-sim` | — | budget guard refuses over-cap runs (exit 2) |
 | `scripted-onboarding` | — | pty driver: answer / pick / confirm / expect turns |
 | `scripted-danger` | — | danger gate fires before any approval |
+| `agent-smoke` | — | real claude-code (bench template) does a trivial task headlessly; needs `ANTHROPIC_API_KEY`, refuses without it |
 | `claude-playbooks-install` | kommander-playbook | documented `claude-playbook` CLI install path, 9 reality assertions |
 | `kommander-install` | kommander-playbook | README standalone path: in-place install, alias, data dirs, helper |
 | `kommander-update` | kommander-playbook | upgrade: v3.4.0 → subject VERSION; data survives `reset --hard` |

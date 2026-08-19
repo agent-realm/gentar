@@ -42,11 +42,18 @@ class RunReport:
     subject: str = "arena"
     agent: str = "shell"
     template: str = ""
+    # Env var NAMES a run required — names only; a value must never
+    # reach a report.
+    credentials: list[str] = field(default_factory=list)
     sandbox: str = ""
     started: str = ""
     reproduce: str = ""
     steps: list[StepRecord] = field(default_factory=list)
     asserts: list[AssertRecord] = field(default_factory=list)
+    # Raw pty transcript when a driver ran — the evidence behind an
+    # agent-in-the-loop verdict. Tail-rendered; values of declared
+    # credentials never appear (they are env, not output).
+    transcript: str = ""
     verdict: str = "pass"          # pass | fail | refuse
     exit_code: int = 0
     error: str = ""
@@ -84,6 +91,7 @@ class RunReport:
             ("verdict", f"{self.verdict} (exit {self.exit_code})"),
             ("subject", self.subject),
             ("bench agent", self.agent + (f" (template {self.template})" if self.template else "")),
+            ("credentials", ", ".join(self.credentials) or "-"),
             ("sandbox", self.sandbox or "-"),
             ("started", self.started or "-"),
             ("written", finished),
@@ -127,6 +135,14 @@ class RunReport:
             for a in self.asserts:
                 detail = _tail(a.detail, _DETAIL_TAIL).replace("|", "\\|").replace("\n", " ")
                 lines.append(f"| `{a.check}` | {'✅ pass' if a.ok else '❌ FAIL'} | {detail} |")
+            lines.append("")
+
+        if self.transcript:
+            lines.append("## Driver transcript")
+            lines.append("")
+            lines.append("```")
+            lines.append(_tail(self.transcript, 4000))
+            lines.append("```")
             lines.append("")
 
         if self.summary:

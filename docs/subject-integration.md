@@ -69,8 +69,31 @@ notice and only subjectless suites run.
 | Tier | Fires | Suites |
 |---|---|---|
 | gate | every gentar PR / push, every subject dispatch | deterministic subjectless (smoke, bench-template-verify, otlp-selfreport, budget-sim, scripted pair) |
-| nightly | cron (arena repo) | subject suites behind `GENTAR_BUDGET_CAP` |
+| nightly | cron (arena repo) | subject suites behind `GENTAR_BUDGET_CAP`; `agent-smoke` when `ANTHROPIC_API_KEY` is set |
 | dispatch | manual / subject repo | one named scenario, arbitrary gentar ref |
+
+## Credentials (agent-in-the-loop suites)
+
+A scenario that drives a real agent declares what it needs, by NAME:
+
+```toml
+[scenario]
+credentials = ["ANTHROPIC_API_KEY"]   # env var names, nothing else
+```
+
+The contract:
+
+- **Missing → refuse, not fail.** The coordinator exits 2 before any
+  bench exists when a declared name is absent from its environment —
+  a usage error, never a red test.
+- **Tier-1 transport: env vars on a throwaway bench.** Present values
+  are exported into every oracle step and the pty driver process
+  inside the sandbox. The bench dies with the run; nothing persists.
+- **Names only in the record.** Spans and run reports carry the names
+  a run required, never a value.
+- **Invocation:** the credential must reach the coordinator container —
+  `docker compose run --rm -e ANTHROPIC_API_KEY coordinator run agent-smoke`
+  (CI maps the `ANTHROPIC_API_KEY` secret to env and passes `-e`).
 
 ## Conventions
 

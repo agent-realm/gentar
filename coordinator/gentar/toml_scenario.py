@@ -10,6 +10,11 @@ oracle mode is phase 2's runner.
     subject = "kommander-playbook"   # dir under the subjects root
     agent = "shell"           # oracle runs on a plain sandbox
     template = "gentar-bench-v1"  # optional: sbx template to create from
+    credentials = ["ANTHROPIC_API_KEY"]  # env var NAMES the run needs;
+                                          # missing → refuse (exit 2) before
+                                          # any bench exists; values travel
+                                          # to the bench, names never values
+                                          # to spans/reports
 
     [oracle]
     steps = ["…", "…"]        # shell lines; each must exit 0
@@ -41,6 +46,11 @@ class TomlScenario:
         self.subject = sc.get("subject")
         self.agent = sc.get("agent", "shell")
         self.template = sc.get("template")  # sbx template tag, e.g. gentar-bench-v1
+        self.credentials = list(sc.get("credentials", []))
+        for i, c in enumerate(self.credentials):
+            if not isinstance(c, str) or not c.strip():
+                raise ScenarioError(
+                    f"{path}: scenario.credentials[{i}] must be an env var name")
 
         self.steps = list((doc.get("oracle") or {}).get("steps", []))
         verify = doc.get("verify") or {}
