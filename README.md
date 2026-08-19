@@ -132,6 +132,14 @@ Kommander-playbook is the reference subject: its suites run
 `claude-playbooks-install`, `kommander-install`/`-update`/`-task-lock`,
 and `docs-honesty-kommander` from the same trigger.
 
+## Scope map
+
+New to the vocabulary, or unsure which machine holds what? **Start with
+[docs/scope-map.md](docs/scope-map.md)** — what contains what, every relation
+counted (`1 → 1`, `1 → N`, `N → 1`), and the three cardinalities people get
+backwards. A rendered version with hand-drawn figures sits beside it at
+[docs/scope-map.html](docs/scope-map.html).
+
 ## Status
 
 Design of record ([docs/design.md](docs/design.md)) and build plan
