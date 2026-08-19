@@ -46,9 +46,9 @@ def check_commands(bench: BenchHost, sandbox: str,
     for c in commands:
         command, contains = c["command"], c.get("contains")
         rc, out = _sh(bench, sandbox, command)
-        ok, detail = rc == 0, f"exit {rc}"
+        ok, detail = rc == 0, f"exit {rc}: {out.strip()[:300]}"
         if ok and contains is not None:
             ok = contains in out
-            detail = "" if ok else f"output lacks {contains!r}: {out.strip()[:200]}"
+            detail = "" if ok else f"output lacks {contains!r}: {out.strip()[:300]}"
         results.append(AssertResult(f"cmd {command[:60]}", ok, detail))
     return results

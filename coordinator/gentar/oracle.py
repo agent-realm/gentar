@@ -8,13 +8,15 @@ import time
 from gentar.asserts import AssertResult, check_commands, check_files
 from gentar.benchhost import BenchHost
 from gentar.config import Config
+from gentar.report import AssertRecord, RunReport, StepRecord
 from gentar.spans import Spans
 from gentar.toml_scenario import TomlScenario
 
 
 def _step(bench: BenchHost, subject: str, run_id: str, scenario_name: str,
           spans: Spans, index: int, command: str,
-          env: dict[str, str] | None = None) -> None:
+          env: dict[str, str] | None = None,
+          report: RunReport | None = None) -> None:
     """One oracle step as a two-row span; a nonzero exit fails the run."""
     span = spans.step_start(subject, run_id, scenario_name,
                             f"oracle.step.{index}")
@@ -24,13 +26,17 @@ def _step(bench: BenchHost, subject: str, run_id: str, scenario_name: str,
                    "pass" if rc == 0 else "fail", t0,
                    attrs={"exit_code": str(rc)},
                    detail=f"$ {command}\n{out.strip()[:2000]}")
+    if report is not None:
+        report.steps.append(
+            StepRecord(index=index, command=command, exit_code=rc, output=out))
     if rc != 0:
         raise AssertionError(
             f"oracle step {index} failed rc={rc}: {command}\n{out.strip()[:400]}")
 
 
 def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
-               spans: Spans, cfg: Config, subject: str = "arena") -> str:
+               spans: Spans, cfg: Config, subject: str = "arena",
+               report: RunReport | None = None) -> str:
     workspace = bench.workspace(run_id)
     name = scenario.name
 
@@ -58,7 +64,8 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
     if cfg.otlp_endpoint:
         step_env["OTEL_EXPORTER_OTLP_ENDPOINT"] = cfg.otlp_endpoint
     for i, step_text in enumerate(scenario.steps):
-        _step(bench, subject, run_id, name, spans, i, step_text, env=step_env)
+        _step(bench, subject, run_id, name, spans, i, step_text, env=step_env,
+              report=report)
 
     # 3b. Interactive driver turns (scripted today; agents phase 6).
     if scenario.driver_command:
@@ -78,12 +85,16 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
     for r in results:
         if not r.ok:
             failed += 1
+        if report is not None:
+            report.asserts.append(
+                AssertRecord(check=r.name, ok=r.ok, detail=r.detail))
         spans.emit(subject, run_id, name, "assert",
                    "pass" if r.ok else "fail",
                    attrs={"check": r.name}, detail=r.detail)
     if failed:
         raise AssertionError(
-            f"{failed}/{len(results)} assertions failed — see assert spans")
+            f"{failed}/{len(results)} assertions failed — "
+            + "; ".join(f"{r.name}: {r.detail}" for r in results if not r.ok))
 
     ok = sum(1 for r in results)
     return f"oracle ok: {ok}/{len(results)} assertions passed"

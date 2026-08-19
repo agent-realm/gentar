@@ -5,6 +5,14 @@ forge-agnostic at the transport level (a subject job just needs to reach
 `workflow_dispatch` on `agent-realm/gentar`), but this doc describes the
 GitHub shape actually wired today.
 
+Two modes, pick either or both:
+
+- **Central arena** (below) — gentar's CI runs everything; your repo
+  fires a dispatch. One bench-host, one dashboard.
+- **Own arena** (bottom) — your repo runs the compose stack itself in
+  its own CI. Scenarios live in your repo; any trigger conditions you
+  want; the arena is a `git clone` away.
+
 ## What a subject contributes
 
 1. **Scenario configs** — the subject states install *decisions* and
@@ -72,3 +80,42 @@ notice and only subjectless suites run.
   that pattern is retired constellation-wide. Subjects mount, arenas run.
 - Verdicts come from reality: files, commands, processes — never from
   "the agent said it worked".
+
+## Own arena — a repo runs the stack itself
+
+gentar is compose-native; nothing about it belongs to the central
+instance. A repo that wants its own arena (own triggers, own
+conditions, reports on disk):
+
+1. Carry scenarios in the repo (e.g. `gentar/scenarios/*.toml`,
+   `subject = "<repo-name>"`).
+2. In CI (or locally): clone gentar, stage this checkout under
+   `subjects/<repo-name>/` (plain copy — no symlinks, they don't
+   resolve through the bind), then:
+
+   ```bash
+   GENTAR_SUBJECTS_DIR="$PWD/subjects" \
+     docker compose run --rm \
+       -e GENTAR_SCENARIOS_DIR=/extra \
+       -v "$PWD/gentar/scenarios:/extra:ro" \
+       coordinator run <suite>
+   ```
+
+   (`GENTAR_SUBJECTS_DIR` is compose-interpolated into the subjects
+   bind; the scenarios dir needs the explicit `-e`/`-v` pair because
+   the coordinator reads it at runtime, inside the container.)
+   Exit code is the verdict, same contract.
+3. Every run writes `out/report-<run_id>.md` — steps with output
+   tails, assertions with actuals, verdict, reproduce command. On
+   failure, feed that file to an agent (or a human): it states
+   everything needed to act.
+
+The one shared resource is the **bench-host** (any Linux machine with
+`sbx`, reached over SSH; `GENTAR_BENCH_*` in `.env`). The runner needs
+Docker + network reachability to it — GitHub-hosted `ubuntu-latest`
+can't reach an internal bench-host, so own-arena CI runs on a
+self-hosted runner inside the network (any machine with Docker; the
+pilot's Mac qualifies).
+
+`claude-playbooks` is the reference own-arena subject (see its
+`gentar/` dir).
