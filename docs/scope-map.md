@@ -16,11 +16,31 @@ same content, hand-drawn figures, open it in a browser from a checkout.
 
 ---
 
+## 0. First: which mode are you in?
+
+Several cardinalities below differ by integration mode, so settle this first. The two
+modes are defined in [`subject-integration.md`](./subject-integration.md) and a repo may
+use either or both.
+
+| | **Central arena** | **Own arena** |
+|---|---|---|
+| Who runs the stack | this repo's CI | the subject repo's CI |
+| Where scenarios live | `coordinator/scenarios/` here | `gentar/scenarios/` in the subject |
+| How the subject arrives | cloned into this arena's `subjects/` | tarred from the working tree by `gentar/run.sh` |
+| Workflow | [`.github/workflows/gentar.yml`](../.github/workflows/gentar.yml) | the subject's own, e.g. `arena.yml` |
+| Runner label | `gentar-bench` | the subject's choice, e.g. `arena` |
+| Reference example | `kommander-playbook`, `memhouse` | `claude-playbooks` |
+
+**A subject repo does not have to contain a `gentar/` directory.** In central mode it
+contains no arena config at all; its scenarios are contributed here by PR. Where a claim
+below holds for only one mode, it says so.
+
+---
+
 ## 1. The containment map
 
-Three scopes. The subject repo carries the scenarios but never the arena; the runner
-carries the engine but never a bench; the bench-host carries the benches but never
-the report.
+Three scopes. The subject carries the scenarios but never the arena; the runner carries
+the engine but never a bench; the bench-host carries the benches but never the report.
 
 ### The three scopes, and how they touch
 
@@ -32,17 +52,20 @@ flowchart LR
 
   GH -->|"claims an idle runner by label"| RUN
   RUN -->|"coordinator: ssh · sbx create / exec / rm"| BHH
+  RUN -->|"tar over ssh: subject into the bench workspace"| BHH
   BHH -->|"OTLP spans, emitted from inside the bench"| RUN
-  RUN -->|"one report-run_id.md per run"| GH
-  RUN -.->|"subject mounted read-only into the bench"| BHH
 
   classDef dur fill:none,stroke:#26635F,stroke-width:1.5px;
   class GH,RUN,BHH dur;
 ```
 
-Four edges, and only four. GitHub hands a job to a runner; the runner's coordinator
-reaches the bench-host over SSH; spans come back from inside the bench; the report
-lands in the subject repo. Everything else is containment.
+Note what is **not** drawn: an edge from the runner back to GitHub. Reports are written
+into `out/` on the runner through a bind mount. Nothing in
+[`gentar.yml`](../.github/workflows/gentar.yml) uploads, commits or otherwise returns
+them — they live in the runner's workspace and a later checkout may clean them away.
+An own-arena repo can add that edge itself (the reference subject copies reports into
+its gitignored `gentar/reports/` and uploads them with `actions/upload-artifact`), but
+it is not part of the arena.
 
 ### What lives inside each scope
 
@@ -50,26 +73,31 @@ lands in the subject repo. Everything else is containment.
 flowchart TB
   subgraph GH["SCOPE 1 · SOURCE OF TRUTH — GitHub org"]
     A1["gentar repo<br/>the arena itself"]
-    subgraph SR["subject repo"]
-      A2["gentar/<br/>scenarios/*.toml<br/>×N"]
-      A3["gentar/run.sh"]
-      A4[".github/workflows/<br/>arena.yml"]
-      A5["gentar/.arena/<br/>clone of gentar"]
-      A6["gentar/reports/<br/>×N per run"]
+    subgraph CA["central mode — inside this repo"]
+      A2["coordinator/scenarios/<br/>×N"]
+      A3["subjects/name/<br/>×N cloned at run time"]
+      A4[".github/workflows/<br/>gentar.yml"]
     end
-    A7["self-hosted runners ×N<br/>org scope · label: arena"]
+    subgraph SR["own-arena mode — inside the subject repo"]
+      A5["gentar/scenarios/*.toml<br/>×N"]
+      A6["gentar/run.sh"]
+      A7["its own workflow<br/>e.g. arena.yml"]
+      A8["gentar/.arena/<br/>clone of gentar"]
+    end
+    A9["self-hosted runners ×N<br/>org scope · label per mode"]
   end
 
   subgraph RM["SCOPE 2 · RUNNER MACHINE — one job at a time"]
-    B1["job: arena<br/>×1 at a time"]
-    B3["subjects/name/<br/>staged tree, read-only"]
+    B1["job<br/>×1 at a time"]
+    B3["subjects/name/<br/>read-only bind into coordinator"]
     subgraph CP["arena compose project"]
       B4["coordinator<br/>×1 per scenario"]
       B5["clickhouse"]
       B6["otelcol"]
       B7["dashboard"]
     end
-    B8["bench SSH key"]
+    B8["out/<br/>reports land here"]
+    B9["bench SSH key"]
   end
 
   subgraph BH["SCOPE 3 · BENCH-HOST — Docker Engine + sbx"]
@@ -79,7 +107,7 @@ flowchart TB
       C3["own Docker<br/>daemon"]
       C4["stack-under-test<br/>×N containers"]
       C5["agent at a pty"]
-      C6["subject mounted<br/>read-only"]
+      C6["WORKSPACE_DIR<br/>writable subject copy"]
       C7["credentials at<br/>runtime"]
     end
     C8["macOS tier<br/>tart VMs"]
@@ -89,56 +117,58 @@ flowchart TB
 
   classDef eph fill:none,stroke:#A65A15,stroke-width:1.5px,stroke-dasharray:5 4;
   classDef dur fill:none,stroke:#26635F,stroke-width:1.5px;
-  class A1,A2,A3,A4,A7,B5,B6,B7,B8,C1,C2,C3,C5,C6,C7,C8 dur;
-  class A5,A6,B1,B3,B4,C4 eph;
+  class A1,A2,A4,A5,A6,A7,A9,B5,B6,B7,B9,C1,C2,C3,C5,C7,C8 dur;
+  class A3,A8,B1,B3,B4,B8,C4,C6 eph;
 ```
 
-
 **Teal solid** survives between runs. **Amber dashed** is created and destroyed inside
-one run — the staged subject, the coordinator container, the arena checkout and every
-bench are all gone by the time the job ends. Only the report and the spans outlive it.
+one run — the cloned or staged subject, the coordinator container, the arena checkout
+and every bench are gone by the time the job ends. Only the report on disk and the
+spans in ClickHouse outlive it.
 
-### The three scopes
+### The three scopes in prose
 
 **Source of truth — GitHub.** The `gentar` repo is the arena itself; it is never
-vendored into a subject. A subject repo contributes a `gentar/` directory holding its
-own scenarios, its own `run.sh`, and a workflow. At run time `run.sh` clones gentar
-into `gentar/.arena/`, which is gitignored — so the arena version is a run-time
-choice (`GENTAR_REF`), not a committed dependency. Runners are registered here too;
-registering one at **org scope** means every repo in the org can schedule onto it.
+vendored into a subject. In central mode the scenarios and the subject clones live
+here. In own-arena mode the subject repo contributes its own `gentar/` directory, and
+`run.sh` clones gentar into the gitignored `gentar/.arena/` at run time — so the arena
+version is a run-time choice (`GENTAR_REF`), not a committed dependency.
 
-**Runner machine.** A GitHub Actions self-hosted runner is a long-lived worker
-process. It polls, claims one job, runs it, goes back to polling. Inside a job it
-stages the working tree — uncommitted changes included — as the *subject*, then brings
-up the arena compose project: coordinator, ClickHouse, otelcol, and a dashboard
-generator that runs on demand. Benches are **not** compose services and never appear
-here.
+**Runner machine.** A GitHub Actions self-hosted runner is a long-lived worker process.
+It polls, claims one job, runs it, goes back to polling. Inside a job it brings up the
+arena compose project — coordinator, ClickHouse, otelcol, and a dashboard generator that
+runs on demand — with `subjects/` bind-mounted **read-only** into the coordinator.
+Benches are **not** compose services and never appear here.
 
 **Bench-host.** A VM or LXC with Docker Engine and `sbx`, logged in once. The
-coordinator reaches it over SSH and drives `sbx create` / `exec` / `rm`. Each bench is
-an sbx sandbox — its own microVM with its own kernel and its own Docker daemon, so the
-nested boundary for a stack-under-test comes free and cannot touch the host's daemon.
-The macOS tier is tart VMs on a Mac behind a `[gentar, macos]` runner, because sbx
-cannot host macOS sandboxes.
+coordinator tars the subject over SSH into `/tmp/gentar-workspaces/<run-id>`, then runs
+`sbx create <agent> <workspace>`. Each bench is an sbx sandbox — its own microVM with
+its own kernel and its own Docker daemon, so the nested boundary for a stack-under-test
+comes free and cannot touch the host's daemon. The macOS tier is tart VMs on a Mac
+behind a `[gentar, macos]` runner, because sbx cannot host macOS sandboxes.
+
+> **The subject copy inside the bench is writable.** Only the coordinator-side
+> `/subjects` bind carries `:ro`. `push_dir()` extracts a *copy* into the bench
+> workspace and `sbx create` mounts it with no read-only flag — scenarios such as
+> `cli-head-build` deliberately build inside `$WORKSPACE_DIR`. "Mounted, never baked"
+> is a statement about provenance, not about write protection. Isolation comes from the
+> bench being discarded, not from the mount.
 
 ---
 
 ## 2. What happens on one push
 
-The same six stations run whether you type `gentar/run.sh` locally or push to `main`.
-Only station 2 differs — locally, you are the dispatcher.
-
 ```mermaid
 flowchart LR
-  S1["01 trigger<br/>push to main<br/>tag v*<br/>workflow_dispatch"]
-  S2["02 dispatcher<br/>GitHub claims one<br/>idle runner whose<br/>labels match"]
-  S3["03 stage<br/>clone .arena,<br/>tar working tree<br/>into subjects/"]
+  S1["01 trigger<br/>pull_request<br/>push to main<br/>schedule / dispatch"]
+  S2["02 dispatcher<br/>GitHub expands the<br/>matrix and claims<br/>runners by label"]
+  S3["03 stage<br/>checkout, bench key,<br/>clone or tar<br/>the subject"]
   S4["04 coordinator<br/>one container<br/>per scenario"]
-  S5["05 bench<br/>sbx create → drive<br/>at pty → assert<br/>→ sbx rm"]
-  S6["06 verdict<br/>report-run_id.md<br/>+ OTel spans<br/>exit 0 · 1 · 2"]
+  S5["05 bench<br/>push subject → sbx<br/>create → drive at pty<br/>→ assert → sbx rm"]
+  S6["06 verdict<br/>report in out/<br/>+ OTel spans<br/>exit code = verdict"]
 
   S1 --> S2 -->|"label match"| S3 --> S4 -->|"ssh + sbx"| S5 --> S6
-  S6 -.->|"next scenario — sequential, same runner, fresh bench"| S4
+  S6 -.->|"only where one job holds several scenarios"| S4
 
   classDef eph fill:none,stroke:#A65A15,stroke-width:1.5px,stroke-dasharray:5 4;
   classDef dur fill:none,stroke:#26635F,stroke-width:1.5px;
@@ -146,13 +176,30 @@ flowchart LR
   class S3,S4,S5 eph;
 ```
 
-One job walks stations 3 through 6 **once per scenario**. The bench is rebuilt every
-lap. That is the reset, and it is why a wedged run is discarded rather than repaired.
+The loop back to station 4 is **dashed because it is conditional**, and this is the
+detail most worth getting right:
+
+| Tier | Jobs | Scenarios per job |
+|---|---|---|
+| `gate` — every PR and push to main | **6**, a matrix over `smoke`, `bench-template-verify`, `otlp-selfreport`, `budget-sim`, `scripted-onboarding`, `scripted-danger` | exactly **1** |
+| `nightly` — schedule, or dispatch with `scenario: nightly` | 1 | **N**, looped sequentially |
+| `dispatch` — manual | 1 | exactly **1** |
+| own arena — `gentar/run.sh a b c` | 1 | **N**, looped sequentially |
+
+So on the primary CI tier a job runs exactly one scenario, and the fan-out is the
+matrix. The bench is still rebuilt for every scenario either way — that is the reset,
+and it is why a wedged run is discarded rather than repaired.
+
+**The matrix does not buy parallelism on its own.** All six gate jobs request the same
+`[self-hosted, gentar-bench]` label, so with one runner they queue and run one after
+another. On top of that, `gentar.yml` sets `concurrency: gentar-<ref>` with
+`cancel-in-progress`, deliberately: the bench-host is a single VM and two compose stacks
+spawning sandboxes there would race on names.
 
 The exit code is the whole CI contract: `0` pass, `1` fail, `2` usage or config
 refusal. A failing run writes a report stating every step with its output, what was
-asserted against what it actually saw, and the reproduce command — the artifact is
-meant to be handed straight to an agent.
+asserted against what it actually saw, and the reproduce command — meant to be handed
+straight to an agent.
 
 ---
 
@@ -162,10 +209,13 @@ meant to be handed straight to an agent.
 
 | From | Cardinality | To | Note |
 |---|---|---|---|
-| gentar repo | `1 → N` | arena checkouts | one `.arena/` clone per subject repo, gitignored |
-| subject repo | `1 → 1` | `gentar/` directory | the repo contributes its own arena config |
-| subject repo | `1 → N` | scenarios | one TOML per suite |
-| workflow | `1 → N` | jobs | typically one job, `arena` |
+| gentar repo | `1 → N` | arena checkouts | own-arena only: one `.arena/` clone per subject repo, gitignored |
+| subject repo | `0 → 1` | `gentar/` directory | **optional.** Present in own-arena mode; absent in central mode, where scenarios are contributed to `coordinator/scenarios/` by PR |
+| central arena | `1 → N` | scenarios | `coordinator/scenarios/` |
+| central arena | `1 → N` | subject checkouts | cloned into `subjects/` at run time, token-gated |
+| subject repo (own arena) | `1 → N` | scenarios | one TOML per suite in `gentar/scenarios/` |
+| workflow | `1 → N` | jobs | `gentar.yml` defines three: `gate`, `nightly`, `dispatch` |
+| matrix | `1 → N` | jobs | `gate` expands to 6 jobs, one per scenario |
 | GitHub org | `1 → N` | runners | an org-scoped runner is reachable by every repo in the org |
 | ultimagent constellation | `1 → N` | subjects | components migrate from agent-gauntlet when their owners choose |
 
@@ -175,12 +225,15 @@ meant to be handed straight to an agent.
 |---|---|---|---|
 | runner | `1 → 1` | job, at any instant | exclusive. A second job queues until the runner frees up |
 | runner | `1 → N` | jobs over time | long-lived worker process, **not** per-run |
-| job | `1 → N` | scenarios | `run.sh` loops every suite sequentially inside one job |
-| job | `1 → 1` | arena compose project | named `arena-<repo>` |
+| `gate` job | `1 → 1` | scenario | one `coordinator run "$SCENARIO"` per matrix leg |
+| `nightly` job | `1 → N` | scenarios | looped sequentially in one job |
+| `run.sh` invocation | `1 → N` | scenarios | own-arena: looped sequentially in one job |
+| ref | `1 → 1` | concurrent arena | `concurrency: gentar-<ref>`, `cancel-in-progress` |
+| job | `1 → 1` | arena compose project | `COMPOSE_PROJECT_NAME` per tier |
 | scenario run | `1 → 1` | coordinator container | `docker compose run --rm`, one per scenario |
 | scenario run | `1 → 1` | bench | the container is the reset |
-| scenario run | `1 → 1` | report + verdict | `report-<run_id>.md`; exit `0` pass, `1` fail, `2` refusal |
-| coordinator | `N → 1` | bench-host | **the bottleneck.** `GENTAR_BENCH_HOST` is one static hostname in `.env` |
+| scenario run | `1 → 1` | report + verdict | `report-<run_id>.md` in `out/`; exit `0` pass, `1` fail, `2` refusal |
+| coordinator | `N → 1` | bench-host | **the bottleneck.** `GENTAR_BENCH_HOST` is one static hostname |
 | bench-host | `1 → N` | benches | concurrent, bounded by CPU, RAM and nested KVM |
 | runners | `N → M` | bench-hosts | possible in principle; today `N → 1`, because the hostname is a constant |
 
@@ -192,16 +245,18 @@ meant to be handed straight to an agent.
 | bench | `1 → 1` | Docker daemon | its own — the nested boundary comes free |
 | bench Docker daemon | `1 → N` | stack-under-test containers | the agent gets root over a throwaway daemon |
 | bench | `1 → 1` | agent | driven at a pty, like a human at a terminal |
-| bench | `1 → 1` | subject | mounted read-only, never baked into an image |
+| bench | `1 → 1` | `WORKSPACE_DIR` | a **writable** copy of the subject, pushed by tar over SSH |
+| coordinator | `1 → 1` | `/subjects` bind | **read-only** — this is the mount that carries `:ro`, not the bench's |
 | bench | `1 → N` | OTel spans | emitted from inside, joined to assertions in one SQL query |
 | Proxmox host | `1 → N` | VMs and LXCs | a bench-host is one guest among many |
 | bench-host | `1 → 1` | VM or LXC | a role a machine plays, not a machine type |
 
-The three worth memorising, because they are the ones people get backwards:
+### The three worth memorising
 
 1. **A runner is not per-run.** It is a long-lived worker that happens to be running
    your job right now.
-2. **A job is not per-scenario.** One job loops every suite sequentially.
+2. **Job-to-scenario is mode-dependent** — `1 → 1` on the gate matrix, `1 → N` in
+   nightly and in `run.sh`. Never assume one from the other.
 3. **Runners do not multiply bench capacity.** See below.
 
 ---
@@ -228,23 +283,26 @@ flowchart LR
 ```
 
 Ten runners would still send every bench to the same box. **Benches are the unit of
-work; runners are the unit of queueing.** They scale on different axes and are
-configured in different files — the runner count in GitHub, the bench-host in `.env`.
-The thing to change for real parallelism is the config value, not the runner count.
+work; runners are the unit of queueing.** They scale on different axes and live in
+different files — the runner count in GitHub, the bench-host in `.env`. For real
+parallelism the thing to change is the config value, not the runner count — and today
+the `concurrency` group deliberately holds it to one arena per ref anyway.
 
 ### Why collapsing runner and bench-host onto one machine eventually hurts
 
-It works, and for a spike it is the right call. But the two roles size differently:
+Today they are deliberately the same VM, and the header comment in `gentar.yml` says so:
+Docker, sbx and the compose stack in one place, with the coordinator SSHing to itself.
+For a single-arena setup that is the right call. The two roles still size differently:
 
 | | Runner | Bench-host |
 |---|---|---|
 | What it is | a CI worker slot | a capacity pool for benches |
 | Sized by | how many jobs you want in parallel | how many benches run at once |
-| Needs | GitHub reach; holds `BENCH_SSH_KEY` | nested KVM, CPU, RAM, disk |
+| Needs | GitHub reach; holds `GENTAR_BENCH_KEY` | nested KVM, CPU, RAM, disk |
 | Weight | tiny | heavy |
 
-Buying one more CI lane by cloning a heavy nested-virt machine is the wrong trade —
-and it would not buy any more benches anyway.
+Buying one more CI lane by cloning a heavy nested-virt machine is the wrong trade — and
+it would not buy any more benches anyway.
 
 ---
 
@@ -255,10 +313,10 @@ them collides with something already in the tree.
 
 | Term | Means | Do not confuse with |
 |---|---|---|
-| **arena** | gentar itself — the harness. *aGENT ARena* | the bench. `.arena/`, `arena.yml` and the `arena` runner label already use this word |
+| **arena** | gentar itself — the harness. *aGENT ARena* | the bench. `.arena/` and the own-arena `arena` runner label already use this word |
 | **bench** | the disposable machine one scenario runs in | the bench-host, which outlives every bench it makes |
-| **bench-host** | the box running sbx that hands benches out | the runner, which runs the engine and never hosts a bench |
-| **subject** | the component under test — mounted, never baked | the repo. The subject is a staged copy of the working tree, uncommitted changes included |
+| **bench-host** | the box running sbx that hands benches out | the runner, which runs the engine and never hosts a bench — even when both are the same VM |
+| **subject** | the component under test — mounted, never baked | the repo. The subject is a copy: cloned into `subjects/`, or tarred from a working tree |
 | **scenario** | a TOML stating *decisions*, not steps | a script. The driver renders decisions into the instruction an agent executes |
 | **verdict** | pass or fail read from reality — files, processes, SQL, spans, TTY | the agent's self-report, which is evidence, not a verdict |
 | **runner** | a long-lived GitHub worker that claims one job at a time | a dispatcher. GitHub dispatches; the runner obeys |
@@ -268,29 +326,33 @@ them collides with something already in the tree.
 ## Appendix — a reference deployment
 
 A worked example of the mapping, not a spec. **Snapshot dated 2026-08-19; expect it to
-rot.** The point is to show which role each machine plays, not to pin any hostname.
+rot.** The point is which role each machine plays, not any particular hostname.
 
 | Role | Machine | Detail |
 |---|---|---|
-| arena source | `agent-realm/gentar` | cloned per run into `.arena/` |
-| subject | `claude-playbooks` | two scenarios: `cli-head-build`, `cli-release-install` |
-| runner | a Proxmox guest | org-scoped, label `arena` |
-| bench-host | a second Proxmox guest | 8 cores / 32 GB / 2 TB, Docker CE + sbx 0.38.0, nested KVM verified |
+| arena source | this repo | central mode; `gentar.yml` runs on `[self-hosted, gentar-bench]` |
+| runner **and** bench-host | one Proxmox guest | deliberately collapsed; the coordinator SSHes to itself |
+| a rebuilt bench-host | a second Proxmox guest | 8 cores / 32 GB / 2 TB, Docker CE + sbx 0.38.0, nested KVM verified |
 | macOS tier | a Mac running tart | label `[gentar, macos]` |
 | telemetry | inside the arena compose project | ClickHouse + otelcol, spans schema ported from agent-gauntlet |
 
-Two things this deployment got wrong, worth checking in yours:
+Two things worth checking against any bench-host:
 
 - **`cpu=host` is mandatory on a virtualised bench-host.** An sbx sandbox has its own
-  kernel, so the bench-host needs nested virt. Confirm `/dev/kvm` exists inside the
-  guest before believing a bench-host works.
-- **The bench destroy contract can leak.** A sandbox from a previous run was still
-  listed as running, with its workspace left in `/tmp/gentar-workspaces`, despite the
-  `trap cleanup EXIT INT TERM` in the lifecycle recipe. "The container is the reset"
-  only holds if the destroy is genuinely unconditional — worth asserting on.
+  kernel, so nested virt is required. Confirm `/dev/kvm` exists *inside* the guest
+  before believing a bench-host works — the failure is otherwise silent until the first
+  `sbx create`.
+- **Bench teardown is best-effort by design, so leftovers are possible.**
+  `BenchHost.rm()` never raises — a failed teardown must not mask the real verdict — and
+  the CI teardown step only *reports* what is left (`sbx ls | grep gentar- || echo
+  "bench-host clean"`). A crashed or cancelled run can therefore leave a sandbox and its
+  `/tmp/gentar-workspaces/<run-id>` behind; one was observed on 2026-08-18. "The
+  container is the reset" is a contract about the *next* run getting a fresh bench, not
+  a guarantee that the previous one was reaped.
 
 ---
 
-Sources: this repo's `README.md`, `docs/design.md` and `docker-compose.yml`; a subject
-repo's `gentar/run.sh` and `.github/workflows/arena.yml`; run reports; and the `sbx`
-disposable-test-bench reference.
+Sources: this repo's `README.md`, `docs/design.md`, `docs/subject-integration.md`,
+`docker-compose.yml`, `.github/workflows/gentar.yml` and
+`coordinator/gentar/{benchhost,oracle}.py`; the reference own-arena subject's
+`gentar/run.sh` and workflow; run reports; and the `sbx` disposable-test-bench reference.

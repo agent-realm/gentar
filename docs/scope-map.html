@@ -169,8 +169,33 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
 <header class="mast">
   <p class="eyebrow">GENTAR · aGENT ARena · agent-realm</p>
   <h1>Gentar Scope Map</h1>
-  <p class="standfirst">What contains what, and how many of each. The system spans <strong>three machines and two lifetimes</strong> — things that persist between runs, and things that are created and destroyed inside one. Most of the confusion comes from mixing those two up.</p>
+  <p class="standfirst">What contains what, and how many of each. The system spans <strong>three machines, two lifetimes and two integration modes</strong>. Most confusion comes from mixing the lifetimes up — or from reading a cardinality that only holds in one mode as if it held in both.</p>
 </header>
+
+<!-- ============ 0. MODES ============ -->
+<section>
+  <h2><span class="num">00</span>First: which mode are you in?</h2>
+  <p class="lede">Several cardinalities below differ by integration mode, so settle this first. A repo may use either or both.</p>
+
+  <div class="tscroll">
+    <table>
+      <thead><tr><th></th><th>Central arena</th><th>Own arena</th></tr></thead>
+      <tbody>
+        <tr><td class="ent">Who runs the stack</td><td>the gentar repo's CI</td><td>the subject repo's CI</td></tr>
+        <tr><td class="ent">Where scenarios live</td><td><code>coordinator/scenarios/</code></td><td><code>gentar/scenarios/</code> in the subject</td></tr>
+        <tr><td class="ent">How the subject arrives</td><td>cloned into the arena's <code>subjects/</code></td><td>tarred from the working tree by <code>gentar/run.sh</code></td></tr>
+        <tr><td class="ent">Workflow</td><td><code>.github/workflows/gentar.yml</code></td><td>the subject's own, e.g. <code>arena.yml</code></td></tr>
+        <tr><td class="ent">Runner label</td><td><code>gentar-bench</code></td><td>the subject's choice, e.g. <code>arena</code></td></tr>
+        <tr><td class="ent">Reference example</td><td><code>kommander-playbook</code>, <code>memhouse</code></td><td><code>claude-playbooks</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="lbl">A SUBJECT REPO NEED NOT CONTAIN A gentar/ DIRECTORY</span>
+    <p>In central mode it contains no arena config at all — its scenarios are contributed to the arena repo by PR, and its checkout is cloned into <code>subjects/</code> at run time. Where a claim below holds for only one mode, it says so.</p>
+  </div>
+</section>
 
 <!-- ============ 1. SCOPE ============ -->
 <section>
@@ -184,57 +209,68 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
 
   <figure>
     <div class="scroll">
-      <svg class="dg" viewBox="0 0 1180 640" role="img" aria-label="Containment map of the gentar arena across three scopes: the GitHub org holding the gentar repo, the subject repo with its scenarios and workflow, and its self-hosted runners; the runner machine holding the job, the staged subject and the arena compose project of coordinator, clickhouse, otelcol and dashboard; and the bench-host holding sandboxd and N benches, each an sbx sandbox with its own kernel, its own Docker daemon, a nested stack-under-test, an agent at a pty and a read-only subject mount.">
+      <svg class="dg" viewBox="0 0 1180 760" role="img" aria-label="Containment map of the gentar arena across three scopes: the GitHub org holding the gentar repo, a central mode with scenarios and cloned subjects inside the arena repo, an own-arena mode with scenarios and a run script inside the subject repo, and the org self-hosted runners; the runner machine holding the job, the read-only subjects bind, the arena compose project of coordinator, clickhouse, otelcol and dashboard, and the out directory where reports land; and the bench-host holding sandboxd and N benches, each an sbx sandbox with its own kernel, its own Docker daemon, a nested stack-under-test, an agent at a pty and a writable subject workspace.">
 
         <text class="col" x="16" y="26">SOURCE OF TRUTH — GITHUB</text>
         <text class="col" x="404" y="26">RUNNER MACHINE — ONE JOB AT A TIME</text>
         <text class="col" x="796" y="26">BENCH-HOST — DOCKER ENGINE + SBX</text>
 
         <!-- ============ COLUMN A ============ -->
-        <rect class="panel" x="16" y="44" width="352" height="560" rx="4"/>
+        <rect class="panel" x="16" y="44" width="352" height="688" rx="4"/>
         <text class="m" x="30" y="66">org  agent-realm</text>
 
         <rect class="box-d" x="32" y="78" width="320" height="48" rx="3"/>
         <text class="t"  x="46" y="98">gentar repo</text>
-        <text class="t2" x="46" y="115">the arena itself — one per constellation</text>
+        <text class="t2" x="46" y="115">the arena itself — never vendored</text>
 
-        <rect class="box" x="32" y="142" width="320" height="320" rx="3"/>
-        <text class="t" x="46" y="164">subject repo — claude-playbooks</text>
+        <rect class="box" x="32" y="142" width="320" height="196" rx="3"/>
+        <text class="t" x="46" y="164">central mode — inside the gentar repo</text>
 
-        <rect class="box-d" x="46" y="176" width="292" height="48" rx="3"/>
-        <text class="t"  x="60" y="196">gentar/scenarios/*.toml</text>
-        <text class="me" x="60" y="213">×N — one per suite</text>
+        <rect class="box-d" x="46" y="176" width="292" height="44" rx="3"/>
+        <text class="t"  x="60" y="196">coordinator/scenarios/</text>
+        <text class="me" x="60" y="212">×N — contributed by PR</text>
 
-        <rect class="box-d" x="46" y="232" width="292" height="48" rx="3"/>
-        <text class="t"  x="60" y="252">gentar/run.sh</text>
-        <text class="t2" x="60" y="269">local kickoff — same path as CI</text>
+        <rect class="box-e" x="46" y="228" width="292" height="44" rx="3"/>
+        <text class="t"  x="60" y="248">subjects/&lt;name&gt;/</text>
+        <text class="me" x="60" y="264">×N — cloned at run time, token-gated</text>
 
-        <rect class="box-d" x="46" y="288" width="292" height="48" rx="3"/>
-        <text class="t"  x="60" y="308">.github/workflows/arena.yml</text>
-        <text class="m"  x="60" y="325">runs-on: [self-hosted, arena]</text>
+        <rect class="box-d" x="46" y="280" width="292" height="44" rx="3"/>
+        <text class="t" x="60" y="300">.github/workflows/gentar.yml</text>
+        <text class="m" x="60" y="316">runs-on: [self-hosted, gentar-bench]</text>
 
-        <rect class="box-e" x="46" y="344" width="292" height="48" rx="3"/>
-        <text class="t"  x="60" y="364">gentar/.arena/</text>
-        <text class="t2" x="60" y="381">clone of gentar — gitignored</text>
+        <rect class="box" x="32" y="354" width="320" height="300" rx="3"/>
+        <text class="t" x="46" y="376">own-arena mode — inside the subject repo</text>
 
-        <rect class="box-e" x="46" y="400" width="292" height="48" rx="3"/>
-        <text class="t"  x="60" y="420">gentar/reports/</text>
-        <text class="me" x="60" y="437">×N — report-&lt;run_id&gt;.md, one per run</text>
+        <rect class="box-d" x="46" y="388" width="292" height="44" rx="3"/>
+        <text class="t"  x="60" y="408">gentar/scenarios/*.toml</text>
+        <text class="me" x="60" y="424">×N — one per suite</text>
 
-        <rect class="box-d" x="32" y="478" width="320" height="48" rx="3"/>
-        <text class="t"  x="46" y="498">self-hosted runners</text>
-        <text class="md" x="46" y="515">×N · org scope · label: arena</text>
+        <rect class="box-d" x="46" y="440" width="292" height="44" rx="3"/>
+        <text class="t"  x="60" y="460">gentar/run.sh</text>
+        <text class="t2" x="60" y="476">local kickoff — same path as CI</text>
 
-        <rect class="box" x="32" y="542" width="320" height="48" rx="3"/>
-        <text class="t"  x="46" y="562">GitHub dispatcher</text>
-        <text class="t2" x="46" y="579">claims one idle runner by label</text>
+        <rect class="box-d" x="46" y="492" width="292" height="44" rx="3"/>
+        <text class="t" x="60" y="512">its own workflow, e.g. arena.yml</text>
+        <text class="m" x="60" y="528">label is the subject's choice</text>
+
+        <rect class="box-e" x="46" y="544" width="292" height="44" rx="3"/>
+        <text class="t"  x="60" y="564">gentar/.arena/</text>
+        <text class="t2" x="60" y="580">clone of gentar — gitignored</text>
+
+        <rect class="box-e" x="46" y="596" width="292" height="44" rx="3"/>
+        <text class="t"  x="60" y="616">gentar/reports/</text>
+        <text class="me" x="60" y="632">×N — copied back by run.sh</text>
+
+        <rect class="box-d" x="32" y="670" width="320" height="48" rx="3"/>
+        <text class="t"  x="46" y="690">self-hosted runners</text>
+        <text class="md" x="46" y="707">×N · org scope · label per mode</text>
 
         <!-- ============ COLUMN B ============ -->
-        <rect class="panel" x="404" y="44" width="368" height="528" rx="4"/>
-        <text class="m" x="418" y="66">today: VM 9100 · runner gentar-bench-9100</text>
+        <rect class="panel" x="404" y="44" width="368" height="592" rx="4"/>
+        <text class="m" x="418" y="66">may be the same box as the bench-host</text>
 
         <rect class="box-e" x="420" y="78" width="336" height="48" rx="3"/>
-        <text class="t"  x="434" y="98">job  arena</text>
+        <text class="t"  x="434" y="98">job</text>
         <text class="me" x="434" y="115">×1 at a time · N over the runner's life</text>
 
         <rect class="box-e" x="420" y="142" width="336" height="48" rx="3"/>
@@ -243,7 +279,7 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
 
         <rect class="box-e" x="420" y="206" width="336" height="48" rx="3"/>
         <text class="t"  x="434" y="226">subjects/&lt;name&gt;/</text>
-        <text class="t2" x="434" y="243">tar of the working tree — mounted read-only</text>
+        <text class="t2" x="434" y="243">bound into the coordinator read-only</text>
 
         <rect class="box" x="420" y="270" width="336" height="224" rx="3"/>
         <text class="t" x="434" y="292">arena compose project</text>
@@ -262,13 +298,17 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
         <rect class="box-d" x="434" y="448" width="308" height="32" rx="3"/>
         <text class="t" x="448" y="468">dashboard — on demand</text>
 
-        <rect class="box-d" x="420" y="510" width="336" height="48" rx="3"/>
-        <text class="t"  x="434" y="530">bench SSH key</text>
-        <text class="m"  x="434" y="547">secrets.BENCH_SSH_KEY → /run/secrets</text>
+        <rect class="box-e" x="420" y="510" width="336" height="48" rx="3"/>
+        <text class="t"  x="434" y="530">out/</text>
+        <text class="t2" x="434" y="547">reports land here — and stay here</text>
+
+        <rect class="box-d" x="420" y="574" width="336" height="48" rx="3"/>
+        <text class="t"  x="434" y="594">bench SSH key</text>
+        <text class="m"  x="434" y="611">GENTAR_BENCH_KEY → /run/secrets</text>
 
         <!-- ============ COLUMN C ============ -->
         <rect class="panel" x="796" y="44" width="368" height="516" rx="4"/>
-        <text class="m" x="810" y="66">VM 142 gentar-bench-host · 10.10.10.52</text>
+        <text class="m" x="810" y="66">a VM or LXC with Docker Engine + sbx</text>
 
         <rect class="box-d" x="812" y="78" width="336" height="48" rx="3"/>
         <text class="t"  x="826" y="98">sandboxd</text>
@@ -293,18 +333,18 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
         <text class="t"  x="840" y="352">agent at a pty</text>
         <text class="t2" x="840" y="369">claude-code · codex · shell</text>
 
-        <rect class="box" x="826" y="388" width="308" height="36" rx="3"/>
-        <text class="t" x="840" y="411">subject mounted read-only</text>
+        <rect class="box-e" x="826" y="388" width="308" height="36" rx="3"/>
+        <text class="t" x="840" y="411">WORKSPACE_DIR — writable subject copy</text>
 
         <rect class="box" x="826" y="432" width="308" height="36" rx="3"/>
         <text class="t" x="840" y="455">credentials injected at runtime</text>
 
         <rect class="box-d" x="812" y="498" width="336" height="48" rx="3"/>
-        <text class="t"  x="826" y="518">macOS tier — tart VMs on macminim</text>
+        <text class="t"  x="826" y="518">macOS tier — tart VMs on a Mac</text>
         <text class="m"  x="826" y="535">label [gentar, macos] · sbx cannot host macOS</text>
       </svg>
     </div>
-    <figcaption><strong>Figure 1.</strong> Three scopes, not one. The subject repo carries the scenarios but never the arena; the runner carries the engine but never a bench; the bench-host carries the benches but never the report. Everything dashed is gone by the time the job ends.</figcaption>
+    <figcaption><strong>Figure 1.</strong> Three scopes, not one, and two integration modes inside the first. The subject carries the scenarios but never the arena; the runner carries the engine but never a bench; the bench-host carries the benches but never the report. Everything dashed is gone by the time the job ends.</figcaption>
   </figure>
 </section>
 
@@ -312,10 +352,11 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
 <section>
   <h2><span class="num">02</span>What happens on one push</h2>
   <p class="lede">The same six stations run whether you type <code>gentar/run.sh</code> locally or push to <code>main</code>. Only station 2 differs — locally, you are the dispatcher.</p>
+  <p class="lede">The loop back to station 4 is dashed because it is <strong>conditional</strong>, and this is the detail most worth getting right.</p>
 
   <figure>
     <div class="scroll">
-      <svg class="dg" viewBox="0 0 1180 360" role="img" aria-label="Six-station flow: a trigger reaches the GitHub dispatcher, which claims an idle runner by label; the runner clones the arena and stages the working tree as the subject; a coordinator container starts per scenario; the coordinator reaches the bench-host over SSH to create a bench, drive the agent and destroy the bench; a report and spans are written and the exit code is the verdict; then the loop returns to the coordinator for the next scenario, sequentially on the same runner.">
+      <svg class="dg" viewBox="0 0 1180 400" role="img" aria-label="Six-station flow: a trigger reaches the GitHub dispatcher, which expands the matrix and claims runners by label; the runner checks out, writes the bench key and clones or tars the subject; a coordinator container starts per scenario; the coordinator reaches the bench-host over SSH to push the subject, create a bench, drive the agent and destroy the bench; a report is written into the out directory with OTel spans and the exit code is the verdict; a conditional loop returns to the coordinator only where one job holds several scenarios.">
         <defs>
           <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
@@ -328,23 +369,23 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
         <rect class="box-d" x="12" y="96" width="166" height="132" rx="3"/>
         <text class="me" x="26" y="120">01</text>
         <text class="t"  x="26" y="146">trigger</text>
-        <text class="t2" x="26" y="166">push to main</text>
-        <text class="t2" x="26" y="183">tag v*</text>
-        <text class="t2" x="26" y="200">workflow_dispatch</text>
+        <text class="t2" x="26" y="166">pull_request</text>
+        <text class="t2" x="26" y="183">push to main</text>
+        <text class="t2" x="26" y="200">schedule / dispatch</text>
 
         <rect class="box-d" x="210" y="96" width="166" height="132" rx="3"/>
         <text class="me" x="224" y="120">02</text>
         <text class="t"  x="224" y="146">dispatcher</text>
-        <text class="t2" x="224" y="166">GitHub claims one</text>
-        <text class="t2" x="224" y="183">idle runner whose</text>
-        <text class="t2" x="224" y="200">labels match</text>
+        <text class="t2" x="224" y="166">GitHub expands the</text>
+        <text class="t2" x="224" y="183">matrix and claims</text>
+        <text class="t2" x="224" y="200">runners by label</text>
 
         <rect class="box-e" x="408" y="96" width="166" height="132" rx="3"/>
         <text class="me" x="422" y="120">03</text>
         <text class="t"  x="422" y="146">stage</text>
-        <text class="t2" x="422" y="166">clone .arena,</text>
-        <text class="t2" x="422" y="183">tar working tree</text>
-        <text class="t2" x="422" y="200">into subjects/</text>
+        <text class="t2" x="422" y="166">checkout, bench key,</text>
+        <text class="t2" x="422" y="183">clone or tar the</text>
+        <text class="t2" x="422" y="200">subject</text>
 
         <rect class="box-e" x="606" y="96" width="166" height="132" rx="3"/>
         <text class="me" x="620" y="120">04</text>
@@ -355,14 +396,14 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
         <rect class="box-e" x="804" y="96" width="166" height="132" rx="3"/>
         <text class="me" x="818" y="120">05</text>
         <text class="t"  x="818" y="146">bench</text>
-        <text class="t2" x="818" y="166">sbx create →</text>
-        <text class="t2" x="818" y="183">drive at pty →</text>
+        <text class="t2" x="818" y="166">push subject → sbx</text>
+        <text class="t2" x="818" y="183">create → drive →</text>
         <text class="t2" x="818" y="200">assert → sbx rm</text>
 
         <rect class="box-d" x="1002" y="96" width="166" height="132" rx="3"/>
         <text class="me" x="1016" y="120">06</text>
         <text class="t"  x="1016" y="146">verdict</text>
-        <text class="t2" x="1016" y="166">report-&lt;id&gt;.md</text>
+        <text class="t2" x="1016" y="166">report in out/</text>
         <text class="t2" x="1016" y="183">+ OTel spans</text>
         <text class="t2" x="1016" y="200">exit 0 · 1 · 2</text>
 
@@ -375,29 +416,51 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
         <line class="edge" x1="970" y1="162" x2="996" y2="162" marker-end="url(#ar)"/>
 
         <path class="edge-e" d="M 1085 228 L 1085 300 L 689 300 L 689 234" marker-end="url(#are)"/>
-        <text class="me" x="800" y="292">next scenario — sequential, same runner, fresh bench</text>
+        <text class="me" x="700" y="322">loop only when one job holds several scenarios — nightly, or run.sh</text>
 
-        <text class="m" x="12" y="336">Stations 3–5 are dashed: staged tree, coordinator container and bench are all destroyed before the job ends. Only the report and the spans outlive the run.</text>
+        <text class="m" x="12" y="366">Stations 3–5 are dashed: staged subject, coordinator container and bench are all destroyed before the job ends.</text>
+        <text class="m" x="12" y="384">The report stays in out/ on the runner. Nothing in the workflow returns it to GitHub.</text>
       </svg>
     </div>
-    <figcaption><strong>Figure 2.</strong> One job walks stations 3 through 6 once per scenario. The bench is rebuilt every lap — that is the reset, and it is why a wedged run is discarded rather than repaired.</figcaption>
+    <figcaption><strong>Figure 2.</strong> On the primary CI tier a job runs exactly one scenario and the fan-out is the matrix; only nightly and <code>run.sh</code> loop. Either way the bench is rebuilt for every scenario — that is the reset, and why a wedged run is discarded rather than repaired.</figcaption>
   </figure>
+
+  <div class="tscroll">
+    <table>
+      <caption>How many scenarios one job holds, by tier</caption>
+      <thead><tr><th>Tier</th><th>Jobs</th><th>Scenarios per job</th></tr></thead>
+      <tbody>
+        <tr><td class="ent"><code>gate</code> — every PR and push to main</td><td><strong>6</strong>, a matrix over <code>smoke</code>, <code>bench-template-verify</code>, <code>otlp-selfreport</code>, <code>budget-sim</code>, <code>scripted-onboarding</code>, <code>scripted-danger</code></td><td class="card">exactly 1</td></tr>
+        <tr><td class="ent"><code>nightly</code> — schedule, or dispatch with <code>scenario: nightly</code></td><td>1</td><td class="card">N, sequential</td></tr>
+        <tr><td class="ent"><code>dispatch</code> — manual</td><td>1</td><td class="card">exactly 1</td></tr>
+        <tr><td class="ent">own arena — <code>gentar/run.sh a b c</code></td><td>1</td><td class="card">N, sequential</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <span class="lbl">THE MATRIX DOES NOT BUY PARALLELISM ON ITS OWN</span>
+    <p>All six gate jobs request the same <code>[self-hosted, gentar-bench]</code> label, so with one runner they queue and run one after another. On top of that, <code>gentar.yml</code> sets <code>concurrency: gentar-&lt;ref&gt;</code> with <code>cancel-in-progress</code> — deliberately, because the bench-host is a single VM and two compose stacks spawning sandboxes there would race on names.</p>
+  </div>
 </section>
 
 <!-- ============ 3. CARDINALITY ============ -->
 <section>
   <h2><span class="num">03</span>Every relation, counted</h2>
-  <p class="lede">Read each row as <em>one A relates to this many B</em>. The rows worth memorising are the three that people get backwards: a runner is not per-run, a job is not per-scenario, and runners do not multiply bench capacity.</p>
+  <p class="lede">Read each row as <em>one A relates to this many B</em>. Three are worth memorising because they are routinely read backwards: <strong>a runner is not per-run</strong> (long-lived, one job at a time); <strong>job-to-scenario is mode-dependent</strong> — <code>1 → 1</code> on the gate matrix, <code>1 → N</code> in nightly and <code>run.sh</code>; and <strong>runners do not multiply bench capacity</strong>.</p>
 
   <div class="tscroll">
     <table>
       <caption>Structural relations — repository and GitHub scope</caption>
       <thead><tr><th>From</th><th>Cardinality</th><th>To</th><th>Note</th></tr></thead>
       <tbody>
-        <tr><td class="ent">gentar repo</td><td class="card">1 → N</td><td>arena checkouts</td><td>one <code>.arena/</code> clone per subject repo, gitignored</td></tr>
-        <tr><td class="ent">subject repo</td><td class="card">1 → 1</td><td><code>gentar/</code> directory</td><td>the repo contributes its own arena config</td></tr>
-        <tr><td class="ent">subject repo</td><td class="card">1 → N</td><td>scenarios</td><td>one TOML per suite; today two</td></tr>
-        <tr><td class="ent">workflow</td><td class="card">1 → N</td><td>jobs</td><td>today exactly one job, <code>arena</code></td></tr>
+        <tr><td class="ent">gentar repo</td><td class="card">1 → N</td><td>arena checkouts</td><td>own-arena only: one <code>.arena/</code> clone per subject repo, gitignored</td></tr>
+        <tr><td class="ent">subject repo</td><td class="card">0 → 1</td><td><code>gentar/</code> directory</td><td><strong>optional.</strong> Present in own-arena mode; absent in central mode, where scenarios are contributed to <code>coordinator/scenarios/</code> by PR</td></tr>
+        <tr><td class="ent">central arena</td><td class="card">1 → N</td><td>scenarios</td><td><code>coordinator/scenarios/</code></td></tr>
+        <tr><td class="ent">central arena</td><td class="card">1 → N</td><td>subject checkouts</td><td>cloned into <code>subjects/</code> at run time, token-gated</td></tr>
+        <tr><td class="ent">subject repo (own arena)</td><td class="card">1 → N</td><td>scenarios</td><td>one TOML per suite in <code>gentar/scenarios/</code></td></tr>
+        <tr><td class="ent">workflow</td><td class="card">1 → N</td><td>jobs</td><td><code>gentar.yml</code> defines three: <code>gate</code>, <code>nightly</code>, <code>dispatch</code></td></tr>
+        <tr><td class="ent">matrix</td><td class="card">1 → N</td><td>jobs</td><td><code>gate</code> expands to 6 jobs, one per scenario</td></tr>
         <tr><td class="ent">GitHub org</td><td class="card">1 → N</td><td>runners</td><td><code>gentar-bench-9100</code> is org-scoped, so every repo in <code>agent-realm</code> can schedule onto it</td></tr>
         <tr><td class="ent">ultimagent constellation</td><td class="card">1 → N</td><td>subjects</td><td>components migrate from agent-gauntlet when their owners choose</td></tr>
       </tbody>
@@ -411,12 +474,15 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
       <tbody>
         <tr><td class="ent">runner</td><td class="card">1 → 1</td><td>job, at any instant</td><td>exclusive. A second job queues until the runner frees up</td></tr>
         <tr><td class="ent">runner</td><td class="card">1 → N</td><td>jobs over time</td><td>long-lived worker process, <em>not</em> per-run</td></tr>
-        <tr><td class="ent">job</td><td class="card">1 → N</td><td>scenarios</td><td><code>run.sh</code> loops every suite sequentially inside one job</td></tr>
-        <tr><td class="ent">job</td><td class="card">1 → 1</td><td>arena compose project</td><td>named <code>arena-&lt;repo&gt;</code></td></tr>
+        <tr><td class="ent"><code>gate</code> job</td><td class="card">1 → 1</td><td>scenario</td><td>one <code>coordinator run "$SCENARIO"</code> per matrix leg</td></tr>
+        <tr><td class="ent"><code>nightly</code> job</td><td class="card">1 → N</td><td>scenarios</td><td>looped sequentially in one job</td></tr>
+        <tr><td class="ent"><code>run.sh</code> invocation</td><td class="card">1 → N</td><td>scenarios</td><td>own-arena: looped sequentially in one job</td></tr>
+        <tr><td class="ent">ref</td><td class="card">1 → 1</td><td>concurrent arena</td><td><code>concurrency: gentar-&lt;ref&gt;</code>, <code>cancel-in-progress</code></td></tr>
+        <tr><td class="ent">job</td><td class="card">1 → 1</td><td>arena compose project</td><td><code>COMPOSE_PROJECT_NAME</code> per tier</td></tr>
         <tr><td class="ent">scenario run</td><td class="card">1 → 1</td><td>coordinator container</td><td><code>docker compose run --rm</code>, one per scenario</td></tr>
         <tr><td class="ent">scenario run</td><td class="card">1 → 1</td><td>bench</td><td>the container is the reset</td></tr>
-        <tr><td class="ent">scenario run</td><td class="card">1 → 1</td><td>report + verdict</td><td><code>report-&lt;run_id&gt;.md</code>; exit 0 pass · 1 fail · 2 refusal</td></tr>
-        <tr><td class="ent">coordinator</td><td class="card">N → 1</td><td>bench-host</td><td><strong>the bottleneck.</strong> <code>GENTAR_BENCH_HOST</code> is one static hostname in <code>.env</code></td></tr>
+        <tr><td class="ent">scenario run</td><td class="card">1 → 1</td><td>report + verdict</td><td><code>report-&lt;run_id&gt;.md</code> in <code>out/</code>; exit 0 pass · 1 fail · 2 refusal</td></tr>
+        <tr><td class="ent">coordinator</td><td class="card">N → 1</td><td>bench-host</td><td><strong>the bottleneck.</strong> <code>GENTAR_BENCH_HOST</code> is one static hostname</td></tr>
         <tr><td class="ent">bench-host</td><td class="card">1 → N</td><td>benches</td><td>concurrent, bounded by CPU, RAM and nested KVM</td></tr>
         <tr><td class="ent">runners</td><td class="card">N → M</td><td>bench-hosts</td><td>possible in principle; today N → 1, because the hostname is a constant</td></tr>
       </tbody>
@@ -432,7 +498,8 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
         <tr><td class="ent">bench</td><td class="card">1 → 1</td><td>Docker daemon</td><td>its own — the nested boundary comes free</td></tr>
         <tr><td class="ent">bench Docker daemon</td><td class="card">1 → N</td><td>stack-under-test containers</td><td>the agent gets root over a throwaway daemon</td></tr>
         <tr><td class="ent">bench</td><td class="card">1 → 1</td><td>agent</td><td>driven at a pty like a human at a terminal</td></tr>
-        <tr><td class="ent">bench</td><td class="card">1 → 1</td><td>subject</td><td>mounted read-only, never baked into an image</td></tr>
+        <tr><td class="ent">bench</td><td class="card">1 → 1</td><td><code>WORKSPACE_DIR</code></td><td>a <strong>writable</strong> copy of the subject, pushed by tar over SSH</td></tr>
+        <tr><td class="ent">coordinator</td><td class="card">1 → 1</td><td><code>/subjects</code> bind</td><td><strong>read-only</strong> — this is the mount that carries <code>:ro</code>, not the bench's</td></tr>
         <tr><td class="ent">bench</td><td class="card">1 → N</td><td>OTel spans</td><td>emitted from inside, joined to assertions in one SQL query</td></tr>
         <tr><td class="ent">Proxmox host</td><td class="card">1 → N</td><td>VMs and LXCs</td><td>arf currently runs 9 VMs and 9 LXCs</td></tr>
         <tr><td class="ent">bench-host</td><td class="card">1 → 1</td><td>VM or LXC</td><td>a role a machine plays, not a machine type</td></tr>
@@ -475,7 +542,7 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
 
         <rect class="box-d" x="456" y="96" width="286" height="108" rx="3"/>
         <text class="t"  x="470" y="122">bench-host</text>
-        <text class="t2" x="470" y="141">VM 142 · 8 cores · 32 GB</text>
+        <text class="t2" x="470" y="141">one machine, however big</text>
         <text class="t2" x="470" y="159">benches ×N, bounded by CPU, RAM</text>
         <text class="t2" x="470" y="177">and nested KVM — not by runner count</text>
 
@@ -492,33 +559,39 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
         <text class="m" x="16" y="276">Benches are the unit of work. Runners are the unit of queueing. They scale on different axes and are configured in different files.</text>
       </svg>
     </div>
-    <figcaption><strong>Figure 3.</strong> Ten runners would still send every bench to the same box. The thing to change for real parallelism is the config value, not the runner count.</figcaption>
+    <figcaption><strong>Figure 3.</strong> Ten runners would still send every bench to the same box. <strong>Benches are the unit of work; runners are the unit of queueing.</strong> The thing to change for real parallelism is the config value, not the runner count — and today the <code>concurrency</code> group deliberately holds it to one arena per ref anyway.</figcaption>
   </figure>
 
   <div class="note">
     <span class="lbl">WHY THE COLLAPSE MATTERS</span>
-    <p>Today one VM plays both roles. That works, but the roles size differently: a runner is a tiny polling process that holds <code>BENCH_SSH_KEY</code> and needs GitHub reach; a bench-host is a heavy box that needs nested KVM and runs untrusted agent code. Buying one more CI lane by cloning a 32&nbsp;GB nested-virt machine is the wrong trade — and it would not buy any more benches anyway.</p>
+    <p>Today they are deliberately the same VM, and the header comment in <code>gentar.yml</code> says so: Docker, sbx and the compose stack in one place, with the coordinator SSHing to itself. For a single-arena setup that is the right call. The roles still size differently: a runner is a tiny polling process that holds <code>GENTAR_BENCH_KEY</code> and needs GitHub reach; a bench-host is a heavy box that needs nested KVM and runs untrusted agent code. Buying one more CI lane by cloning a heavy nested-virt machine is the wrong trade — and it would not buy any more benches anyway.</p>
   </div>
 </section>
 
 <!-- ============ 5. TODAY ============ -->
 <section>
-  <h2><span class="num">05</span>Where each role sits right now</h2>
+  <h2><span class="num">05</span>A reference deployment</h2>
+
+  <p class="lede">A worked example of the mapping, not a spec. <strong>Snapshot dated 2026-08-19; expect it to rot.</strong> The point is which role each machine plays, not any particular hostname.</p>
 
   <div class="tscroll">
     <table>
-      <caption>Concrete mapping on arf, 2026-08-19</caption>
-      <thead><tr><th>Role</th><th>Machine</th><th>Detail</th><th>State</th></tr></thead>
+      <caption>Reference deployment, 2026-08-19</caption>
+      <thead><tr><th>Role</th><th>Machine</th><th>Detail</th></tr></thead>
       <tbody>
-        <tr><td class="ent">arena source</td><td class="mono">github.com/agent-realm/gentar</td><td>cloned per run into <code>.arena/</code></td><td class="state-ok">live</td></tr>
-        <tr><td class="ent">subject</td><td class="mono">claude-playbooks</td><td>worktree <code>embed-gentar</code>, 2 scenarios, 5 reports</td><td class="state-ok">live</td></tr>
-        <tr><td class="ent">runner</td><td class="mono">VM 9100 · 10.10.10.200</td><td><code>gentar-bench-9100</code>, org scope on agent-realm</td><td class="state-no">service inactive</td></tr>
-        <tr><td class="ent">bench-host</td><td class="mono">VM 142 · 10.10.10.52</td><td>8 cores / 32 GB / 2 TB, Docker 29.7.2 + sbx 0.38.0, nested KVM verified</td><td class="state-no">needs sbx login + policy</td></tr>
-        <tr><td class="ent">bench-host (old)</td><td class="mono">VM 9100 · 10.10.10.200</td><td>3.9 GB sandbox state, coordinator images, one leaked bench from 2026-08-18</td><td class="state-no">superseded</td></tr>
-        <tr><td class="ent">macOS tier</td><td class="mono">macminim + tart</td><td>label <code>[gentar, macos]</code>; sbx cannot host macOS sandboxes</td><td class="state-no">not set up</td></tr>
-        <tr><td class="ent">telemetry</td><td class="mono">inside the arena compose project</td><td>ClickHouse + otelcol, spans schema ported from agent-gauntlet</td><td class="state-ok">per-run</td></tr>
+        <tr><td class="ent">arena source</td><td class="mono">the gentar repo</td><td>central mode; <code>gentar.yml</code> runs on <code>[self-hosted, gentar-bench]</code></td></tr>
+        <tr><td class="ent">runner <em>and</em> bench-host</td><td class="mono">one Proxmox guest</td><td>deliberately collapsed — the coordinator SSHes to itself</td></tr>
+        <tr><td class="ent">a rebuilt bench-host</td><td class="mono">a second Proxmox guest</td><td>8 cores / 32 GB / 2 TB, Docker CE + sbx 0.38.0, nested KVM verified</td></tr>
+        <tr><td class="ent">macOS tier</td><td class="mono">a Mac running tart</td><td>label <code>[gentar, macos]</code>; sbx cannot host macOS sandboxes</td></tr>
+        <tr><td class="ent">telemetry</td><td class="mono">inside the arena compose project</td><td>ClickHouse + otelcol, spans schema ported from agent-gauntlet</td></tr>
       </tbody>
     </table>
+  </div>
+
+  <div class="note">
+    <span class="lbl">TWO THINGS WORTH CHECKING AGAINST ANY BENCH-HOST</span>
+    <p><strong><code>cpu=host</code> is mandatory on a virtualised bench-host.</strong> An sbx sandbox has its own kernel, so nested virt is required. Confirm <code>/dev/kvm</code> exists <em>inside</em> the guest before believing a bench-host works — the failure is otherwise silent until the first <code>sbx create</code>.</p>
+    <p><strong>Bench teardown is best-effort by design, so leftovers are possible.</strong> <code>BenchHost.rm()</code> never raises — a failed teardown must not mask the real verdict — and the CI teardown step only <em>reports</em> what is left. A crashed or cancelled run can leave a sandbox and its <code>/tmp/gentar-workspaces/&lt;run-id&gt;</code> behind; one was observed on 2026-08-18. "The container is the reset" is a contract about the <em>next</em> run getting a fresh bench, not a guarantee that the previous one was reaped.</p>
   </div>
 </section>
 
@@ -531,10 +604,10 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
     <table>
       <thead><tr><th>Term</th><th>Means</th><th>Do not confuse with</th></tr></thead>
       <tbody>
-        <tr><td class="ent">arena</td><td>gentar itself — the harness. <em>aGENT ARena</em></td><td>the bench. <code>.arena/</code>, <code>arena.yml</code> and the <code>arena</code> runner label all already use this word</td></tr>
+        <tr><td class="ent">arena</td><td>gentar itself — the harness. <em>aGENT ARena</em></td><td>the bench. <code>.arena/</code> and the own-arena <code>arena</code> runner label already use this word</td></tr>
         <tr><td class="ent">bench</td><td>the disposable machine one scenario runs in</td><td>the bench-host, which outlives every bench it makes</td></tr>
-        <tr><td class="ent">bench-host</td><td>the box running sbx that hands benches out</td><td>the runner, which runs the engine and never hosts a bench</td></tr>
-        <tr><td class="ent">subject</td><td>the component under test — mounted, never baked</td><td>the repo. The subject is a staged copy of the working tree, uncommitted changes included</td></tr>
+        <tr><td class="ent">bench-host</td><td>the box running sbx that hands benches out</td><td>the runner, which runs the engine and never hosts a bench — even when both are the same VM</td></tr>
+        <tr><td class="ent">subject</td><td>the component under test — mounted, never baked</td><td>the repo. The subject is a copy: cloned into <code>subjects/</code>, or tarred from a working tree</td></tr>
         <tr><td class="ent">scenario</td><td>a TOML stating <em>decisions</em>, not steps</td><td>a script. The driver renders decisions into instructions an agent executes</td></tr>
         <tr><td class="ent">verdict</td><td>pass or fail read from reality — files, processes, SQL, spans, TTY</td><td>the agent's self-report, which is evidence, not a verdict</td></tr>
         <tr><td class="ent">runner</td><td>a long-lived GitHub worker that claims one job at a time</td><td>a dispatcher. GitHub dispatches; the runner obeys</td></tr>
@@ -544,7 +617,7 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
 </section>
 
 <footer>
-  Sources: <code>agent-realm/gentar</code> — <code>README.md</code>, <code>docs/design.md</code>, <code>docker-compose.yml</code>; the <code>claude-playbooks</code> worktree <code>embed-gentar</code> — <code>gentar/run.sh</code>, <code>.github/workflows/arena.yml</code>, five run reports; <code>skillz/plugins/skillz/skills/sbx/references/test-arena.md</code>; and live inspection of VM 9100 and VM 142 on arf. Kommander task <code>arf-proxmox</code>, 2026-08-19.
+  Sources: <code>agent-realm/gentar</code> — <code>README.md</code>, <code>docs/design.md</code>, <code>docs/subject-integration.md</code>, <code>docker-compose.yml</code>, <code>.github/workflows/gentar.yml</code>, <code>coordinator/gentar/benchhost.py</code> and <code>oracle.py</code>; a reference own-arena subject — <code>gentar/run.sh</code> and its workflow, five run reports; the <code>sbx</code> disposable-test-bench reference; and live inspection of the deployment above. Revised 2026-08-19 after review on PR&nbsp;#14.
 </footer>
 
 </div>
