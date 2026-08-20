@@ -1,6 +1,6 @@
 """Environment-driven configuration. Every knob is an env var with a
-default matching today's setup (VM 9100 on arf) — same policy as
-gauntlet's target.env."""
+default matching today's setup (VM 142, gentar-bench-host on arf) — same
+policy as gauntlet's target.env."""
 
 import os
 
@@ -11,8 +11,8 @@ def _opt(name: str, default: str = "") -> str:
 
 class Config:
     def __init__(self) -> None:
-        # Bench-host (an sbx host; default = the spike VM on arf).
-        self.bench_host = _opt("GENTAR_BENCH_HOST", "10.10.10.200")
+        # Bench-host (an sbx host; default = VM 142, gentar-bench-host).
+        self.bench_host = _opt("GENTAR_BENCH_HOST", "10.10.10.52")
         self.bench_user = _opt("GENTAR_BENCH_USER", "polat")
         # Optional SSH jump host, e.g. "pilot@arf". Empty = direct.
         self.bench_jump = _opt("GENTAR_BENCH_JUMP")

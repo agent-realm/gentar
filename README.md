@@ -194,4 +194,4 @@ docker compose exec clickhouse clickhouse-client \
 ```
 
 Defaults in `.env.example` point at the current bench-host — the VM on
-arf (`10.10.10.200`) the runner lives on.
+arf (`10.10.10.52`, VM 142 `gentar-bench-host`) the runner lives on.

@@ -5,7 +5,7 @@
 #   nightly   — subject + budget-guarded suites, post-merge.
 #   dispatch  — arbitrary scenario/ref, manual or from a subject repo.
 #
-# Everything runs on the self-hosted `gentar-bench` runner (VM 9100 —
+# Everything runs on the self-hosted `gentar-bench` runner (VM 142, gentar-bench-host —
 # the arena's own bench-host: Docker + sbx + this compose stack in one
 # place; the coordinator spawns benches by SSHing to itself with the
 # GENTAR_BENCH_KEY repo secret). `docker compose run` exit code IS the
@@ -71,13 +71,14 @@ jobs:
         if: always()
         run: |
           docker compose down -v --remove-orphans || true
-          rm -f /tmp/gentar_ci_bench_key
           # Anything a crashed run left on the bench-host (informational;
           # the coordinator already rms its own sandbox best-effort).
+          # Same key file the coordinator used — ssh BEFORE removing it.
           ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
-            -i "$HOME/.ssh/gentar_ci_key" polat@10.10.10.200 \
+            -i /tmp/gentar_ci_bench_key polat@10.10.10.52 \
             'sbx ls | grep gentar- || echo "bench-host clean"' || true
+          rm -f /tmp/gentar_ci_bench_key
 
   nightly:
     name: nightly / subject suites
