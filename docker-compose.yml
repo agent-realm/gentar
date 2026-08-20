@@ -21,7 +21,12 @@ services:
       timeout: 2s
       retries: 20
     ports:
-      - "127.0.0.1:8123:8123" # dashboard/debug access from the host only
+      # Dashboard/debug access from the host only; the suites themselves
+      # reach ClickHouse over the compose network (GENTAR_CLICKHOUSE_URL).
+      # Two arenas on one Docker host (e.g. gentar's own CI gate and a
+      # subject repo's own-arena) collide on 8123 — override with
+      # GENTAR_CLICKHOUSE_HOST_PORT instead of editing this file.
+      - "127.0.0.1:${GENTAR_CLICKHOUSE_HOST_PORT:-8123}:8123"
 
   otelcol:
     # OTLP receiver for agent self-report (phase 5): benches POST their
