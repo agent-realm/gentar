@@ -17,6 +17,14 @@ on:
   pull_request:
   push:
     branches: [main]
+    # Keyword tags — run the gate on ANY commit, no merge needed
+    # (same grammar as the claude-playbooks arena):
+    #   arena            → every gate suite, at that commit
+    #   arena-<scenario> → that one suite (e.g. arena-smoke);
+    #                      unknown name → coordinator refuses, exit 2
+    #   v*               → release proof (every gate suite)
+    # Re-run: delete and re-push the tag.
+    tags: ['arena', 'arena-*', 'v*']
   schedule:
     # Off-round minute; nightly post-merge sweep.
     - cron: "17 0 * * *"
@@ -39,15 +47,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate suite list lives HERE (single source) — the gate matrix below
+  # consumes it via fromJSON. A keyword tag narrows it: `arena` / `v*`
+  # keep everything, `arena-<scenario>` picks one (name validated by the
+  # coordinator itself — unknown → exit 2 refusal, no bench spent).
+  gate-setup:
+    name: gate setup
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      scenarios: ${{ steps.pick.outputs.scenarios }}
+    steps:
+      - id: pick
+        run: |
+          ALL='["smoke","bench-template-verify","otlp-selfreport","budget-sim","scripted-onboarding","scripted-danger"]'
+          OUT="$ALL"
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$TAG" != "$GITHUB_REF" ]; then
+            case "$TAG" in
+              arena|v*)  OUT="$ALL" ;;
+              arena-*)   OUT="[\"${TAG#arena-}\"]" ;;
+            esac
+          fi
+          echo "scenarios=$OUT" >> "$GITHUB_OUTPUT"
+
   gate:
     name: gate / ${{ matrix.scenario }}
-    # Subjectless deterministic suites gate every PR and main push.
+    # Subjectless deterministic suites gate every PR, main push, and
+    # keyword-tagged commit.
+    needs: [gate-setup]
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: [self-hosted, gentar-bench]
     strategy:
       fail-fast: false
       matrix:
-        scenario: [smoke, bench-template-verify, otlp-selfreport, budget-sim, scripted-onboarding, scripted-danger]
+        scenario: ${{ fromJSON(needs.gate-setup.outputs.scenarios) }}
     env:
       COMPOSE_PROJECT_NAME: gentar-ci
       SCENARIO: ${{ matrix.scenario }}
@@ -66,6 +100,16 @@ jobs:
           docker compose run --rm coordinator run "$SCENARIO"
         # `run` propagates the coordinator's exit code; a failing
         # scenario fails the job — that IS the contract.
+
+      - name: upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # Per-suite name — matrix jobs upload in parallel.
+          name: gentar-report-${{ matrix.scenario }}
+          path: out/
+          if-no-files-found: warn
+          # A refusal (exit 2) writes no report; the job is already red.
 
       - name: teardown
         if: always()
