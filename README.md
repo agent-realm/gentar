@@ -80,6 +80,7 @@ contract.
 | Tier | When | Suites |
 |---|---|---|
 | PR gate | every PR / push to main | 6 deterministic subjectless suites (matrix in [.github/workflows/gentar.yml](.github/workflows/gentar.yml)); exit code is the verdict |
+| keyword tags | tag pushed at ANY commit | `arena` → every gate suite at that commit (unmerged branches included); `arena-<scenario>` → that one suite (unknown name → exit-2 refusal, no bench spent); `v*` → release proof = every gate suite. Re-run: delete and re-push the tag |
 | nightly | post-merge, cron 00:17 | `scripted-onboarding`, `agent-smoke` (when `ANTHROPIC_API_KEY` is set) + all subject suites, behind `GENTAR_SUBJECT_TOKEN` and the budget guard |
 | dispatch | manual / from a subject repo | one named scenario, arbitrary gentar ref + subject ref (see [docs/subject-integration.md](docs/subject-integration.md)) |
 
