@@ -150,11 +150,21 @@ class PtyDriver:
             time.sleep(3); waited += 3
         return False
 
-    def pick_option(self, label_pattern: str, max_tries: int = 8) -> bool:
+    def pick_option(self, label_pattern: str, max_tries: int = 8,
+                    settle: float = 10.0) -> bool:
         """Navigate the picker DOWN until the ❯ cursor line matches
-        label_pattern, then Enter. False if no picker is visible."""
+        label_pattern, then Enter. False if no picker is visible —
+        but only after `settle` seconds: the picker render races the
+        turn that triggered it (the answer keystroke travels a
+        multi-hop pty chain; the redraw lands noticeably later)."""
         label = re.compile(label_pattern, re.IGNORECASE)
-        if not PICKER_CURSOR_RE.search(self.screen()):
+        waited = 0.0
+        while waited < settle:
+            if PICKER_CURSOR_RE.search(self.screen()):
+                break
+            time.sleep(0.5)
+            waited += 0.5
+        else:
             return False
         for _ in range(max_tries):
             # The transcript is a raw stream, not a rendered pane (gauntlet

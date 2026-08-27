@@ -16,6 +16,7 @@ pty_spawn_args. ``make_bench(cfg, kind)`` is the factory.
 """
 
 import json
+import os
 import shlex
 import subprocess
 
@@ -32,6 +33,13 @@ class BenchHost:
 
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
+
+    # Subject delivery vs bench creation order (the oracle honors this):
+    # True = populate the workspace before the bench exists (sbx: the
+    # workspace is a host dir that create bind-mounts — touching the
+    # mount root after create breaks sbx's sandbox); False = the bench
+    # must exist first (tart: the workspace lives inside the VM).
+    push_before_create = True
 
     def _ssh_argv(self, user: str, host: str, jump: str = "") -> list[str]:
         """Batch-mode ssh argv with the install's key/known-hosts policy."""
@@ -226,6 +234,8 @@ class TartBenchHost(BenchHost):
         super().__init__(cfg)
         self._vm_ips: dict[str, str] = {}   # sandbox name -> guest ip
 
+    push_before_create = False   # workspace lives inside the VM
+
     # -- tart host (control plane) -----------------------------------------
 
     def _tart(self, args: list[str], timeout: int = 300,
@@ -238,15 +248,24 @@ class TartBenchHost(BenchHost):
     def _vm_ssh(self, name: str) -> list[str]:
         """Batch ssh into the guest, jumping through the tart host — the
         vmnet subnet is only routed there, so this works from any
-        coordinator location. Guest host keys change with every clone."""
+        coordinator location. Guest host keys change with every clone.
+        ProxyCommand (two ssh processes), not -J: Debian's in-process
+        stdio forward mishandles this combo from inside containers
+        (empirically; ProxyCommand is the portable form)."""
         if name not in self._vm_ips:
             raise BenchHostError(
                 f"no live tart VM named {name!r} — create() it first")
+        hop = " ".join([
+            "ssh", "-i", self.cfg.bench_key, "-o", "BatchMode=yes",
+            "-o", "UserKnownHostsFile=" + self.cfg.bench_known_hosts,
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=15",
+            "-W", "%h:%p", f"{self.cfg.tart_user}@{self.cfg.tart_host}"])
         return [
             "ssh", "-i", self.cfg.bench_key, "-o", "BatchMode=yes",
             "-o", "UserKnownHostsFile=/dev/null",
             "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
-            "-J", f"{self.cfg.tart_user}@{self.cfg.tart_host}",
+            f"-o ProxyCommand={hop}",
             f"{self.cfg.tart_vm_user}@{self._vm_ips[name]}",
         ]
 
@@ -277,9 +296,12 @@ class TartBenchHost(BenchHost):
 
     def exec(self, name: str, command: str, timeout: int = 300,
              env: dict[str, str] | None = None) -> tuple[int, str]:
+        # WORKSPACE_DIR: sbx sets it inside sandboxes; scenarios rely on
+        # it, so the tart tier injects it explicitly.
+        merged = {"WORKSPACE_DIR": self.workspace(name), **(env or {})}
         proc = self._ssh_run(
             self._vm_ssh(name),
-            _env_exports(env) + command,
+            _env_exports(merged) + command,
             timeout=timeout, strict=False)
         return proc.returncode, proc.stdout
 
@@ -292,9 +314,13 @@ class TartBenchHost(BenchHost):
             raise BenchHostError(
                 f"no live tart VM maps to workspace {remote_dir!r}")
         remote = f"mkdir -p {remote_dir} && tar -C {remote_dir} -xzf -"
+        # COPYFILE_DISABLE: host-run coordinators use macOS bsdtar, which
+        # otherwise stores AppleDouble ._* metadata files in the stream
+        # (GNU tar in the container ignores the var, bsdtar honors it).
         proc = subprocess.run(
             ["tar", "-C", local_dir, "-czf", "-", "."],
             stdout=subprocess.PIPE,
+            env={**os.environ, "COPYFILE_DISABLE": "1"},
         )
         if proc.returncode != 0:
             raise BenchHostError(f"local tar of {local_dir} failed")
@@ -312,20 +338,24 @@ class TartBenchHost(BenchHost):
         # Never raises: teardown must not mask the real verdict.
         try:
             self._tart(["stop", name], timeout=120, strict=False)
-            self._tart(["delete", "--force", name], timeout=120)
+            self._tart(["delete", name], timeout=120)
         except (BenchHostError, subprocess.TimeoutExpired) as exc:
             print(f"warn: tart VM {name} teardown failed: {exc}")
 
     def exists(self, name: str) -> bool:
         proc = self._tart(["list"], timeout=60)
-        return any(line.split()[-1:] == [name]
-                   for line in proc.stdout.splitlines())
+        # Columns: <source> <name> <disk> <size> <accessed> <state> —
+        # the name is field 2 (state, not name, is last).
+        return any(len(fields) > 1 and fields[1] == name
+                   for fields in (line.split()
+                                  for line in proc.stdout.splitlines()))
 
     def pty_spawn_args(self, sandbox: str, columns: int, lines: int,
                        env: dict[str, str], command: str) -> list[str]:
+        merged = {"WORKSPACE_DIR": self.workspace(sandbox), **env}
         remote = " ".join([
             "env", f"COLUMNS={columns}", f"LINES={lines}",
-            *([shlex.quote(f"{k}={v}") for k, v in (env or {}).items()]),
+            *([shlex.quote(f"{k}={v}") for k, v in merged.items()]),
             "sh", "-c", _sq(command)])
         return self._vm_ssh(sandbox) + ["-tt", remote]
 
