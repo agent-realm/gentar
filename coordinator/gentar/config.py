@@ -35,6 +35,9 @@ class Config:
         self.tart_host = _opt("GENTAR_TART_HOST", "macminim")
         self.tart_user = _opt("GENTAR_TART_USER", "polat")
         self.tart_vm_user = _opt("GENTAR_TART_VM_USER", "admin")
+        # Absolute path: non-interactive ssh shells don't source PATH
+        # wrappers, so a bare "tart" is not found over ssh.
+        self.tart_bin = _opt("GENTAR_TART_BIN", "/opt/homebrew/bin/tart")
 
         # Telemetry. Best-effort: telemetry never fails a test.
         self.clickhouse_url = _opt("GENTAR_CLICKHOUSE_URL", "http://clickhouse:8123")

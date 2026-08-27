@@ -232,7 +232,7 @@ class TartBenchHost(BenchHost):
               strict: bool = True) -> subprocess.CompletedProcess:
         return self._ssh_run(
             self._ssh_argv(self.cfg.tart_user, self.cfg.tart_host),
-            " ".join(shlex.quote(w) for w in ["tart", *args]),
+            " ".join(shlex.quote(w) for w in [self.cfg.tart_bin, *args]),
             timeout=timeout, strict=strict)
 
     def _vm_ssh(self, name: str) -> list[str]:
@@ -266,7 +266,7 @@ class TartBenchHost(BenchHost):
         # ssh session that started it.
         self._ssh_run(
             self._ssh_argv(self.cfg.tart_user, self.cfg.tart_host),
-            f"nohup tart run --no-graphics {shlex.quote(name)} "
+            f"nohup {self.cfg.tart_bin} run --no-graphics {shlex.quote(name)} "
             f">/tmp/tart-{shlex.quote(name)}.log 2>&1 &",
             timeout=30)
         proc = self._tart(["ip", name, "--wait", "300"], timeout=330)
