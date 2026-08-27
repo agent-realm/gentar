@@ -26,6 +26,16 @@ class Config:
             "GENTAR_BENCH_WORKSPACE_ROOT", "/tmp/gentar-workspaces"
         )
 
+        # Bench tier: "sbx" (default) or "tart" (macOS VMs). A scenario's
+        # `bench = "tart"` overrides per-run.
+        self.bench_kind = _opt("GENTAR_BENCH_KIND", "sbx")
+        # tart tier: the Mac running the tart CLI (control plane) and the
+        # guest user benches ssh in as. Guest ssh jumps through the tart
+        # host — vmnet is only routed there.
+        self.tart_host = _opt("GENTAR_TART_HOST", "macminim")
+        self.tart_user = _opt("GENTAR_TART_USER", "polat")
+        self.tart_vm_user = _opt("GENTAR_TART_VM_USER", "admin")
+
         # Telemetry. Best-effort: telemetry never fails a test.
         self.clickhouse_url = _opt("GENTAR_CLICKHOUSE_URL", "http://clickhouse:8123")
         self.clickhouse_user = _opt("GENTAR_CLICKHOUSE_USER", "gentar")

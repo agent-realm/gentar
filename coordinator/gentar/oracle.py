@@ -50,22 +50,25 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
     workspace = bench.workspace(run_id)
     name = scenario.name
 
-    # 1. Deliver the subject into the workspace (mounted, never baked).
-    if scenario.subject:
-        local_subject = f"{cfg.subjects_root}/{scenario.subject}"
-        bench.push_dir(local_subject, workspace)
-        spans.emit(subject, run_id, name, "subject.push",
-                   attrs={"subject": scenario.subject, "into": workspace})
-
-    # 2. Fresh bench with the workspace bind-mounted. A scenario with a
-    # template creates from it (agent CLIs pre-installed); template tag +
-    # image digest land in the span for provenance.
+    # 1. Fresh bench with the workspace ready. sbx: the workspace is a
+    # host dir bind-mounted into the sandbox; tart: the workspace lives
+    # inside the VM, so it can only exist after the VM boots — hence
+    # create BEFORE push (bind-mounts are live, so the order is safe on
+    # the sbx tier too). A scenario with a template creates from it
+    # (agent CLIs pre-installed); template tag + digest land in the span.
     bench.create(run_id, agent=scenario.agent, template=scenario.template)
     attrs = {"sandbox": run_id, "agent": scenario.agent}
     if scenario.template:
         attrs["template"] = scenario.template
         attrs["template_digest"] = bench.template_digest(scenario.template)
     spans.emit(subject, run_id, name, "bench.create", attrs=attrs)
+
+    # 2. Deliver the subject into the workspace (mounted, never baked).
+    if scenario.subject:
+        local_subject = f"{cfg.subjects_root}/{scenario.subject}"
+        bench.push_dir(local_subject, workspace)
+        spans.emit(subject, run_id, name, "subject.push",
+                   attrs={"subject": scenario.subject, "into": workspace})
 
     # 3. Reference solution, verbatim. Steps run with the run id (and
     # the OTLP endpoint, when configured) in their env, so subject

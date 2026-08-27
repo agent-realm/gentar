@@ -12,7 +12,6 @@ incident 2026-07-13):
 """
 
 import re
-import shlex
 import time
 
 import pexpect
@@ -49,16 +48,11 @@ class PtyDriver:
     # -- lifecycle -------------------------------------------------------
 
     def start(self, command: str, env: dict[str, str] | None = None) -> None:
-        ssh = self.bench._ssh_base() + ["-tt", "--"]
-        # Extra env (credential transport, tier 1) is quoted per
-        # assignment — a value with spaces/metachars stays one word.
-        remote = " ".join([
-            self.bench.cfg.sbx_bin, "exec", "-t", self.sandbox,
-            "env", f"COLUMNS={self.columns}", f"LINES={self.lines}",
-            *([shlex.quote(f"{k}={v}") for k, v in (env or {}).items()]),
-            "bash", "-c", _sq(command),
-        ])
-        self.child = pexpect.spawn(ssh[0], ssh[1:] + [remote],
+        # The host builds the transport (sbx: ssh→`sbx exec -t`; tart:
+        # ssh jump→guest); the driver only drives the pty it gets back.
+        argv = self.bench.pty_spawn_args(
+            self.sandbox, self.columns, self.lines, env or {}, command)
+        self.child = pexpect.spawn(argv[0], argv[1:],
                                    encoding="utf-8", codec_errors="replace",
                                    dimensions=(self.lines, self.columns),
                                    timeout=1)
@@ -190,11 +184,6 @@ class _TranscriptTap:
 
 _KEYS = {"enter": "\r", "escape": "\x1b", "down": "\x1b[B", "up": "\x1b[A",
          "ctrl-c": "\x03"}
-
-
-def _sq(s: str) -> str:
-    """Single-quote for the remote shell word."""
-    return "'" + s.replace("'", "'\\''") + "'"
 
 
 def _tail(s: str, n: int) -> str:
