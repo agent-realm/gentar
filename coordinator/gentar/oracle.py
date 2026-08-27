@@ -50,22 +50,36 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
     workspace = bench.workspace(run_id)
     name = scenario.name
 
-    # 1. Deliver the subject into the workspace (mounted, never baked).
-    if scenario.subject:
+    # 1. Fresh bench + subject delivery, order per tier: sbx wants the
+    # workspace populated BEFORE create (a tar touching the bind-mount
+    # root after create breaks sbx's mount — exec fails getcwd EPERM,
+    # reproduced on VM 142 with both GNU and bsdtar streams); tart has
+    # no choice — the workspace lives inside the VM, which must boot
+    # first. push_before_create on the host states which world we're in.
+    def _create() -> None:
+        bench.create(run_id, agent=scenario.agent,
+                     template=scenario.template)
+        attrs = {"sandbox": run_id, "agent": scenario.agent}
+        if scenario.template:
+            attrs["template"] = scenario.template
+            attrs["template_digest"] = bench.template_digest(
+                scenario.template)
+        spans.emit(subject, run_id, name, "bench.create", attrs=attrs)
+
+    def _push() -> None:
+        if not scenario.subject:
+            return
         local_subject = f"{cfg.subjects_root}/{scenario.subject}"
         bench.push_dir(local_subject, workspace)
         spans.emit(subject, run_id, name, "subject.push",
                    attrs={"subject": scenario.subject, "into": workspace})
 
-    # 2. Fresh bench with the workspace bind-mounted. A scenario with a
-    # template creates from it (agent CLIs pre-installed); template tag +
-    # image digest land in the span for provenance.
-    bench.create(run_id, agent=scenario.agent, template=scenario.template)
-    attrs = {"sandbox": run_id, "agent": scenario.agent}
-    if scenario.template:
-        attrs["template"] = scenario.template
-        attrs["template_digest"] = bench.template_digest(scenario.template)
-    spans.emit(subject, run_id, name, "bench.create", attrs=attrs)
+    if bench.push_before_create:
+        _push()
+        _create()
+    else:
+        _create()
+        _push()
 
     # 3. Reference solution, verbatim. Steps run with the run id (and
     # the OTLP endpoint, when configured) in their env, so subject

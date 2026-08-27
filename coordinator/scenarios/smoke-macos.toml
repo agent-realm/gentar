@@ -1,0 +1,19 @@
+# First macOS-tier scenario: proves the tart bench end-to-end — clone
+# from the template VM, boot headless, ssh in through the jump, and find
+# Darwin underneath plus the pinned agent CLI. No subject: the substrate
+# is the thing under test (macOS twin of bench-template-verify).
+[scenario]
+name = "smoke-macos"
+bench = "tart"
+template = "gentar-bench-macos-v1"
+
+[oracle]
+steps = ["uname -s"]
+
+[[verify.commands]]
+command = "uname -sm"
+contains = "Darwin arm64"
+
+[[verify.commands]]
+command = "claude --version"
+contains = "2.1.234"

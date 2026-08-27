@@ -10,7 +10,7 @@ builtins (smoke) and TOML scenarios (oracle runner)."""
 import os
 import time
 
-from gentar.benchhost import BenchHost
+from gentar.benchhost import BenchHost, make_bench
 from gentar.config import Config
 from gentar.oracle import run_oracle
 from gentar.provenance import run_attrs
@@ -166,7 +166,9 @@ def run(name: str, cfg: Config | None = None) -> int:
 
     subject = (scenario.subject or ARENA_SUBJECT) if scenario else ARENA_SUBJECT
     run_kind = "scripted" if (scenario and scenario.driver_command) else "oracle"
-    bench = BenchHost(cfg)
+    # Bench tier: the scenario's `bench` key overrides the install default
+    # (config bench_kind, "sbx"); builtins always use the default tier.
+    bench = make_bench(cfg, kind=(scenario.bench if scenario else ""))
     spans = Spans(cfg)
     run_id = new_run_id(cfg.name_prefix)
     report = RunReport(

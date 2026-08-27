@@ -170,13 +170,20 @@ all merged to main and gate-verified per PR:
   update / task-lock), memhouse (install / real house), docs-honesty
   v1 for both kommander-playbook and gentar itself — the quickstart's
   `.env.example` exists because `docs-honesty-gentar` demanded it.
+- **macOS tier (tart)** — a second BenchHost implementation: tart VMs
+  cloned from a local template (`gentar-bench-macos-v1`, claude-code
+  pinned) on an Apple-Silicon Mac, driven headless over ssh through the
+  tart host. A scenario opts in with `bench = "tart"`; `smoke-macos`
+  is the substrate proof (Darwin arm64 + pinned CLI). Not part of the
+  CI gate — the gate runner is Linux with no route to the Mac; run it
+  where the Mac is reachable (see the macOS tier section below).
 
 **Not built yet** (deliberate, not forgotten): real-agent runs —
 claude-code driven by the pty driver inside a bench. The wiring exists
 (template, driver, env tier); what's missing is API-key injection, a
 credential-tier decision, not a code gap. Also deferred from plan v1:
-tart/macOS tier on the pilot's Mac (`macminim`), Forgejo/Gitea forge
-swap, `--kit` evaluation, multi-bench parallel matrices.
+Forgejo/Gitea forge swap, `--kit` evaluation, multi-bench parallel
+matrices.
 
 ## Quickstart
 
@@ -196,3 +203,28 @@ docker compose exec clickhouse clickhouse-client \
 
 Defaults in `.env.example` point at the current bench-host — the VM on
 arf (`10.10.10.52`, VM 142 `gentar-bench-host`) the runner lives on.
+
+### macOS tier (tart)
+
+The tart tier runs on the pilot's Mac (`macminim`): template VM
+`gentar-bench-macos-v1` (claude-code pinned by
+`bench-template/VERSION`, coordinator key authorized, agent CLIs on
+PATH via the guest's `~/.zshenv`). The Mac runs the tart CLI; benches
+are per-run clones, reached by ssh through the tart host (the guest's
+vmnet subnet is only routed on the Mac — so the coordinator must run
+somewhere with a route to the Mac, typically a container on the Mac
+itself with `GENTAR_TART_HOST=host.docker.internal`).
+
+```bash
+# from a checkout on the Mac, against a local Docker (OrbStack works):
+docker build -t gentar-coordinator coordinator/
+docker run --rm \
+  -v "$HOME/.ssh/id_ed25519:/run/secrets/bench_ssh_key:ro" -v "$PWD/out:/out" \
+  -e GENTAR_TART_HOST=host.docker.internal \
+  -e GENTAR_BENCH_KEY=/run/secrets/bench_ssh_key \
+  -e GENTAR_BENCH_KNOWN_HOSTS=/dev/null \
+  gentar-coordinator run smoke-macos   # exit code = verdict
+```
+
+Template rebuild is manual (boot the template VM, provision, `tart
+stop`); see the session log 2026-08-28 for the exact bring-up.

@@ -10,6 +10,8 @@ oracle mode is phase 2's runner.
     subject = "kommander-playbook"   # dir under the subjects root
     agent = "shell"           # oracle runs on a plain sandbox
     template = "gentar-bench-v1"  # optional: sbx template to create from
+    bench = "tart"           # optional: bench tier override (sbx default);
+                              # tart = template names a local tart VM
     credentials = ["ANTHROPIC_API_KEY"]  # env var NAMES the run needs;
                                           # missing → refuse (exit 2) before
                                           # any bench exists; values travel
@@ -45,7 +47,10 @@ class TomlScenario:
         self.name = sc.get("name", path.stem)
         self.subject = sc.get("subject")
         self.agent = sc.get("agent", "shell")
-        self.template = sc.get("template")  # sbx template tag, e.g. gentar-bench-v1
+        self.template = sc.get("template")  # sbx template tag / tart VM name
+        # Bench tier override: "tart" = macOS VM bench (default per config
+        # otherwise, i.e. the sbx tier).
+        self.bench = sc.get("bench")
         self.credentials = list(sc.get("credentials", []))
         for i, c in enumerate(self.credentials):
             if not isinstance(c, str) or not c.strip():
