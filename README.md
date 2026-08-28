@@ -86,7 +86,7 @@ contract.
 
 ## Scenario inventory
 
-15 suites today — every verdict from reality; one (`agent-smoke`)
+16 suites today — every verdict from reality; one (`agent-smoke`)
 puts a real claude-code in the loop, behind a declared credential.
 (`coordinator ls` also lists `smoke-fail`, the built-in sabotage probe
 that proves failure detection itself.)
@@ -94,6 +94,7 @@ that proves failure detection itself.)
 | Suite | Subject | What it proves |
 |---|---|---|
 | `smoke` | — | bench lifecycle: create → exec `uname -a` → span → destroy |
+| `smoke-macos` | — | tart tier substrate proof: Darwin arm64 + pinned CLI on a Mac bench (not in the CI gate; see macOS tier) |
 | `bench-template-verify` | — | benches from `gentar-bench-v1` carry the pinned claude-code |
 | `otlp-selfreport` | — | agent self-report: OTLP drop-file relay joins harness spans in one SQL |
 | `budget-sim` | — | budget guard refuses over-cap runs (exit 2) |
@@ -101,6 +102,7 @@ that proves failure detection itself.)
 | `scripted-danger` | — | danger gate fires before any approval |
 | `agent-smoke` | — | real claude-code (bench template) does a trivial task headlessly; needs `ANTHROPIC_API_KEY`, refuses without it |
 | `claude-playbooks-install` | kommander-playbook | documented `claude-playbook` CLI install path, 9 reality assertions |
+| `claude-playbooks-install-macos` | kommander-playbook | the same suite on a tart Mac bench — installers and launchers behave identically on darwin/arm64 |
 | `kommander-install` | kommander-playbook | README standalone path: in-place install, alias, data dirs, helper |
 | `kommander-update` | kommander-playbook | upgrade: v3.4.0 → subject VERSION; data survives `reset --hard` |
 | `kommander-task-lock` | kommander-playbook | lock guard exit contract (0 acquired / 2 live / 3 stale) |
@@ -174,9 +176,12 @@ all merged to main and gate-verified per PR:
   cloned from a local template (`gentar-bench-macos-v1`, claude-code
   pinned) on an Apple-Silicon Mac, driven headless over ssh through the
   tart host. A scenario opts in with `bench = "tart"`; `smoke-macos`
-  is the substrate proof (Darwin arm64 + pinned CLI). Not part of the
-  CI gate — the gate runner is Linux with no route to the Mac; run it
-  where the Mac is reachable (see the macOS tier section below).
+  is the substrate proof (Darwin arm64 + pinned CLI) and
+  `claude-playbooks-install-macos` is the first subject suite on the
+  tier — the documented installer path behaves identically on
+  darwin/arm64. Not part of the CI gate — the gate runner is Linux
+  with no route to the Mac; run these where the Mac is reachable (see
+  the macOS tier section below).
 
 **Not built yet** (deliberate, not forgotten): real-agent runs —
 claude-code driven by the pty driver inside a bench. The wiring exists
@@ -228,3 +233,7 @@ docker run --rm \
 
 Template rebuild is manual (boot the template VM, provision, `tart
 stop`); see the session log 2026-08-28 for the exact bring-up.
+
+Subject suites on the tier (`claude-playbooks-install-macos`) need the
+subject mounted at the coordinator's subjects root, e.g. add
+`-v <path-to-kommander-playbook>:/subjects/kommander-playbook:ro`.
