@@ -1,6 +1,6 @@
 ---
 node: /s2-arena-portability
-status: proposed
+status: approved
 snapshot: 1
 snapshot-commit: 9f2ee5a
 seeds: [compose-arena, bench-host-142, telemetry-spans]
