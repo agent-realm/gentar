@@ -7,8 +7,8 @@ engine's `AGENTS.md` (below) and start its first procedure for this project.
 
 ## Engine
 
-- **Engine:** `engine-conflux` (`~/loox-org/engine-conflux/AGENTS.md`)
-- **Why:** rich prior record (README + design of record + build plan v1 + 20 merged PRs) and genuinely open next-phase decisions that need pilot values — conflux's record → pilot → measurement triage fits both.
+- **Engine:** `engine-plato` (`~/loox-org/engine-plato/AGENTS.md`)
+- **Why:** pilot-chosen (2026-08-31), overruling the survey match to conflux: the pilot wants the in-place branch-tree record, scenario fan, and character drillers — plato's bets. The conflux converge's frozen frame (loop-gentar, deleted) is prior art for the interview.
 
 ## Resources
 
