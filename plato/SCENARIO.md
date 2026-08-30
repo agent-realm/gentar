@@ -1,6 +1,6 @@
 ---
 node: /s1-subject-kernel
-status: approved
+status: closed
 snapshot: 1
 snapshot-commit: 9f2ee5a
 seeds: [gentar-repo, scenario-toml, sbx-linux-tier, bench-host-142]
@@ -46,3 +46,14 @@ directory is proven in CI). Oracle-first: no LLM anywhere in the loop.
 - Real agents (deferred register). tart/macOS (deferred register). Any
   change to kernel itself beyond the `gentar/` dir + trigger — kernel's
   code is the subject under test, not the target of edits.
+
+## Closure
+
+- closed-reason: pilot ruling 2026-08-31 — kernel was the fan's example
+  pick, not a record-backed subject; the recorded principle "subjects
+  migrate to gentar when their owners choose" makes onboarding a subject
+  whose owner has not asked a presumption, not generality proof. i4 is
+  carried by /s3-subject-scaffold.
+- do-not-retry: onboarding any specific component as a "generality proof"
+  without its owner choosing to migrate. A new subject scenario starts from
+  an owner's ask, not from the engine's pick.
