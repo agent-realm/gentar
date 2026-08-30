@@ -1,7 +1,7 @@
 ---
 node: /s3-subject-scaffold/r3-smoke-green
 scenario: /s3-subject-scaffold
-status: draft
+status: frozen
 touches:
   - "worktree docker-compose.yml + coordinator image (docker compose build)"
   - "plato/scaffold/demo-subject/ (this branch) staged as a real git checkout under a scratch subjects root"
