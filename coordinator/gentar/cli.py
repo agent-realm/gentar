@@ -2,9 +2,11 @@
 
 import argparse
 
+from gentar import subject_init
 from gentar.config import Config
 from gentar.coordinator import RunError, run
 from gentar.scenarios import known_names
+from gentar.toml_scenario import ScenarioError
 
 
 def main() -> int:
@@ -16,13 +18,28 @@ def main() -> int:
 
     sub.add_parser("ls", help="list known scenarios")
 
+    p_subject = sub.add_parser(
+        "subject", help="subject onboarding helpers")
+    subject_sub = p_subject.add_subparsers(dest="subject_cmd", required=True)
+    p_init = subject_sub.add_parser(
+        "init", help="emit a new subject's scenario skeleton + trigger")
+    p_init.add_argument("name", help="subject name: lowercase-with-dashes")
+    p_init.add_argument("--repo", required=True,
+                        help="subject checkout URL (recorded, never fetched)")
+    p_init.add_argument("--dir", help="write the two files here instead of stdout")
+
     args = parser.parse_args()
-    if args.cmd == "ls":
-        for name in known_names(Config()):
-            print(name)
-        return 0
+    if args.cmd == "subject" and args.subject_cmd == "init":
+        # Pure generator: no config, no bench-host, no network.
+        return subject_init.emit(args.name, args.repo, args.dir or "")
     try:
+        if args.cmd == "ls":
+            for name in known_names(Config()):
+                print(name)
+            return 0
         return run(args.scenario)
-    except RunError as exc:
+    except (RunError, ScenarioError) as exc:
+        # ScenarioError = malformed TOML in a scenarios dir (a usage
+        # error, 2) — including an off-schema file that breaks `ls`.
         print(f"error: {exc}")
         return 2

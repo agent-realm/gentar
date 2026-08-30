@@ -116,7 +116,10 @@ List them live: `docker compose run --rm coordinator ls`.
 ## Integrating your repo (becoming a subject)
 
 Full contract: [docs/subject-integration.md](docs/subject-integration.md).
-The short version — three moves, two of them in your repo:
+The short version — three moves, two of them in your repo (both
+scaffoldable with `docker compose run --rm coordinator subject init
+<name> --repo <url>`, which emits the skeleton TOML and the trigger,
+and refuses to run a suite whose verify stubs are unfilled):
 
 1. **State your scenarios as decisions, not steps.** A TOML per suite:
    what to install, what reality to assert. Either carry them in your

@@ -31,6 +31,11 @@ done
 echo named-scenarios-exist''',
   # --- CI tier claim: the workflow file carries the three tiers ---
   'grep -qF "gate:" "$WORKSPACE_DIR/.github/workflows/gentar.yml" && grep -qF "nightly:" "$WORKSPACE_DIR/.github/workflows/gentar.yml" && grep -qF "dispatch:" "$WORKSPACE_DIR/.github/workflows/gentar.yml" && echo tiers-claim-true',
+  # --- scaffold claim: `gentar subject init` is documented AND exists ---
+  'grep -qF "subject init" "$WORKSPACE_DIR/README.md" && grep -qF "subject init" "$WORKSPACE_DIR/docs/subject-integration.md" && test -f "$WORKSPACE_DIR/coordinator/gentar/subject_init.py" && echo scaffold-documented',
+  # --- the emitted trigger IS the documented dispatch contract (same
+  # dispatch URL in the generator and the integration doc) ---
+  'grep -qF "https://api.github.com/repos/agent-realm/gentar/actions/workflows/gentar.yml/dispatches" "$WORKSPACE_DIR/coordinator/gentar/subject_init.py" && grep -qF "https://api.github.com/repos/agent-realm/gentar/actions/workflows/gentar.yml/dispatches" "$WORKSPACE_DIR/docs/subject-integration.md" && echo trigger-contract-anchored',
 ]
 
 [[verify.commands]]

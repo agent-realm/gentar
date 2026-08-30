@@ -13,6 +13,26 @@ Two modes, pick either or both:
   its own CI. Scenarios live in your repo; any trigger conditions you
   want; the arena is a `git clone` away.
 
+## Scaffold first — one command
+
+Both moves below that live in your repo can be scaffolded:
+
+```bash
+docker compose run --rm coordinator subject init <name> --repo <url>
+```
+
+It emits (stdout, or `--dir` to write files) a decision-TOML scenario
+skeleton — subject prefilled, the install decision shaped, the budget
+block present, verify probes as `TODO` stubs — plus the trigger
+workflow above, verbatim. Pure generator: nothing is fetched from
+`--repo`, no install decision is guessed (that is agent work, not
+generator work), nothing is committed for you.
+
+An unfilled stub is an honest refusal: `coordinator run` exits 2
+before any bench exists while any verify probe still says `TODO`.
+Fill the probes only your subject's author can write, and the suite
+is live.
+
 ## What a subject contributes
 
 1. **Scenario configs** — the subject states install *decisions* and

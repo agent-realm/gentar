@@ -27,10 +27,21 @@ oracle mode is phase 2's runner.
     [[verify.commands]]
     command = "claude-playbook info kommander"
     contains = "Version:"     # optional substring check
+
+    A verify probe carrying the stub value "TODO" (emitted by
+    `gentar subject init`) is an unfilled scaffold: the suite loads,
+    but `run` refuses with exit 2 before any bench exists.
 """
 
 import tomllib
 from pathlib import Path
+
+# Sentinel for an unfilled verify probe, as emitted by the
+# `gentar subject init` scaffold. A scenario carrying any stub still
+# LOADS (so `coordinator ls` sees it) but `coordinator run` refuses
+# with exit 2 before any bench exists — an honest scaffold, never a
+# fake-green one.
+STUB = "TODO"
 
 
 class ScenarioError(ValueError):
@@ -90,6 +101,18 @@ class TomlScenario:
         for i, c in enumerate(self.commands):
             if "command" not in c:
                 raise ScenarioError(f"{path}: verify.commands[{i}] missing command")
+
+        # Unfilled scaffold stubs: verify probes still carrying the
+        # TODO sentinel. Loaded fine (ls lists the suite); the run-time
+        # stub guard in coordinator.run refuses them before any bench
+        # exists. Descriptors name the exact probe to fill.
+        self.stubs: list[str] = []
+        for i, f in enumerate(self.files):
+            if f["path"] == STUB or f.get("contains") == STUB:
+                self.stubs.append(f"verify.files[{i}]")
+        for i, c in enumerate(self.commands):
+            if c["command"] == STUB or c.get("contains") == STUB:
+                self.stubs.append(f"verify.commands[{i}]")
 
     def describe(self) -> str:
         parts = [f"subject={self.subject or '-'}", f"agent={self.agent}",

@@ -17,7 +17,7 @@ from gentar.provenance import run_attrs
 from gentar.report import RunReport
 from gentar.scenarios import REGISTRY, known_names
 from gentar.spans import Spans, new_run_id
-from gentar.toml_scenario import TomlScenario, load_dir
+from gentar.toml_scenario import ScenarioError, TomlScenario, load_dir
 
 # Subject label for subjectless builtins/scenarios: the arena itself.
 ARENA_SUBJECT = "arena"
@@ -109,8 +109,36 @@ def run(name: str, cfg: Config | None = None) -> int:
 
     try:
         fn, scenario = _resolve(name, cfg)
-    except RunError as exc:
+    except (RunError, ScenarioError) as exc:
+        # ScenarioError = malformed/off-schema TOML in a scenarios dir —
+        # a usage error (2), same as an unknown name, never a traceback.
         print(f"Error: {exc}")
+        return 2
+
+    # -- stub guard: refuse before any bench exists ----------------------
+    # A scaffolded scenario (`gentar subject init`) whose verify probes
+    # still carry TODO stubs is not a test yet — running it anyway could
+    # only fake-green. Refuse with exit 2 (a usage error, never a red
+    # bench) exactly like the budget and credential guards.
+    if scenario and scenario.stubs:
+        msg = (f"stub guard: scenario {name!r} has "
+               f"{len(scenario.stubs)} unfilled verify stub(s) "
+               f"({', '.join(scenario.stubs)}) — fill the TODO probes "
+               f"the scaffold emitted, then run; refusing before any "
+               f"bench exists")
+        print(f"Error: {msg}")
+        spans = Spans(cfg)
+        spans.emit(ARENA_SUBJECT, "", name, "stub.refuse", "error",
+                   attrs={"stubs": ",".join(scenario.stubs)},
+                   detail="run refused: unfilled verify stubs")
+        report = RunReport(
+            scenario=name,
+            run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+            subject=(scenario.subject or ARENA_SUBJECT),
+            reproduce=f"docker compose run --rm coordinator run {name}",
+            error=msg)
+        report.mark("refuse", 2)
+        _write_report(report, cfg)
         return 2
 
     # -- budget guard: refuse before any bench exists ---------------------
