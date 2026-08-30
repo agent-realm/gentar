@@ -1,6 +1,6 @@
 ---
 node: /s1-subject-kernel
-status: proposed
+status: approved
 snapshot: 1
 snapshot-commit: 9f2ee5a
 seeds: [gentar-repo, scenario-toml, sbx-linux-tier, bench-host-142]
