@@ -1,7 +1,7 @@
 ---
 node: /s3-subject-scaffold/r2-stub-refuse
 scenario: /s3-subject-scaffold
-status: draft
+status: frozen
 touches:
   - "worktree docker-compose.yml + coordinator image (docker compose build)"
   - "docker compose run --rm coordinator run demo-subject-install (emitted stub suite via GENTAR_SCENARIOS_DIR)"
