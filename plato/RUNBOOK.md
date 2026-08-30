@@ -1,7 +1,7 @@
 ---
 node: /s3-subject-scaffold/r1-emit
 scenario: /s3-subject-scaffold
-status: draft
+status: frozen
 touches:
   - "worktree docker-compose.yml + coordinator image (docker compose build)"
   - "docker compose run --rm coordinator subject init demo-subject --repo https://github.com/x/demo"
