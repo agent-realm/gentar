@@ -1,7 +1,7 @@
 ---
 node: /s3-subject-scaffold/r2-stub-refuse
 scenario: /s3-subject-scaffold
-status: frozen
+status: orphan
 touches:
   - "worktree docker-compose.yml + coordinator image (docker compose build)"
   - "docker compose run --rm coordinator run demo-subject-install (emitted stub suite via GENTAR_SCENARIOS_DIR)"
@@ -17,6 +17,7 @@ stop-conditions:
   - "ssh to polat@10.10.10.52 fails at step 2 — environment trouble, incomplete, stop"
   - "host port 18124 or 14319 already bound before step 1 completes — incomplete, do not pick other ports"
   - "wall clock exceeds the deadline — record incomplete, run teardown, stop"
+steer: "Pilot steer 2026-09-02, verbatim: step 5 and step 8 no longer whole-list diff against the shared bench-host — foreign transient sandboxes from other actors are out of this instrument's scope. Both steps now assert only what this runbook owns: no sandbox whose name contains demo-subject exists at either checkpoint."
 exclusions: "No sandbox is ever CREATED (the green run is r3's instrument); the bench-host is only read via 'sbx ls'. No subject checkout is mounted. The negative control deliberately fails at subject delivery — that failure is expected, not a bug to repair."
 ---
 
@@ -93,14 +94,17 @@ unrelated local services.
    `stub guard: scenario 'demo-subject-install' has 2 unfilled verify stub(s) (verify.files[0], verify.commands[0])`
    and the words `refusing before any bench exists`.
 
-5. No bench exists — snapshot AFTER:
+5. No bench exists — snapshot AFTER (steered: runbook-owned check only):
 
    ```bash
    ssh -o BatchMode=yes -o ConnectTimeout=10 polat@10.10.10.52 'sbx ls' > "$ENV/sbx-after.txt"
-   diff "$ENV/sbx-before.txt" "$ENV/sbx-after.txt"; echo "diff-exit=$?"
+   grep -c 'demo-subject' "$ENV/sbx-after.txt"; echo "own-grep-exit=$?"
    ```
 
-   Expected: `diff-exit=0`, no output.
+   Expected: `own-grep-exit=1` (zero matches — this runbook created no
+   sandbox). Foreign transient sandboxes from other actors on the shared
+   host are out of scope: record any that appear verbatim as an answer,
+   never a verdict.
 
 6. Refusal report exists:
 
@@ -151,14 +155,14 @@ unrelated local services.
    whose detail is subject-delivery failure (`local tar of
    /subjects/demo-subject failed` when no subject is mounted).
 
-8. Bench-host still untouched:
+8. Bench-host still untouched (steered: runbook-owned check only):
 
    ```bash
    ssh -o BatchMode=yes -o ConnectTimeout=10 polat@10.10.10.52 'sbx ls' > "$ENV/sbx-final.txt"
-   diff "$ENV/sbx-before.txt" "$ENV/sbx-final.txt"; echo "diff-exit=$?"
+   grep -c 'demo-subject' "$ENV/sbx-final.txt"; echo "own-grep-exit=$?"
    ```
 
-   Expected: `diff-exit=0`, no output.
+   Expected: `own-grep-exit=1` (zero matches). Same scope rule as step 5.
 
 9. Teardown (every exit path):
 
