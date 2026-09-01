@@ -203,11 +203,18 @@ docker compose run --rm coordinator run smoke   # exit code = verdict
 ls out/   # report-<run_id>.md per run — failure reports are agent-feedable
 docker compose exec clickhouse clickhouse-client \
   --user gentar --password gentar \
-  -q "SELECT span_name, status FROM gentar.spans ORDER BY ts"
+  -q "SELECT step, status FROM gentar.spans ORDER BY ts_start"
 ```
 
 Defaults in `.env.example` point at the current bench-host — the VM on
 arf (`10.10.10.52`, VM 142 `gentar-bench-host`) the runner lives on.
+
+Busy Docker host? The stack publishes `8123` (ClickHouse) and `4318`
+(otelcol) on the host; if something else already listens there, set
+`GENTAR_CLICKHOUSE_HOST_PORT` / `GENTAR_OTELCOL_HOST_PORT` in `.env`
+before the first `docker compose run` — the suites themselves never
+need those host ports (they talk over the compose network), but compose
+refuses to start while the bind fails.
 
 ### macOS tier (tart)
 

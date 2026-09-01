@@ -6,6 +6,13 @@
 # (the documented drop point any agent adapter can use), and the
 # coordinator relays that file to otelcol on the compose network. The
 # harness↔agent JOIN is proven by one SQL on run_id (README phase-5).
+#
+# Timestamps MUST be epoch nanoseconds (OTel spec). This suite once used
+# process.hrtime.bigint() — monotonic ns since boot — which lands as
+# 1970-01-01; otelcol's ClickHouse export carries a 14-day TTL, so the
+# span inserted fine and then vanished from every query (found on the
+# 2026-08-30 second-host portability pass: parts sat in the 19700101
+# partition, SELECT returned nothing, zero errors anywhere).
 [scenario]
 name = "otlp-selfreport"
 
@@ -16,7 +23,7 @@ steps = [
     const c = require("crypto");
     const trace = c.createHash("sha256").update(r).digest("hex").slice(0, 32);
     const span = c.randomBytes(8).toString("hex");
-    const now = process.hrtime.bigint().toString();
+    const now = (BigInt(Date.now()) * 1000000n).toString();
     const body = { resourceSpans: [{ resource: { attributes: [
         { key: "gentar.run_id", value: { stringValue: r } } ] },
       scopeSpans: [{ spans: [{ traceId: trace, spanId: span,

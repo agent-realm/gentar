@@ -45,7 +45,10 @@ services:
     volumes:
       - ./otelcol/config.yaml:/etc/otelcol/config.yaml:ro
     ports:
-      - "4318:4318"
+      # Same busy-host concern as ClickHouse above: the suites reach
+      # otelcol over the compose network (drop-file relay), the host
+      # publish is for external POSTs — override rather than edit.
+      - "${GENTAR_OTELCOL_HOST_PORT:-4318}:4318"
 
   coordinator:
     build: ./coordinator
