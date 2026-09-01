@@ -1,7 +1,7 @@
 ---
 node: /s2-arena-portability/r2-spans-join
 scenario: /s2-arena-portability
-status: draft
+status: frozen
 touches:
   - this worktree's .env (created fresh, gitignored)
   - docker compose project plato-s2-r2-spans (own ClickHouse volume, host ports 18131 + 14331)
