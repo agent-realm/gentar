@@ -1,7 +1,7 @@
 ---
 node: /s3-subject-scaffold/r3-smoke-green
 scenario: /s3-subject-scaffold
-status: frozen
+status: orphan
 touches:
   - "worktree docker-compose.yml + coordinator image (docker compose build)"
   - "plato/scaffold/demo-subject/ (this branch) staged as a real git checkout under a scratch subjects root"
@@ -18,6 +18,7 @@ stop-conditions:
   - "host port 18125 or 14320 already bound before step 1 completes — incomplete, do not pick other ports"
   - "the run leaves a sandbox on the bench-host after teardown — attempt one manual 'sbx rm --force <name>', record it, then verdict per the expects"
   - "wall clock exceeds the deadline — record incomplete, run teardown, stop"
+steer: "Pilot steer 2026-09-02, verbatim: step 7 first grep expects the report's expanded render (report expands ~ to the bench home path /home/agent), and the second grep uses grep -cF (literal, no BRE anchor) for the cat command line."
 exclusions: "The stub refusal is r2's instrument (the filled suite here never exercises the guard). No dashboard, no ClickHouse assertions, no OTLP self-report is checked. The subject is deliberately trivial — install sophistication is not what this instrument measures."
 ---
 
@@ -137,13 +138,15 @@ local services.
 
    ```bash
    REPORT=$(ls -t out/report-gentar-*.md | head -1)
-   grep -c 'file-contains ~/.demo-subject/state.txt' "$REPORT"
-   grep -c 'cat "$HOME/.demo-subject/state.txt"' "$REPORT"
+   grep -c 'file-contains /home/agent/.demo-subject/state.txt' "$REPORT"
+   grep -cF 'cat "$HOME/.demo-subject/state.txt"' "$REPORT"
    grep -m1 '^## Verdict\|verdict' "$REPORT" || true
    ```
 
    Expected: first two greps each count >= 1; record what the verdict
-   line prints.
+   line prints. (Steered: the report renders `~` expanded to the bench
+   home `/home/agent`, and macOS BSD grep anchors `$` inside BRE patterns
+   — hence the expanded path and `-cF` literal match.)
 
 8. Bench-host clean (the coordinator destroyed its sandbox):
 
