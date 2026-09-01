@@ -1,7 +1,7 @@
 ---
 node: /s2-arena-portability/r1-second-host-gate
 scenario: /s2-arena-portability
-status: draft
+status: frozen
 touches:
   - this worktree's .env (created fresh, gitignored)
   - docker compose project plato-s2-r1-gate (own ClickHouse volume, host ports 18130 + 14330)
