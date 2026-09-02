@@ -1,7 +1,7 @@
 ---
 node: /s7-docs-truth/r2-envfile-project-seam
 scenario: /s7-docs-truth
-status: draft
+status: frozen
 touches:
   - "worktree .env (arena A: COMPOSE_PROJECT_NAME=gentar-s7arm, GENTAR_NAME_PREFIX=gentar-s7arm, ports 18190/14390)"
   - "worktree .env-nbr (arena B: COMPOSE_PROJECT_NAME=gentar-s7nbr, GENTAR_NAME_PREFIX=gentar-s7nbr, ports 18191/14391)"
