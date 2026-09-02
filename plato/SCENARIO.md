@@ -1,6 +1,6 @@
 ---
 node: /s5-arena-coexist
-status: approved
+status: running
 snapshot: 1
 snapshot-commit: 9f2ee5a
 seeds: [compose-arena, bench-host-142, telemetry-spans]
