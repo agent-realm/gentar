@@ -1,7 +1,7 @@
 ---
 node: /s5-arena-coexist/r3-two-arena-coexist
 scenario: /s5-arena-coexist
-status: draft
+status: frozen
 touches:
   - "arena A: this worktree (.env with COMPOSE_PROJECT_NAME=plato-s5-r3a, GENTAR_CLICKHOUSE_HOST_PORT=18151, GENTAR_OTELCOL_HOST_PORT=14351, GENTAR_NAME_PREFIX=gentar-s5-alpha)"
   - "arena B: a second checkout at <worktree>-b/ extracted via `git archive HEAD | tar -x` (.env with COMPOSE_PROJECT_NAME=plato-s5-r3b, GENTAR_CLICKHOUSE_HOST_PORT=18152, GENTAR_OTELCOL_HOST_PORT=14352, GENTAR_NAME_PREFIX=gentar-s5-beta)"
