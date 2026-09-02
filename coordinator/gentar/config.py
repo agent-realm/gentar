@@ -16,10 +16,11 @@ _PREFIX_MAX = 24
 def _check_prefix(prefix: str) -> None:
     if len(prefix) > _PREFIX_MAX or not _PREFIX_RE.match(prefix):
         raise ValueError(
-            f"GENTAR_NAME_PREFIX {prefix!r} must be lowercase-with-dashes "
-            f"(letters/digits/dashes, single dashes only), max "
-            f"{_PREFIX_MAX} chars — it names sandboxes, workspace dirs, "
-            f"run ids, and report files")
+            f"GENTAR_NAME_PREFIX {prefix!r} must START WITH A LETTER, "
+            f"then lowercase letters/digits/single dashes only (so "
+            f"gentar-1a is legal; 1gentar, gentar--x, Gentar are not), "
+            f"max {_PREFIX_MAX} chars — it names sandboxes, workspace "
+            f"dirs, run ids, and report files")
 
 
 def _opt(name: str, default: str = "") -> str:

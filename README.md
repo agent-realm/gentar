@@ -218,6 +218,13 @@ receiver). On some Docker hosts (OrbStack) losing that race fails
 stay green, because the suites themselves never use host ports (they
 talk over the compose network). If even `18123`/`14318` are taken, set
 `GENTAR_CLICKHOUSE_HOST_PORT` / `GENTAR_OTELCOL_HOST_PORT` in `.env`.
+Two recovery notes from the field: if a port knob you set points at an
+occupied port, the same silent loss applies — verify with
+`curl http://127.0.0.1:<port>/ping` before relying on the publish; and
+after a bind failure, removing the squatter and running plain
+`docker compose up -d` can leave the container Up/healthy with the
+publish silently *absent* (`docker port <container>` empty) — recreate
+with `docker compose up -d --force-recreate <service>` to restore it.
 
 ### Two arenas, one machine or one bench-host
 
@@ -234,18 +241,27 @@ shell — see the scoping rule below):
   prefixes every run_id, so sandbox names, workspace dirs, span
   run_ids, and report filenames all carry it: an operator reading
   `sbx ls` can tell whose sandbox is whose without out-of-band
-  knowledge. Lowercase-with-dashes, 24 chars max; anything else is a
-  usage error (exit 2) at startup.
+  knowledge. Shape: must START WITH A LETTER; then lowercase letters,
+  digits, and single dashes only (no leading digit, no double dash, no
+  underscores); 24 chars max. Anything else is a usage error (exit 2)
+  at startup.
 
 **Scoping rule: one arena = one `.env` — everything in it, nothing on
 the shell.** The port knobs are `.env`-file-scoped while a shell
 `COMPOSE_PROJECT_NAME` export is invocation-scoped; mixing the two
 means a later compose call without the exports silently reverts to the
-file's ports, recreates your containers against them, and dies on a
-bind error naming neither project nor file — after destroying the
-running ones. `--env-file` is no escape either: it drives port
-*interpolation* only, while the coordinator container still reads the
-literal `.env`.
+file's values and reconciles your containers against them — and ANY
+compose invocation reconciles, not just `up`: a drifted `docker
+compose run` or `exec` will recreate the running clickhouse onto the
+exported port too. The bind error that follows names the endpoint
+(`plato-x-clickhouse-1: Bind for 127.0.0.1:18123 failed`) but neither
+the env file nor the `GENTAR_*_HOST_PORT` knob — grep the named port
+number across `.env` and your shell exports to find the drift.
+`--env-file` is no escape either: it drives interpolation AND the
+project name, while the coordinator container still reads the literal
+`.env` — one variable, two values, no error; a live drill produced a
+sandbox stamped arena A's prefix writing into arena B's ClickHouse
+through exactly this seam.
 
 ### macOS tier (tart)
 

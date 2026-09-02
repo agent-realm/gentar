@@ -1,111 +1,97 @@
 ---
-node: /s5-arena-coexist
-status: blessed
+node: /s7-docs-truth
+status: approved
 snapshot: 1
 snapshot-commit: 9f2ee5a
 seeds: [compose-arena, bench-host-142, telemetry-spans]
 hints: [bench-host/sbx-lifecycle, ci/forge-agnostic-tiers]
-steered-from: "/s2-arena-portability @ 3849dcc"
+steered-from: "/s5-arena-coexist @ f976be1"
 ---
 
-# s5 — arena coexistence: two arenas, no shadows
+# s7 — docs truth: the coexistence text says what actually happens
 
-Steered scenario off `/s2-arena-portability @ 3849dcc` (blessed
-b1-second-host-all). Its drills — d1-impatient, d2-tweaker, d3-neighbor —
-found the second-Docker-host claim holds but coexistence itself has
-holes; the pilot's steer (2026-09-02, answer: "fix") applies them as
-this scenario's opening commits.
+Steered scenario off `/s5-arena-coexist @ f976be1` (blessed
+b1-coexist-all). Its drills — d1-neighbor (PASS, zero findings),
+d2-tweaker, d3-impatient — confirmed the CODE holds (concurrent arenas
+fully separated, attribution held, quickstart green on the new
+defaults beside the native 8123 server) and found the next layer:
+the coexistence TEXT I wrote in s5 has factual errors and gaps. The
+pilot's steer (2026-09-02, "Fix via s7") applies them as this
+scenario's opening commits. Docs-first scenario: one message string
+changes in code (the prefix refusal); everything else is README,
+.env.example, and the refusal text telling the same truth.
 
 ## Steers (pilot's decision, verbatim record)
 
-Pilot chose "fix" from the menu:
-- fix all real findings in both scenarios (this one = the arena
-  coexistence holes)
-- delights recorded, not actioned
+Pilot chose "Fix via s7 (Recommended)" from the menu.
 
-Findings driven in, with the drill + reproduction of record:
+Findings driven in, with the drill + finding name of record:
 
-1. **default-collision, silent** — with a native clickhouse-server
-   listening on 127.0.0.1:8123, `docker compose run` raised NO error,
-   reported clickhouse Healthy, exit 0, and `docker ps` even listed the
-   publish — but the host port answered the FOREIGN server (auth
-   rejected) while compose-internal truth had 6 spans. On OrbStack the
-   busy-host collision is silent: quickstart immune (SQL via compose
-   exec), every host-side consumer reads the wrong server (d1).
-2. **isolation-leak** — two checkouts that end up with the same
-   COMPOSE_PROJECT_NAME are ONE merged arena: the second silently
-   attaches to the first's containers; spans land in the first's
-   ClickHouse volume while reports land per-checkout, so attribution
-   looks separate when it is not (d2).
-3. **attribution-confusion** — on a shared bench-host, `sbx ls` shows
-   two `gentar-<ts>-<hex>` sandboxes with no field carrying arena,
-   coordinator, or Docker-host identity; the report's Reproduce line is
-   identical in every arena. Ownership is decidable only with
-   out-of-band knowledge (your own report's run_id) (d3).
-4. **name-collision-risk / LAN exposure** — otelcol's default published
-   `0.0.0.0:4318` on all interfaces: two default-configured arenas
-   cannot both start, and the publish can shadow an unrelated host OTLP
-   receiver — plus the collector is exposed to the LAN for no benefit,
-   since benches never POST to it (drop-file relay via the coordinator)
-   (d3).
-5. **bend-crash + half-applied-override** — port knobs are `.env`-scoped
-   while COMPOSE_PROJECT_NAME is invocation-scoped: a compose call that
-   omits the shell exports silently reverts to the file's ports,
-   recreates the running stack, and dies on a bind error naming neither
-   project nor file. `--env-file` is no escape: interpolation reads it,
-   the coordinator container still reads the literal `.env` (d2).
+1. **env-file-identity-split** (d2) — README claimed `--env-file`
+   drives "port *interpolation* only"; it drives the project name too.
+   A live drill through exactly this seam produced a sandbox stamped
+   arena A's prefix writing into arena B's ClickHouse — one variable,
+   two values, no error.
+2. **inert-publish-after-bind-fail-recovery** (d2) — after a bind
+   failure, removing the squatter and running plain `up -d` can leave
+   the container Up/healthy with the publish silently ABSENT
+   (`docker port` empty); only `--force-recreate` restores it. Beyond
+   the docs.
+3. **bind-error-text-names-project** (d2) — README said the bind error
+   names "neither project nor env file"; it names the endpoint
+   (`plato-x-clickhouse-1`), so the project IS legible — the env file
+   and knob are what it omits.
+4. **run-subcommand-recreates-telemetry** (d2) — any compose
+   invocation reconciles drifted config, `run` and `exec` included,
+   not just `up`.
+5. **prefix-docs-vs-validator** (d2) — docs + refusal message omitted
+   the leading-letter rule and digits-allowed (`1gentar` refused while
+   every stated sub-rule was satisfied; `gentar-1a` legal but
+   undocumented).
+6. **silent-shadow-on-taken-port** (d3) — pointing a port knob at an
+   occupied port loses silently on OrbStack, exactly like the default
+   collision s5 moved away from; the docs stopped one sentence short
+   of saying so.
+7. **bind-error-names-neither-knob** (d3) — the path from the daemon's
+   "port is already allocated" to the `GENTAR_*_HOST_PORT` knob is
+   grep-only; docs never hand you the grep.
 
 ## Mechanism
 
-Same arena, coexistence made a first-class property:
-
-- **Defaults off the canonical ports** — host publishes default to
-  `18123` (ClickHouse) and `14318` (otelcol), loopback-only. The
-  occupied ports on a real machine are 8123/4318 (native installs,
-  other receivers); a gentar-specific default kills the silent-shadow
-  class instead of documenting it. The knob stays for the residual
-  two-arenas case.
-- **otelcol loopback-only** — the publish is manual debugging from the
-  host; benches relay OTLP through the coordinator over the compose
-  network, so `127.0.0.1` closes the LAN exposure and the receiver
-  shadow with nothing lost.
-- **Arena identity on the bench-host** — `GENTAR_NAME_PREFIX`
-  (existing knob, now documented + validated) prefixes every run_id:
-  sandbox names, workspace dirs, span run_ids, and report filenames
-  all carry it. Off-shape values (uppercase, double dash, >24 chars,
-  spaces) refuse at startup with exit 2, never a traceback, never a
-  weird filename mid-run.
-- **Arena identity on the Docker host** — `.env.example` and README
-  name COMPOSE_PROJECT_NAME as THE identity knob and state the scoping
-  rule: one arena = one `.env`, everything in it, nothing on the shell.
-  The merge failure mode and the `--env-file` split-brain are written
-  down where the person standing up a second arena will read them.
+- **README busy-host section** gains the two field notes: verify a
+  knob-targeted port with `curl /ping` before relying on the publish;
+  after a bind failure, recover with `--force-recreate` (plain `up -d`
+  can leave the publish absent).
+- **Scoping rule rewritten to the truth**: `--env-file` drives
+  interpolation AND the project name (the cross-contamination seam
+  described concretely); any compose invocation reconciles; the bind
+  error names endpoint+port but not file/knob — grep the port number
+  to find the drift.
+- **Prefix shape stated completely** everywhere it appears (README,
+  .env.example, refusal message): starts with a letter; lowercase
+  letters, digits, single dashes; ≤24 chars — with legal/illegal
+  examples.
+- The single code change is the refusal MESSAGE joining the docs in
+  telling the whole rule.
 
 ## What a runbook will be able to expect
 
-- A fresh `cp .env.example .env` + quickstart run, beside a native
-  clickhouse-server on 8123: exit 0, and the host port 18123 answers
-  THE ARENA (spans reachable host-side), 8123 still answers the native
-  server.
-- `docker compose config` shows both publishes bound to 127.0.0.1;
-  `GENTAR_*_HOST_PORT` still overrides either.
-- `GENTAR_NAME_PREFIX=Bad Value` (or `gentar--x`, or 25 chars) refuses
-  with exit 2 and a message naming the shape rule; a valid prefix
-  shows up in the run_id, the sandbox name on the bench-host, and the
-  report filename.
-- Two arenas with distinct COMPOSE_PROJECT_NAME + distinct ports in
-  their own `.env` files coexist on one Docker host and one
-  bench-host; spans stay separated; `sbx ls` distinguishes their
-  sandboxes by prefix.
-- The dashboard's host-side fallback reaches the arena on 18123.
+- README's scoping-rule paragraph contains no claim a live two-stack
+  drill can falsify: env-file scope, reconciliation scope, and error
+  text all match observed behavior.
+- The busy-host section names the silent-loss case for explicitly-set
+  knobs and the `--force-recreate` recovery.
+- `GENTAR_NAME_PREFIX=1gentar` refuses with a message that states the
+  leading-letter rule; docs and message agree with the validator on
+  every boundary shape (leading digit, double dash, underscore, 24/25
+  chars).
+- No code behavior changes beyond the message string: all s5 blessed
+  behavior unchanged (16 suites load, quickstart green on defaults).
 
 ## Deliberately left out
 
-Deferred-ideal topics stay parked (deferral register). The delight
-(five-minute quickstart green first try, d1) is recorded, unactioned.
-No compose `name:` pin — a fixed top-level name would COLLAPSE all
-checkouts onto one project, the opposite of the steer. No runtime
-collision detection (bind-failure preflight): the silent case lives in
-the Docker host's publish semantics, not in anything the coordinator
-can see from inside the network; moving the defaults removes the class
-the coordinator could not have detected.
+No runtime detection of the silent-shadow class — it lives in the
+Docker host's publish semantics, invisible from inside the compose
+network (s5's recorded decision stands; the docs now carry the
+curl-verify mitigation). Deferred-ideal topics stay parked (deferral
+register). Delights recorded, unactioned.
