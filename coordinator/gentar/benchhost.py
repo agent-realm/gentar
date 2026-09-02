@@ -19,6 +19,7 @@ import json
 import os
 import shlex
 import subprocess
+import time
 
 from gentar.config import Config
 
@@ -194,11 +195,27 @@ class SbxBenchHost(BenchHost):
 
     def rm(self, name: str) -> None:
         # Never raises: teardown must not mask the real verdict.
+        # s4 hardening (d1-impatient drill): sbx rm returns before the
+        # sandbox fully disappears — a green run must not leave a live
+        # bench behind its own exit. Wait a bounded 60s for the listing
+        # to clear; still listed after that warns (never masks the
+        # verdict).
         try:
             self._run([self.cfg.sbx_bin, "rm", name, "--force"], timeout=120)
             self._run(["rm", "-rf", self.workspace(name)], timeout=60)
         except (BenchHostError, subprocess.TimeoutExpired) as exc:
             print(f"warn: sandbox {name} teardown failed: {exc}")
+            return
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            try:
+                if not self.exists(name):
+                    return
+            except BenchHostError:
+                return  # listing unreadable: nothing more to assert
+            time.sleep(5)
+        print(f"warn: sandbox {name} still listed 60s after teardown "
+              f"(sbx async cleanup lagging; verify with 'sbx ls')")
 
     def exists(self, name: str) -> bool:
         proc = self._run([self.cfg.sbx_bin, "ls", "--json"], timeout=60)
@@ -336,11 +353,24 @@ class TartBenchHost(BenchHost):
 
     def rm(self, name: str) -> None:
         # Never raises: teardown must not mask the real verdict.
+        # s4 hardening: mirror the sbx tier's bounded settle wait — a
+        # green run must not leave a live VM behind its own exit.
         try:
             self._tart(["stop", name], timeout=120, strict=False)
             self._tart(["delete", name], timeout=120)
         except (BenchHostError, subprocess.TimeoutExpired) as exc:
             print(f"warn: tart VM {name} teardown failed: {exc}")
+            return
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            try:
+                if not self.exists(name):
+                    return
+            except BenchHostError:
+                return  # listing unreadable: nothing more to assert
+            time.sleep(5)
+        print(f"warn: tart VM {name} still listed 60s after teardown "
+              f"(verify with 'tart list' on the tart host)")
 
     def exists(self, name: str) -> bool:
         proc = self._tart(["list"], timeout=60)

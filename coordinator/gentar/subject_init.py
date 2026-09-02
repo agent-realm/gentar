@@ -54,7 +54,11 @@ jobs:
 # A subject name is one path segment: lowercase-with-dashes (it names
 # the dir under the subjects root). Two dashes in a row are reserved
 # elsewhere in gentar naming; keep them out of subject names too.
+# Length cap 64: a name this long already overflows some filesystems'
+# filename limits once "-install.toml" is appended (d3-abuser drill hit
+# a traceback at 301 chars) — refuse it as a usage error instead.
 _NAME_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+_NAME_MAX = 64
 
 
 def _usage_error(msg: str) -> int:
@@ -103,12 +107,23 @@ contains = "TODO"      # substring its output must carry
 """
 
 
-def emit(name: str, repo: str, out_dir: str = "") -> int:
-    """Print (or, with --dir, write) the scenario TOML + the trigger."""
+def emit(name: str, repo: str, out_dir: str = "", force: bool = False) -> int:
+    """Print (or, with --dir, write) the scenario TOML + the trigger.
+
+    s4 hardening (d3-abuser drill): --dir never silently overwrites —
+    an existing target file is a usage error unless --force. Every
+    filesystem failure (un-creatable path, name too long for the
+    filesystem) is a clean usage error naming the path, never a
+    traceback.
+    """
     if not _NAME_RE.match(name):
         return _usage_error(
             f"subject name {name!r} must be lowercase-with-dashes "
             f"(it names the dir under the subjects root)")
+    if len(name) > _NAME_MAX:
+        return _usage_error(
+            f"subject name is {len(name)} chars; max {_NAME_MAX} "
+            f"(filesystem limits bite once '-install.toml' is appended)")
     if not repo or any(ch.isspace() for ch in repo):
         return _usage_error(
             "--repo must be a non-empty checkout URL (no network is "
@@ -119,14 +134,29 @@ def emit(name: str, repo: str, out_dir: str = "") -> int:
 
     if out_dir:
         root = Path(out_dir)
-        root.mkdir(parents=True, exist_ok=True)
-        (root / toml_path).write_text(toml)
-        (root / "gentar.yml").write_text(TRIGGER_YML)
+        targets = [root / toml_path, root / "gentar.yml"]
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except (OSError, ValueError) as exc:
+            return _usage_error(f"--dir {out_dir!r} cannot be created: {exc}")
+        if not force:
+            existing = [str(t) for t in targets if t.exists()]
+            if existing:
+                return _usage_error(
+                    f"--dir already holds scaffold output: {', '.join(existing)} "
+                    f"— pass --force to overwrite")
+        try:
+            (root / toml_path).write_text(toml)
+            (root / "gentar.yml").write_text(TRIGGER_YML)
+        except (OSError, ValueError) as exc:
+            return _usage_error(f"cannot write into --dir {out_dir!r}: {exc}")
         print(f"# wrote {root / toml_path}")
         print(f"# wrote {root / 'gentar.yml'}")
         print(f"# -> carry the TOML in {repo} under gentar/ (or PR it "
               f"into coordinator/scenarios/); put gentar.yml at "
-              f".github/workflows/gentar.yml")
+              f".github/workflows/gentar.yml. To run it before it "
+              f"lands in a repo: GENTAR_SCENARIOS_DIR=<dir> docker "
+              f"compose run --rm coordinator run {name}-install")
         return 0
 
     print(f"# ==== 1/2 scenario: {toml_path} — carry in the subject repo "

@@ -51,7 +51,11 @@ def _resolve(name: str, cfg: Config) -> tuple:
                     report=None: run_oracle(
                 scenario, bench, run_id, spans, cfg, subject=subject,
                 report=report)), scenario
-    raise RunError(f"unknown scenario {name!r}; known: {', '.join(known_names(cfg))}")
+    raise RunError(
+        f"unknown scenario {name!r}; known: {', '.join(known_names(cfg))}. "
+        f"Searched scenarios dirs: {', '.join(map(str, cfg.scenarios_dirs))} "
+        f"(GENTAR_SCENARIOS_DIR adds one; `gentar subject init` scaffolds a "
+        f"new suite)")
 
 
 def _spent_so_far(spans: Spans) -> int:
@@ -120,6 +124,9 @@ def run(name: str, cfg: Config | None = None) -> int:
     # still carry TODO stubs is not a test yet — running it anyway could
     # only fake-green. Refuse with exit 2 (a usage error, never a red
     # bench) exactly like the budget and credential guards.
+    # s4 hardening (d2-tweaker/d3-abuser drills): an oracle scenario
+    # with zero verify probes "asserts nothing" — a vacuous 0/0 green.
+    # Same refusal, same exit 2, before any bench exists.
     if scenario and scenario.stubs:
         msg = (f"stub guard: scenario {name!r} has "
                f"{len(scenario.stubs)} unfilled verify stub(s) "
@@ -131,6 +138,24 @@ def run(name: str, cfg: Config | None = None) -> int:
         spans.emit(ARENA_SUBJECT, "", name, "stub.refuse", "error",
                    attrs={"stubs": ",".join(scenario.stubs)},
                    detail="run refused: unfilled verify stubs")
+        report = RunReport(
+            scenario=name,
+            run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+            subject=(scenario.subject or ARENA_SUBJECT),
+            reproduce=f"docker compose run --rm coordinator run {name}",
+            error=msg)
+        report.mark("refuse", 2)
+        _write_report(report, cfg)
+        return 2
+    if scenario and scenario.asserts_nothing:
+        msg = (f"assert guard: scenario {name!r} declares no verify probes "
+               f"and no driver — it asserts nothing (0/0 assertions is "
+               f"not a pass); add [[verify.files]] / [[verify.commands]] "
+               f"probes, then run; refusing before any bench exists")
+        print(f"Error: {msg}")
+        spans = Spans(cfg)
+        spans.emit(ARENA_SUBJECT, "", name, "assert.refuse", "error",
+                   detail="run refused: suite asserts nothing")
         report = RunReport(
             scenario=name,
             run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",

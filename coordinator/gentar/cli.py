@@ -27,11 +27,14 @@ def main() -> int:
     p_init.add_argument("--repo", required=True,
                         help="subject checkout URL (recorded, never fetched)")
     p_init.add_argument("--dir", help="write the two files here instead of stdout")
+    p_init.add_argument("--force", action="store_true",
+                        help="with --dir: overwrite existing scaffold output")
 
     args = parser.parse_args()
     if args.cmd == "subject" and args.subject_cmd == "init":
         # Pure generator: no config, no bench-host, no network.
-        return subject_init.emit(args.name, args.repo, args.dir or "")
+        return subject_init.emit(args.name, args.repo, args.dir or "",
+                                 force=args.force)
     try:
         if args.cmd == "ls":
             for name in known_names(Config()):
