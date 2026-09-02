@@ -1,7 +1,7 @@
 ---
 node: /s7-docs-truth/r1-prefix-docs-agree
 scenario: /s7-docs-truth
-status: draft
+status: frozen
 touches:
   - "worktree .env (untracked; project gentar-s7r1, ports 18190/14390 never bound)"
   - "docker compose build coordinator; docker compose run --rm --no-deps -e GENTAR_NAME_PREFIX=<case> coordinator ls"
