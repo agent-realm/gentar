@@ -1,7 +1,7 @@
 ---
 node: /s5-arena-coexist/r1-quickstart-default
 scenario: /s5-arena-coexist
-status: draft
+status: frozen
 touches:
   - this worktree's .env (created fresh via `cp .env.example .env`, gitignored, never edited — the defaults are the thing under test)
   - docker compose project derived from this worktree's directory basename (no COMPOSE_PROJECT_NAME set anywhere — the fresh-quickstart condition)
