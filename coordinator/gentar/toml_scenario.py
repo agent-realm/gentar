@@ -40,6 +40,14 @@ asserting nothing), and an oracle scenario with zero verify probes and
 no driver "asserts nothing" — it loads, but `run` refuses with exit 2
 before any bench exists, exactly like an unfilled stub. Malformed TOML
 is a ScenarioError carrying file + decoder message, never a traceback.
+
+s6 hardening (d1-tweaker/d2-abuser/d3-impatient drills): the exit-2
+net has no holes (recursion bombs and unreadable paths are config
+errors too), bench tier / credentials list / non-empty name / negative
+budget values are validated at load, a driver suite with zero turns
+asserts nothing (the s4 exemption was wholesale; `command = "true"`
+ran green through it), and duplicate scenario names in one dir name
+BOTH files instead of silently shadowing.
 """
 
 import tomllib
@@ -97,6 +105,17 @@ class TomlScenario:
                 doc = tomllib.load(fh)
         except tomllib.TOMLDecodeError as exc:
             raise ScenarioError(f"{path}: malformed TOML — {exc}") from exc
+        # s6 hardening (d2-abuser drill): the exit-2 net must have no
+        # holes. A recursion-bomb TOML (deeply nested arrays) raises
+        # RecursionError; anything unreadable (a directory named *.toml,
+        # permissions) raises OSError. Both are config errors here —
+        # never a traceback, never exit 1.
+        except RecursionError as exc:
+            raise ScenarioError(
+                f"{path}: TOML nests too deeply to parse — config error, "
+                f"not a crash") from exc
+        except OSError as exc:
+            raise ScenarioError(f"{path}: unreadable — {exc}") from exc
 
         sc = _table(doc, "scenario", path)
         self.name = sc.get("name", path.stem)
@@ -104,14 +123,37 @@ class TomlScenario:
         self.agent = sc.get("agent", "shell")
         self.template = sc.get("template")  # sbx template tag / tart VM name
         # Bench tier override: "tart" = macOS VM bench (default per config
-        # otherwise, i.e. the sbx tier).
+        # otherwise, i.e. the sbx tier). s6 hardening (d1-tweaker drill):
+        # validated AT LOAD — a typo'd tier must be a config error at `ls`
+        # time, not a traceback at `run` time.
         self.bench = sc.get("bench")
         for key, val in (("name", self.name), ("subject", self.subject),
                          ("agent", self.agent), ("template", self.template),
                          ("bench", self.bench)):
             if val is not None and not isinstance(val, str):
                 raise ScenarioError(f"{path}: scenario.{key} must be a string")
-        self.credentials = list(sc.get("credentials", []))
+        # s6 hardening (d1-tweaker drill): an empty name registers as a
+        # ghost — blank line in `ls`, empty entry in known lists, runnable
+        # by `run ""`. Every other string field demands non-empty; so does
+        # the name.
+        if self.name is not None and not self.name.strip():
+            raise ScenarioError(
+                f"{path}: scenario.name must be a non-empty string "
+                f"(empty names register as ghosts)")
+        if self.bench not in (None, "", "sbx", "tart"):
+            raise ScenarioError(
+                f"{path}: scenario.bench must be 'sbx' or 'tart', got "
+                f"{self.bench!r}")
+        # s6 hardening (d1-tweaker drill): a bare string here spells its
+        # letters as env var names ("A, N, T, …") — refuse the wrong TYPE
+        # at load, naming the file and the key.
+        raw_credentials = sc.get("credentials", [])
+        if not isinstance(raw_credentials, list):
+            raise ScenarioError(
+                f"{path}: scenario.credentials must be a LIST of env var "
+                f"names, e.g. credentials = [\"ANTHROPIC_API_KEY\"] "
+                f"(got {type(raw_credentials).__name__})")
+        self.credentials = list(raw_credentials)
         for i, c in enumerate(self.credentials):
             if not isinstance(c, str) or not c.strip():
                 raise ScenarioError(
@@ -155,11 +197,17 @@ class TomlScenario:
         self.turns = list(turns)
 
         # Spend ceiling in "spend units" (tokens today). 0 = unbudgeted.
+        # s6 hardening (d2-abuser drill): negatives are a config error —
+        # a negative ceiling or negative spend is arithmetic vandalism,
+        # not a budget.
         budget = _table(doc, "budget", path)
         for key in ("tokens", "simulate_spend"):
             val = budget.get(key, 0)
             if not isinstance(val, int) or isinstance(val, bool):
                 raise ScenarioError(f"{path}: [budget].{key} must be an integer")
+            if val < 0:
+                raise ScenarioError(
+                    f"{path}: [budget].{key} must be >= 0, got {val}")
         self.budget_tokens = int(budget.get("tokens", 0) or 0)
         # Simulated spend for no-LLM runs exercising the budget guard:
         # after a passing run this many units are recorded as burned.
@@ -194,12 +242,18 @@ class TomlScenario:
 
         # Asserts-nothing: an oracle suite with zero verify probes and
         # no driver has nothing to check — running it could only print a
-        # vacuous "0/0 assertions passed". Driver suites are exempt
-        # (the driver's own outcome is the verdict). Loads fine; the
+        # vacuous "0/0 assertions passed". s6 hardening (d1-tweaker +
+        # d2-abuser drills): a DRIVER suite with zero turns and zero
+        # verify probes asserts nothing either — the s4 exemption was
+        # wholesale ("driver's outcome is the verdict"), but a driver
+        # with no turns HAS no outcome; `command = "true"` ran green
+        # through that door. The verdict evidence is turns or probes;
+        # zero of both is the same vacuous green. Loads fine; the
         # run-time guard in coordinator.run refuses it before any bench
         # exists, exactly like an unfilled stub.
         self.asserts_nothing: bool = (
-            not self.files and not self.commands and not self.driver_command)
+            not self.files and not self.commands
+            and not (self.driver_command and self.turns))
 
     def describe(self) -> str:
         parts = [f"subject={self.subject or '-'}", f"agent={self.agent}",
@@ -208,8 +262,21 @@ class TomlScenario:
 
 
 def load_dir(scenarios_dir: str | Path) -> dict[str, TomlScenario]:
+    """Load every *.toml in a scenarios dir. s6 hardening (d1-tweaker
+    drill): a directory named *.toml is a config error (not an
+    IsADirectory traceback), and two files declaring the same scenario
+    name in one dir is a config error naming BOTH files — one silently
+    winning over the other is a shadowing bug, not a feature."""
     out: dict[str, TomlScenario] = {}
+    seen: dict[str, Path] = {}
     for path in sorted(Path(scenarios_dir).glob("*.toml")):
+        if path.is_dir():
+            raise ScenarioError(f"{path}: is a directory, not a scenario file")
         scenario = TomlScenario(path)
+        if scenario.name in seen:
+            raise ScenarioError(
+                f"{path}: duplicate scenario name {scenario.name!r} "
+                f"(also declared by {seen[scenario.name]})")
+        seen[scenario.name] = path
         out[scenario.name] = scenario
     return out

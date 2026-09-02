@@ -39,9 +39,41 @@ def _write_report(report: RunReport, cfg: Config) -> None:
         print(f"warn: report write failed (non-fatal): {exc}")
 
 
+def _searched_dirs(cfg: Config) -> str:
+    """One line per scenarios dir with its state — s6 hardening
+    (d3-impatient drill): 'missing', 'empty', or 'N suites' tells the
+    eleven-minute user whether their GENTAR_SCENARIOS_DIR/mount is even
+    visible, instead of a bare dir list that can't distinguish an
+    unmounted path from an unseen suite."""
+    parts = []
+    for d in cfg.scenarios_dirs:
+        try:
+            n = len(load_dir(d))
+        except Exception:
+            state = "unreadable"
+        else:
+            state = "empty" if n == 0 else f"{n} suites"
+        parts.append(f"{d} ({state})" if _dir_exists(d) else f"{d} (missing)")
+    return ", ".join(parts)
+
+
+def _dir_exists(d: str) -> bool:
+    from pathlib import Path
+    return Path(d).is_dir()
+
+
 def _resolve(name: str, cfg: Config) -> tuple:
     """-> (callable(bench, run_id, spans) -> summary, TomlScenario | None)"""
     if name in REGISTRY:
+        # s6 hardening (d1-tweaker drill): a user TOML silently losing
+        # to a builtin of the same name is shadowing, not precedence —
+        # the collision is loud, and renaming is the fix.
+        for d in cfg.scenarios_dirs:
+            if name in load_dir(d):
+                raise RunError(
+                    f"scenario name {name!r} collides: builtin AND a suite "
+                    f"in {d} — rename one; the builtin wins silently "
+                    f"otherwise")
         return REGISTRY[name], None
     for d in cfg.scenarios_dirs:
         tomls = load_dir(d)
@@ -53,7 +85,7 @@ def _resolve(name: str, cfg: Config) -> tuple:
                 report=report)), scenario
     raise RunError(
         f"unknown scenario {name!r}; known: {', '.join(known_names(cfg))}. "
-        f"Searched scenarios dirs: {', '.join(map(str, cfg.scenarios_dirs))} "
+        f"Searched scenarios dirs: {_searched_dirs(cfg)} "
         f"(GENTAR_SCENARIOS_DIR adds one; `gentar subject init` scaffolds a "
         f"new suite)")
 
@@ -149,9 +181,10 @@ def run(name: str, cfg: Config | None = None) -> int:
         return 2
     if scenario and scenario.asserts_nothing:
         msg = (f"assert guard: scenario {name!r} declares no verify probes "
-               f"and no driver — it asserts nothing (0/0 assertions is "
-               f"not a pass); add [[verify.files]] / [[verify.commands]] "
-               f"probes, then run; refusing before any bench exists")
+               f"and no driven turns — it asserts nothing (0/0 assertions "
+               f"is not a pass); add [[verify.files]] / [[verify.commands]] "
+               f"probes or driver turns, then run; refusing before any "
+               f"bench exists")
         print(f"Error: {msg}")
         spans = Spans(cfg)
         spans.emit(ARENA_SUBJECT, "", name, "assert.refuse", "error",
@@ -167,16 +200,26 @@ def run(name: str, cfg: Config | None = None) -> int:
         return 2
 
     # -- budget guard: refuse before any bench exists ---------------------
+    # s6 hardening (d2-abuser drill): the s4 guard counted declared
+    # [budget].tokens only — a suite declaring tokens = 0 with
+    # simulate_spend = 500 against a cap of 100 ran green and recorded
+    # 500 units OVER the cap. A run's burn is whichever spend it will
+    # actually record: the declared ceiling or the simulated spend,
+    # whichever is larger.
+    declared_spend = 0
+    if scenario:
+        declared_spend = max(scenario.budget_tokens,
+                             scenario.simulated_spend)
     budget_tokens = scenario.budget_tokens if scenario else 0
-    if cfg.budget_cap and budget_tokens:
+    if cfg.budget_cap and declared_spend:
         spans = Spans(cfg)
         already = _spent_so_far(spans)
-        if already + budget_tokens > cfg.budget_cap:
-            msg = (f"budget guard: run would spend {budget_tokens} units, "
+        if already + declared_spend > cfg.budget_cap:
+            msg = (f"budget guard: run would spend {declared_spend} units, "
                    f"{already} already burned, cap {cfg.budget_cap}")
             print(f"Error: {msg}")
             spans.emit(ARENA_SUBJECT, "", name, "budget.refuse", "error",
-                       attrs={"tokens": str(budget_tokens),
+                       attrs={"tokens": str(declared_spend),
                               "already_burned": str(already),
                               "cap": str(cfg.budget_cap)},
                        detail="run refused by budget guard")

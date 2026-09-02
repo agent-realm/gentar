@@ -124,7 +124,11 @@ and refuses to run a suite whose verify stubs are unfilled):
 1. **State your scenarios as decisions, not steps.** A TOML per suite:
    what to install, what reality to assert. Either carry them in your
    repo under `gentar/`, or PR them into `coordinator/scenarios/`
-   (how every current subject suite lives).
+   (how every current subject suite lives). Honesty limit: the arena
+   checks each probe against reality, but cannot force a probe to be
+   *about* your subject — a probe the bench satisfies on its own
+   (`echo ok` asserting `"ok"`) passes vacuously. Write probes that
+   fail if the install did not happen.
 2. **Add the ~10-line trigger job** to your repo (`.github/workflows/gentar.yml`)
    that fires `workflow_dispatch` on `agent-realm/gentar` with the
    scenario name and your PR head sha as `subject_ref` — the arena then

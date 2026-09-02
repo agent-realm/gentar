@@ -79,6 +79,10 @@ def scenario_toml(name: str, repo: str) -> str:
 # Any probe still carrying the stub value "TODO" makes
 # `coordinator run {suite}` refuse with exit 2 before any bench
 # exists. Fill the stubs, then run. Verdicts come from reality.
+# Honesty limit (yours, not the arena's): each probe is checked against
+# reality, but the arena cannot force a probe to be ABOUT your subject —
+# `echo ok` asserting "ok" passes. Write probes that fail if your
+# install did not happen, not probes the bench satisfies on its own.
 
 [scenario]
 name = "{suite}"
@@ -145,6 +149,16 @@ def emit(name: str, repo: str, out_dir: str = "", force: bool = False) -> int:
                 return _usage_error(
                     f"--dir already holds scaffold output: {', '.join(existing)} "
                     f"— pass --force to overwrite")
+        # s6 hardening (d2-abuser drill): --force must not follow a
+        # pre-planted symlink out of the declared dir — writes are
+        # bounded to the two real paths or they refuse.
+        linked = [str(t) for t in targets if t.is_symlink()]
+        if linked:
+            return _usage_error(
+                f"--dir target is a symlink: {', '.join(linked)} — refusing "
+                f"to write through it (bytes would land outside the "
+                f"declared dir); replace the symlink with a real file "
+                f"first")
         try:
             (root / toml_path).write_text(toml)
             (root / "gentar.yml").write_text(TRIGGER_YML)
@@ -154,9 +168,13 @@ def emit(name: str, repo: str, out_dir: str = "", force: bool = False) -> int:
         print(f"# wrote {root / 'gentar.yml'}")
         print(f"# -> carry the TOML in {repo} under gentar/ (or PR it "
               f"into coordinator/scenarios/); put gentar.yml at "
-              f".github/workflows/gentar.yml. To run it before it "
-              f"lands in a repo: GENTAR_SCENARIOS_DIR=<dir> docker "
-              f"compose run --rm coordinator run {name}-install")
+              f".github/workflows/gentar.yml. To run it before it lands "
+              f"in a repo (mount the dir, then point the coordinator at "
+              f"the mount — a bare GENTAR_SCENARIOS_DIR=x shell prefix "
+              f"never reaches the container, and inside compose --dir "
+              f"sees the CONTAINER filesystem):")
+        print(f"# docker compose run --rm -v \"$PWD/{name}-scaffold\":/extra:ro "
+              f"-e GENTAR_SCENARIOS_DIR=/extra coordinator run {name}-install")
         return 0
 
     print(f"# ==== 1/2 scenario: {toml_path} — carry in the subject repo "
