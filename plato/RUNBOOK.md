@@ -1,7 +1,7 @@
 ---
 node: /s5-arena-coexist/r2-prefix-identity
 scenario: /s5-arena-coexist
-status: draft
+status: frozen
 touches:
   - this worktree's .env (created fresh, then appended: COMPOSE_PROJECT_NAME=plato-s5-arm, GENTAR_CLICKHOUSE_HOST_PORT=18150, GENTAR_OTELCOL_HOST_PORT=14350, GENTAR_NAME_PREFIX=gentar-s5-id)
   - docker compose project plato-s5-arm (host publishes 127.0.0.1:18150 / 127.0.0.1:14350, own ClickHouse volume)
