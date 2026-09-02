@@ -1,6 +1,6 @@
 ---
 node: /s4-scaffold-hardened
-status: approved
+status: blessed
 snapshot: 1
 snapshot-commit: 9f2ee5a
 seeds: [gentar-repo, scenario-toml]
