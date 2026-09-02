@@ -33,7 +33,9 @@ STATUS_DARK_TEXT = {"pass": "#ffffff", "running": "#141400", "fail": "#ffffff", 
 
 
 def resolve_ch():
-    url = os.environ.get("GENTAR_CLICKHOUSE_URL", "http://localhost:8123")
+    # Host-side default follows the compose publish default (18123) —
+    # the arena is reached from the host on that port, not 8123.
+    url = os.environ.get("GENTAR_CLICKHOUSE_URL", "http://localhost:18123")
     user = os.environ.get("GENTAR_CLICKHOUSE_USER", "gentar")
     pw = os.environ.get("GENTAR_CLICKHOUSE_PASSWORD", "gentar")
     db = os.environ.get("GENTAR_CLICKHOUSE_DB", "gentar")

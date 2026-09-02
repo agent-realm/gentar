@@ -23,16 +23,25 @@ services:
     ports:
       # Dashboard/debug access from the host only; the suites themselves
       # reach ClickHouse over the compose network (GENTAR_CLICKHOUSE_URL).
-      # Two arenas on one Docker host (e.g. gentar's own CI gate and a
-      # subject repo's own-arena) collide on 8123 — override with
-      # GENTAR_CLICKHOUSE_HOST_PORT instead of editing this file.
-      - "127.0.0.1:${GENTAR_CLICKHOUSE_HOST_PORT:-8123}:8123"
+      # Host default is 18123, NOT 8123: canonical service ports are the
+      # occupied ones (a native clickhouse-server install listens on 8123
+      # already), and on some Docker hosts (OrbStack) a publish that loses
+      # the race to a native listener fails SILENTLY — the port answers
+      # the foreign server while the quickstart stays green (its SQL goes
+      # via compose exec). A gentar-specific default kills the class;
+      # override with GENTAR_CLICKHOUSE_HOST_PORT instead of editing this
+      # file (two arenas on one Docker host need distinct values).
+      - "127.0.0.1:${GENTAR_CLICKHOUSE_HOST_PORT:-18123}:8123"
 
   otelcol:
-    # OTLP receiver for agent self-report (phase 5): benches POST their
-    # spans here; the collector exports them into ClickHouse where one
-    # SQL joins them with harness spans on gentar.run_id. Published on
-    # all interfaces — benches live on the bench-host, not this network.
+    # OTLP receiver for agent self-report (phase 5): agents drop OTLP-JSON
+    # in the bench workspace and the COORDINATOR relays it here over the
+    # compose network; the collector exports into ClickHouse where one
+    # SQL joins agent self-report with harness spans on gentar.run_id.
+    # Host publish is loopback-only manual debugging: benches never POST
+    # to it (no inbound route to the arena), and an all-interfaces 4318
+    # both exposed the collector to the LAN and shadowed unrelated host
+    # OTLP receivers.
     image: otel/opentelemetry-collector-contrib:0.159.0
     command: ["--config=/etc/otelcol/config.yaml"]
     environment:
@@ -45,10 +54,11 @@ services:
     volumes:
       - ./otelcol/config.yaml:/etc/otelcol/config.yaml:ro
     ports:
-      # Same busy-host concern as ClickHouse above: the suites reach
-      # otelcol over the compose network (drop-file relay), the host
-      # publish is for external POSTs — override rather than edit.
-      - "${GENTAR_OTELCOL_HOST_PORT:-4318}:4318"
+      # Loopback-only, 14318 not 4318 (same reasoning as ClickHouse
+      # above: canonical OTLP port is the occupied one). The suites reach
+      # otelcol over the compose network (drop-file relay); this publish
+      # is manual debugging from the host — override rather than edit.
+      - "127.0.0.1:${GENTAR_OTELCOL_HOST_PORT:-14318}:4318"
 
   coordinator:
     build: ./coordinator

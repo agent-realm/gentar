@@ -18,11 +18,18 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.cmd == "ls":
-        for name in known_names(Config()):
+        try:
+            names = known_names(Config())
+        except ValueError as exc:
+            print(f"error: {exc}")
+            return 2
+        for name in names:
             print(name)
         return 0
     try:
         return run(args.scenario)
-    except RunError as exc:
+    except (RunError, ValueError) as exc:
+        # ValueError = off-shape config value (e.g. GENTAR_NAME_PREFIX) —
+        # a usage error (2), never a traceback.
         print(f"error: {exc}")
         return 2

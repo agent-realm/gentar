@@ -209,12 +209,43 @@ docker compose exec clickhouse clickhouse-client \
 Defaults in `.env.example` point at the current bench-host — the VM on
 arf (`10.10.10.52`, VM 142 `gentar-bench-host`) the runner lives on.
 
-Busy Docker host? The stack publishes `8123` (ClickHouse) and `4318`
-(otelcol) on the host; if something else already listens there, set
-`GENTAR_CLICKHOUSE_HOST_PORT` / `GENTAR_OTELCOL_HOST_PORT` in `.env`
-before the first `docker compose run` — the suites themselves never
-need those host ports (they talk over the compose network), but compose
-refuses to start while the bind fails.
+Busy Docker host? The host publishes are loopback-only and default to
+`18123` (ClickHouse) and `14318` (otelcol) — deliberately off the
+canonical `8123`/`4318`, which are the ports something else on the
+machine already owns (a native clickhouse-server, another OTLP
+receiver). On some Docker hosts (OrbStack) losing that race fails
+*silently*: the published port answers the foreign server while runs
+stay green, because the suites themselves never use host ports (they
+talk over the compose network). If even `18123`/`14318` are taken, set
+`GENTAR_CLICKHOUSE_HOST_PORT` / `GENTAR_OTELCOL_HOST_PORT` in `.env`.
+
+### Two arenas, one machine or one bench-host
+
+An arena's identity is two knobs, both set in `.env` (never on the
+shell — see the scoping rule below):
+
+- **`COMPOSE_PROJECT_NAME`** — identity on the Docker host. Two
+  checkouts that end up with the same project name (same dir basename,
+  or a shared export) are *one merged arena*: the second silently
+  attaches to the first's containers and both write spans into one
+  ClickHouse volume, with no error anywhere. Give every checkout a
+  distinct name and distinct port knobs.
+- **`GENTAR_NAME_PREFIX`** — identity on a shared bench-host. It
+  prefixes every run_id, so sandbox names, workspace dirs, span
+  run_ids, and report filenames all carry it: an operator reading
+  `sbx ls` can tell whose sandbox is whose without out-of-band
+  knowledge. Lowercase-with-dashes, 24 chars max; anything else is a
+  usage error (exit 2) at startup.
+
+**Scoping rule: one arena = one `.env` — everything in it, nothing on
+the shell.** The port knobs are `.env`-file-scoped while a shell
+`COMPOSE_PROJECT_NAME` export is invocation-scoped; mixing the two
+means a later compose call without the exports silently reverts to the
+file's ports, recreates your containers against them, and dies on a
+bind error naming neither project nor file — after destroying the
+running ones. `--env-file` is no escape either: it drives port
+*interpolation* only, while the coordinator container still reads the
+literal `.env`.
 
 ### macOS tier (tart)
 

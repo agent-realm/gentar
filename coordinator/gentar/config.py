@@ -3,6 +3,23 @@ default matching today's setup (VM 142, gentar-bench-host on arf) — same
 policy as gauntlet's target.env."""
 
 import os
+import re
+
+# Arena identity prefixes (GENTAR_NAME_PREFIX): the value lands in
+# sandbox names, bench-host workspace paths, span run_ids, and report
+# filenames — one path/name segment, so same shape rule as a subject
+# name (lowercase-with-dashes, no double dash) plus a length cap.
+_PREFIX_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+_PREFIX_MAX = 24
+
+
+def _check_prefix(prefix: str) -> None:
+    if len(prefix) > _PREFIX_MAX or not _PREFIX_RE.match(prefix):
+        raise ValueError(
+            f"GENTAR_NAME_PREFIX {prefix!r} must be lowercase-with-dashes "
+            f"(letters/digits/dashes, single dashes only), max "
+            f"{_PREFIX_MAX} chars — it names sandboxes, workspace dirs, "
+            f"run ids, and report files")
 
 
 def _opt(name: str, default: str = "") -> str:
@@ -46,7 +63,13 @@ class Config:
         self.clickhouse_db = _opt("GENTAR_CLICKHOUSE_DB", "gentar")
 
         # Sandbox name prefix; run id is appended by the coordinator.
+        # s5 hardening (d3-neighbor drill): the prefix is the arena's
+        # identity on a shared bench-host — it lands in sandbox names,
+        # workspace paths, span run_ids, and report filenames, so an
+        # off-shape value is refused here (usage error, exit 2), not
+        # discovered as a weird filename halfway through a run.
         self.name_prefix = _opt("GENTAR_NAME_PREFIX", "gentar")
+        _check_prefix(self.name_prefix)
 
         # Subjects root: mounted read-only into the coordinator container
         # (compose volume). A scenario's `subject` names a dir under it.
