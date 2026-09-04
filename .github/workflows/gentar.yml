@@ -86,6 +86,10 @@ jobs:
       COMPOSE_PROJECT_NAME: gentar-ci
       SCENARIO: ${{ matrix.scenario }}
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
+      # VM 142 also hosts the claude-playbooks arena, whose otelcol
+      # publishes the default 4318 — pin ours aside (same rule as the
+      # ClickHouse 8123/8126 split).
+      GENTAR_OTLP_HOST_PORT: "4319"
     steps:
       - uses: actions/checkout@v4
 
@@ -132,6 +136,7 @@ jobs:
       COMPOSE_PROJECT_NAME: gentar-nightly
       GENTAR_BUDGET_CAP: "50000"
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
+      GENTAR_OTLP_HOST_PORT: "4319"
       # Tier-1 credential for the agent suite; empty when the secret
       # is absent — agent-smoke then skips with a notice (or refuses
       # honestly if dispatched directly).
@@ -210,6 +215,7 @@ jobs:
     env:
       COMPOSE_PROJECT_NAME: gentar-dispatch
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
+      GENTAR_OTLP_HOST_PORT: "4319"
       # Pass-through for credential-declaring scenarios (agent-smoke):
       # -e forwards it into the coordinator; absent → honest refuse 2.
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

@@ -1,0 +1,23 @@
+# First osb-tier scenario: proves the OpenSandbox bench end-to-end —
+# container create through the opensandbox-server, exec with a real exit
+# code via the SDK, and the workspace push (tar through execd's file
+# API). No subject: the substrate is the thing under test (docker-tier
+# twin of bench-template-verify / smoke-macos). Runs against whatever
+# image the scenario names; python:3.12-slim carries bash and python3
+# and nothing agent-shaped — that layer comes with a gentar osb image
+# once a real suite needs one.
+[scenario]
+name = "smoke-osb"
+bench = "osb"
+template = "python:3.12-slim"
+
+[oracle]
+steps = ["uname -s"]
+
+[[verify.commands]]
+command = "uname -sm"
+contains = "Linux"
+
+[[verify.commands]]
+command = "python3 --version"
+contains = "Python 3.12"
