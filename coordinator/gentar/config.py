@@ -39,6 +39,21 @@ class Config:
         # wrappers, so a bare "tart" is not found over ssh.
         self.tart_bin = _opt("GENTAR_TART_BIN", "/opt/homebrew/bin/tart")
 
+        # osb tier: the opensandbox-server (docker runtime) driving the
+        # benches. Runs wherever the sandbox containers should live; the
+        # coordinator reaches it over HTTP. A scenario's `bench = "osb"`
+        # overrides per-run. Templates are image refs on that server's
+        # docker daemon; api_key only if the server enforces one.
+        self.osb_server = _opt("GENTAR_OSB_SERVER", "http://127.0.0.1:8080")
+        self.osb_api_key = _opt("GENTAR_OSB_API_KEY")
+        self.osb_template = _opt("GENTAR_OSB_TEMPLATE", "python:3.12-slim")
+        # Route ALL sandbox traffic (exec/files/pty) through the server's
+        # execd proxy instead of per-sandbox host ports. Needed when the
+        # coordinator can't reach sandbox ports directly (coordinator
+        # container + sandboxes on the server's docker host — the server
+        # hands out its own host-relative endpoints either way).
+        self.osb_server_proxy = _opt("GENTAR_OSB_SERVER_PROXY", "") == "1"
+
         # Telemetry. Best-effort: telemetry never fails a test.
         self.clickhouse_url = _opt("GENTAR_CLICKHOUSE_URL", "http://clickhouse:8123")
         self.clickhouse_user = _opt("GENTAR_CLICKHOUSE_USER", "gentar")

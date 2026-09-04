@@ -47,9 +47,9 @@ class TomlScenario:
         self.name = sc.get("name", path.stem)
         self.subject = sc.get("subject")
         self.agent = sc.get("agent", "shell")
-        self.template = sc.get("template")  # sbx template tag / tart VM name
-        # Bench tier override: "tart" = macOS VM bench (default per config
-        # otherwise, i.e. the sbx tier).
+        self.template = sc.get("template")  # sbx template tag / tart VM name / image ref
+        # Bench tier override: "tart" = macOS VM bench, "osb" = OpenSandbox
+        # container (default per config otherwise, i.e. the sbx tier).
         self.bench = sc.get("bench")
         self.credentials = list(sc.get("credentials", []))
         for i, c in enumerate(self.credentials):

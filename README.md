@@ -41,13 +41,14 @@ an internal network.
 | Piece | Role |
 |---|---|
 | `coordinator` | engine: bench lifecycle, scheduling, driver transport, assertions, budget guard |
-| `bench ×N` | **sbx sandboxes** (Docker Sandboxes) spawned by the coordinator on a bench-host — per-run microVM, own Docker daemon each; macOS tier: tart VMs |
+| `bench ×N` | **sbx sandboxes** (Docker Sandboxes) spawned by the coordinator on a bench-host — per-run microVM, own Docker daemon each; macOS tier: tart VMs; container tier: OpenSandbox |
 | `telemetry` | ClickHouse + otelcol-contrib; spans schema ported from agent-gauntlet |
 | `dashboard` | stateless verdicts + span drill-down |
 
 Benches are not compose services. The compose file carries coordinator +
 telemetry (+ dashboard); the coordinator creates and destroys each bench
-over SSH (`sbx create/exec/rm` on Linux, `ssh` for tart macOS VMs).
+over SSH (`sbx create/exec/rm` on Linux, `ssh` for tart macOS VMs) or
+through the OpenSandbox server's API (container tier).
 
 ## Test taxonomy (10 dimensions)
 
@@ -86,7 +87,7 @@ contract.
 
 ## Scenario inventory
 
-16 suites today — every verdict from reality; one (`agent-smoke`)
+17 suites today — every verdict from reality; one (`agent-smoke`)
 puts a real claude-code in the loop, behind a declared credential.
 (`coordinator ls` also lists `smoke-fail`, the built-in sabotage probe
 that proves failure detection itself.)
@@ -95,6 +96,7 @@ that proves failure detection itself.)
 |---|---|---|
 | `smoke` | — | bench lifecycle: create → exec `uname -a` → span → destroy |
 | `smoke-macos` | — | tart tier substrate proof: Darwin arm64 + pinned CLI on a Mac bench (not in the CI gate; see macOS tier) |
+| `smoke-osb` | — | osb tier substrate proof: Linux container bench on the OpenSandbox server (not in the CI gate; see osb tier) |
 | `bench-template-verify` | — | benches from `gentar-bench-v1` carry the pinned claude-code |
 | `otlp-selfreport` | — | agent self-report: OTLP drop-file relay joins harness spans in one SQL |
 | `budget-sim` | — | budget guard refuses over-cap runs (exit 2) |
@@ -182,6 +184,15 @@ all merged to main and gate-verified per PR:
   darwin/arm64. Not part of the CI gate — the gate runner is Linux
   with no route to the Mac; run these where the Mac is reachable (see
   the macOS tier section below).
+- **Container tier (OpenSandbox)** — a third BenchHost implementation:
+  benches are plain Linux containers (any image, e.g. `python:3.12-slim`)
+  driven through an [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox)
+  server — no SSH involved; exec, file push, and pty all go through the
+  server's per-sandbox execd daemon. The server ships as an optional
+  compose profile (`--profile osb`, config in `osb/server.toml`); a
+  scenario opts in with `bench = "osb"`, and `smoke-osb` is the substrate
+  proof. Not part of the CI gate — the runner hosts no osb server (see
+  the osb tier section below).
 
 **Not built yet** (deliberate, not forgotten): real-agent runs —
 claude-code driven by the pty driver inside a bench. The wiring exists
@@ -237,3 +248,31 @@ stop`); see the session log 2026-08-28 for the exact bring-up.
 Subject suites on the tier (`claude-playbooks-install-macos`) need the
 subject mounted at the coordinator's subjects root, e.g. add
 `-v <path-to-kommander-playbook>:/subjects/kommander-playbook:ro`.
+
+### osb tier (OpenSandbox)
+
+The osb tier runs benches as plain Linux containers under an
+[OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) server:
+`create` maps to a sandbox (tagged `gentar.name` in its metadata), `exec`
+to the execd command API (real exit codes, per-run env), `push_dir` to a
+tarball through the files API, and the pty driver reaches execd's PTY
+WebSocket through a small local bridge (`coordinator/gentar/osb_pty_bridge.py`).
+No SSH anywhere — the coordinator talks HTTP/WebSocket to the server,
+which spawns sibling containers on its Docker host.
+
+The server itself is an optional compose profile (official
+`opensandbox/server` image, config in `osb/server.toml`, state in the
+`osb-data` volume):
+
+```bash
+docker compose --profile osb up -d osb-server
+docker compose --profile osb run --rm \
+  -e GENTAR_BENCH_KIND=osb -e GENTAR_OSB_SERVER=http://osb-server:8080 \
+  coordinator run smoke-osb   # exit code = verdict
+```
+
+Any scenario runs on the tier by env flip (`GENTAR_BENCH_KIND=osb`) or
+per-scenario `bench = "osb"`; templates are image refs on the server's
+Docker daemon (`GENTAR_OSB_TEMPLATE`, default `python:3.12-slim`). An
+external server works too — point `GENTAR_OSB_SERVER` at it (see
+`.env.example`). Not in the CI gate: the runner hosts no osb server.

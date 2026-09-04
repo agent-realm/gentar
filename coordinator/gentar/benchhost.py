@@ -1,5 +1,5 @@
-"""Bench hosts — where scenarios run. Two implementations behind one
-interface (decision of record, gentar TASK.md 2026-08-18):
+"""Bench hosts — where scenarios run. Three implementations behind one
+interface (decisions of record, gentar TASK.md 2026-08-18, 2026-09-04):
 
 - ``SbxBenchHost``: sbx sandboxes on a Linux bench-host (the default
   tier). The coordinator drives sbx over ssh; each bench is a per-run
@@ -9,6 +9,13 @@ interface (decision of record, gentar TASK.md 2026-08-18):
   commands over ssh into the guest — jumping through the tart host,
   because the guest's vmnet subnet is only routed on the Mac itself.
   The tart VM *is* the bench; nothing nests inside it.
+- ``OpenSandboxBenchHost``: OpenSandbox containers behind an
+  opensandbox-server (the docker-runtime lifecycle server). Fourth wall
+  between arena and substrate: the server owns container lifecycle and
+  its execd daemon owns exec/files/pty, so this host is the python SDK
+  as transport (the osb CLI drops real exit codes — `exit 7` reads 1)
+  and gentar's osb_pty_bridge as the pty transport (execd's /pty
+  WebSocket behind its per-sandbox host port).
 
 Interface every runner (oracle, scripted, pty driver) codes against:
 create / exec / push_dir / rm / exists / workspace / template_digest /
@@ -19,6 +26,11 @@ import json
 import os
 import shlex
 import subprocess
+import sys
+import tempfile
+from datetime import timedelta
+from pathlib import Path
+from urllib.parse import urlparse
 
 from gentar.config import Config
 
@@ -360,10 +372,142 @@ class TartBenchHost(BenchHost):
         return self._vm_ssh(sandbox) + ["-tt", remote]
 
 
+class OpenSandboxBenchHost(BenchHost):
+    """OpenSandbox containers behind an opensandbox-server (docker
+    runtime). The server runs wherever the sandbox containers should run
+    (a lab VM, the CI host, or a compose sidecar); this host talks to it
+    with the python SDK. A bench is one container image — a scenario's
+    ``template`` is an image ref; sandbox identity rides on the
+    ``gentar.name`` metadata key (server ids are UUIDs).
+
+    execd (the in-sandbox daemon) serves everything: commands (with real
+    exit codes and env injection), files, and the PTY WebSocket that
+    osb_pty_bridge attaches to from the pty driver."""
+
+    push_before_create = False   # workspace lives inside the sandbox
+
+    def __init__(self, cfg: Config) -> None:
+        super().__init__(cfg)
+        self._sandboxes: dict[str, object] = {}
+        # Lazy import: the osb tier is opt-in, and the SDK import cost
+        # should not land on sbx/tart runs.
+        from opensandbox.config import ConnectionConfigSync
+        url = urlparse(cfg.osb_server)
+        kwargs = {"domain": url.netloc,
+                  "protocol": "https" if url.scheme == "https" else "http",
+                  "use_server_proxy": cfg.osb_server_proxy}
+        if cfg.osb_api_key:
+            kwargs["api_key"] = cfg.osb_api_key
+        self._conn = ConnectionConfigSync(**kwargs)
+
+    def _get(self, name: str):
+        if name not in self._sandboxes:
+            raise BenchHostError(f"no live osb sandbox named {name!r} "
+                                 "— create() it first")
+        return self._sandboxes[name]
+
+    # -- interface -----------------------------------------------------------
+
+    def workspace(self, name: str) -> str:
+        return f"/root/workspaces/{name}"
+
+    def create(self, name: str, agent: str = "shell",
+               template: str | None = None) -> None:
+        from opensandbox.sync import SandboxSync
+        try:
+            sandbox = SandboxSync.create(
+                template or self.cfg.osb_template,
+                timeout=timedelta(hours=4),
+                metadata={"gentar.name": name},
+                connection_config=self._conn)
+        except Exception as exc:
+            raise BenchHostError(f"osb create {name!r} failed: {exc}") from exc
+        self._sandboxes[name] = sandbox
+        # execd validates that a run's working directory exists — unlike
+        # ssh tiers, which tolerate a missing cd target. Subjectless
+        # scenarios never push, so the workspace is made here, always.
+        execution = sandbox.commands.run(
+            f"mkdir -p {shlex.quote(self.workspace(name))}")
+        if execution.exit_code not in (0, None):
+            raise BenchHostError(
+                f"osb workspace mkdir failed rc={execution.exit_code}")
+
+    def exec(self, name: str, command: str, timeout: int = 300,
+             env: dict[str, str] | None = None) -> tuple[int, str]:
+        from opensandbox.models.execd import RunCommandOpts
+        merged = {"WORKSPACE_DIR": self.workspace(name), **(env or {})}
+        execution = self._get(name).commands.run(
+            command,
+            opts=RunCommandOpts(
+                working_directory=self.workspace(name),
+                timeout=timedelta(seconds=timeout),
+                envs=merged))
+        rc = execution.exit_code if execution.exit_code is not None else 1
+        return rc, execution.text
+
+    def push_dir(self, local_dir: str, remote_dir: str) -> None:
+        """Ship a local directory in as tar: execd's file API is
+        single-file, so pack locally, write the tarball, untar inside."""
+        sandbox = self._get(remote_dir.rstrip("/").split("/")[-1])
+        payload = f"{remote_dir}/.gentar-payload.tgz"
+        with tempfile.NamedTemporaryFile(suffix=".tgz") as tmp:
+            proc = subprocess.run(
+                ["tar", "-C", local_dir, "-czf", tmp.name, "."],
+                capture_output=True,
+                env={**os.environ, "COPYFILE_DISABLE": "1"})
+            if proc.returncode != 0:
+                raise BenchHostError(f"local tar of {local_dir} failed")
+            with open(tmp.name, "rb") as data:
+                sandbox.files.write_file(payload, data)
+        rc, _ = self.exec(remote_dir.rstrip("/").split("/")[-1],
+                          f"mkdir -p {shlex.quote(remote_dir)} && "
+                          f"tar -xzf {shlex.quote(payload)} -C "
+                          f"{shlex.quote(remote_dir)} && "
+                          f"rm -f {shlex.quote(payload)}")
+        if rc != 0:
+            raise BenchHostError(f"untar into {remote_dir} failed rc={rc}")
+
+    def rm(self, name: str) -> None:
+        # Never raises: teardown must not mask the real verdict.
+        sandbox = self._sandboxes.pop(name, None)
+        if sandbox is None:
+            return
+        try:
+            sandbox.destroy()
+        except Exception as exc:
+            print(f"warn: osb sandbox {name} teardown failed: {exc}")
+
+    def exists(self, name: str) -> bool:
+        from opensandbox.models.sandboxes import SandboxFilter
+        from opensandbox.sync import SandboxManagerSync
+        manager = SandboxManagerSync.create(connection_config=self._conn)
+        infos = manager.list_sandbox_infos(
+            SandboxFilter(metadata={"gentar.name": name}))
+        return bool(infos.sandbox_infos)
+
+    def pty_spawn_args(self, sandbox: str, columns: int, lines: int,
+                       env: dict[str, str], command: str) -> list[str]:
+        endpoint = self._get(sandbox).get_endpoint(44772)
+        base = f"http://{endpoint.endpoint}"
+        merged = {"WORKSPACE_DIR": self.workspace(sandbox), **env}
+        # Same shape as the other tiers' remote command — the bridge sends
+        # it as the pty session's first line, then relays.
+        remote = " ".join([
+            "cd", self.workspace(sandbox), "&&", "env",
+            f"COLUMNS={columns}", f"LINES={lines}",
+            *([shlex.quote(f"{k}={v}") for k, v in merged.items()]),
+            "bash", "-c", _sq(command)])
+        bridge = str(Path(__file__).with_name("osb_pty_bridge.py"))
+        return [sys.executable, "-u", bridge, base, remote]
+
+
 def make_bench(cfg: Config, kind: str = "") -> BenchHost:
     kind = kind or cfg.bench_kind
     if kind == "sbx":
         return SbxBenchHost(cfg)
     if kind == "tart":
         return TartBenchHost(cfg)
-    raise BenchHostError(f"unknown bench kind {kind!r} (known: sbx, tart)")
+    if kind == "osb":
+        return OpenSandboxBenchHost(cfg)
+    raise BenchHostError(
+        f"unknown bench kind {kind!r} (known: sbx, tart, osb)")

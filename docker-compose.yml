@@ -93,9 +93,35 @@ services:
       - ./dashboard/out:/out
     command: [python, /dashboard/generate.py, --out, /out/dashboard.html]
 
+  # --profile osb: the opensandbox-server driving docker-runtime benches
+  # (the `bench = "osb"` tier). Sandboxes are sibling containers on this
+  # Docker host, spawned through the mounted docker.sock — NOT compose
+  # services, same as every other tier. activate: `docker compose --profile
+  # osb run --rm coordinator gentar run smoke-osb` with
+  # GENTAR_OSB_SERVER=http://osb-server:8080.
+  osb-server:
+    image: opensandbox/server:latest
+    profiles: ["osb"]
+    environment:
+      SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
+      OPENSANDBOX_INSECURE_SERVER: "YES"   # dev arena; set api_key for real
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - osb-data:/data
+    ports:
+      - "127.0.0.1:${GENTAR_OSB_HOST_PORT:-8180}:8080"
+    configs:
+      - source: osb-server-config
+        target: /etc/opensandbox/config.toml
+
+configs:
+  osb-server-config:
+    file: ./osb/server.toml
+
 secrets:
   bench_ssh_key:
     file: ${GENTAR_BENCH_KEY_FILE:-~/.ssh/id_ed25519}
 
 volumes:
   clickhouse:
+  osb-data:
