@@ -45,7 +45,12 @@ services:
     volumes:
       - ./otelcol/config.yaml:/etc/otelcol/config.yaml:ro
     ports:
-      - "4318:4318"
+      # Published on all interfaces — benches live on the bench-host, not
+      # this network. Two arenas on one Docker host (gentar's own gate and
+      # a subject repo's own-arena) collide on 4318 — override with
+      # GENTAR_OTLP_HOST_PORT instead of editing this file (same rule as
+      # the ClickHouse 8123 knob).
+      - "${GENTAR_OTLP_HOST_PORT:-4318}:4318"
 
   coordinator:
     build: ./coordinator
