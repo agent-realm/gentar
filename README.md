@@ -41,14 +41,15 @@ an internal network.
 | Piece | Role |
 |---|---|
 | `coordinator` | engine: bench lifecycle, scheduling, driver transport, assertions, budget guard |
-| `bench ×N` | **sbx sandboxes** (Docker Sandboxes) spawned by the coordinator on a bench-host — per-run microVM, own Docker daemon each; macOS tier: tart VMs; container tier: OpenSandbox |
+| `bench ×N` | **sbx sandboxes** (Docker Sandboxes) spawned by the coordinator on a bench-host — per-run microVM, own Docker daemon each; macOS tier: tart VMs; container tier: OpenSandbox; cloud tier: Daytona sandboxes |
 | `telemetry` | ClickHouse + otelcol-contrib; spans schema ported from agent-gauntlet |
 | `dashboard` | stateless verdicts + span drill-down |
 
 Benches are not compose services. The compose file carries coordinator +
 telemetry (+ dashboard); the coordinator creates and destroys each bench
-over SSH (`sbx create/exec/rm` on Linux, `ssh` for tart macOS VMs) or
-through the OpenSandbox server's API (container tier).
+over SSH (`sbx create/exec/rm` on Linux, `ssh` for tart macOS VMs),
+through the OpenSandbox server's API (container tier), or through the
+Daytona SDK + its ssh gateway (cloud tier).
 
 ## Test taxonomy (10 dimensions)
 
@@ -87,7 +88,7 @@ contract.
 
 ## Scenario inventory
 
-17 suites today — every verdict from reality; one (`agent-smoke`)
+18 suites today — every verdict from reality; one (`agent-smoke`)
 puts a real claude-code in the loop, behind a declared credential.
 (`coordinator ls` also lists `smoke-fail`, the built-in sabotage probe
 that proves failure detection itself.)
@@ -97,6 +98,7 @@ that proves failure detection itself.)
 | `smoke` | — | bench lifecycle: create → exec `uname -a` → span → destroy |
 | `smoke-macos` | — | tart tier substrate proof: Darwin arm64 + pinned CLI on a Mac bench (not in the CI gate; see macOS tier) |
 | `smoke-osb` | — | osb tier substrate proof: Linux container bench on the OpenSandbox server (not in the CI gate; see osb tier) |
+| `smoke-daytona` | — | daytona tier substrate proof: Linux cloud sandbox minted via the Daytona SDK, driven over ssh with an expiring token (not in the CI gate; see daytona tier) |
 | `bench-template-verify` | — | benches from `gentar-bench-v1` carry the pinned claude-code |
 | `otlp-selfreport` | — | agent self-report: OTLP drop-file relay joins harness spans in one SQL |
 | `budget-sim` | — | budget guard refuses over-cap runs (exit 2) |
@@ -193,6 +195,15 @@ all merged to main and gate-verified per PR:
   scenario opts in with `bench = "osb"`, and `smoke-osb` is the substrate
   proof. Not part of the CI gate — the runner hosts no osb server (see
   the osb tier section below).
+- **Cloud tier (Daytona)** — a fourth BenchHost implementation: benches
+  are Linux cloud sandboxes minted through the [Daytona](https://www.daytona.io)
+  SDK from a public image ref, driven by ssh against Daytona's fixed
+  gateway with a per-sandbox **expiring token as the username** — the
+  same ssh shape as the tart tier minus the key file. No infra of your
+  own anywhere in the bench path. A scenario opts in with
+  `bench = "daytona"`, and `smoke-daytona` is the substrate proof.
+  Not part of the CI gate — the runner would need the Daytona API key
+  (see the daytona tier section below).
 
 **Not built yet** (deliberate, not forgotten): real-agent runs —
 claude-code driven by the pty driver inside a bench. The wiring exists
@@ -276,3 +287,34 @@ per-scenario `bench = "osb"`; templates are image refs on the server's
 Docker daemon (`GENTAR_OSB_TEMPLATE`, default `python:3.12-slim`). An
 external server works too — point `GENTAR_OSB_SERVER` at it (see
 `.env.example`). Not in the CI gate: the runner hosts no osb server.
+
+### daytona tier (Daytona cloud)
+
+The daytona tier runs benches as Linux cloud sandboxes on
+[daytona.io](https://www.daytona.io): `create` mints a sandbox from a
+public image ref through the Daytona SDK (`daytona` pip package,
+`GENTAR_DAYTONA_API_KEY` required), `exec` and the pty driver go over
+ssh against Daytona's fixed gateway (`ssh.app.daytona.io`) with a
+**per-sandbox expiring token as the username** — `ssh <token>@ssh.app.daytona.io`,
+no key file, real exit codes, `ssh -tt` gives a real PTY. `push_dir`
+streams a tarball over that same ssh session; `rm` deletes the sandbox
+through the SDK. No infra of your own in the bench path — the tier
+costs daytona credits per sandbox-hour.
+
+```bash
+docker compose run --rm \
+  -e GENTAR_DAYTONA_API_KEY="$DAYTONA_API_KEY" \
+  coordinator run smoke-daytona   # exit code = verdict
+```
+
+Any scenario runs on the tier by env flip
+(`GENTAR_BENCH_KIND=daytona`) or per-scenario `bench = "daytona"`;
+templates are public image refs with a tag or digest — no `latest`
+(Daytona rejects it), default `python:3.12-slim`
+(`GENTAR_DAYTONA_IMAGE`). Two security notes that shape the wiring:
+the API key is **coordinator-scoped, never a scenario credential** —
+declared credential values travel into the bench, and the key that
+mints sandboxes must not live inside one (`smoke-daytona.toml` says
+so in a comment); and the ssh tokens expire by design (120 min), so a
+leaked one is short-lived. Not in the CI gate: the runner has no
+Daytona API key to spend.
