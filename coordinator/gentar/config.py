@@ -54,6 +54,16 @@ class Config:
         # hands out its own host-relative endpoints either way).
         self.osb_server_proxy = _opt("GENTAR_OSB_SERVER_PROXY", "") == "1"
 
+        # daytona tier: Daytona cloud sandboxes (daytona.io). Lifecycle via
+        # the SDK (api key required); exec/pty via ssh with a per-sandbox
+        # expiring token as username against the fixed ssh gateway.
+        # Templates are public image refs with a tag or digest (no
+        # `latest`). A scenario's `bench = "daytona"` overrides per-run.
+        self.daytona_api_key = _opt("GENTAR_DAYTONA_API_KEY")
+        self.daytona_image = _opt("GENTAR_DAYTONA_IMAGE", "python:3.12-slim")
+        self.daytona_ssh_host = _opt("GENTAR_DAYTONA_SSH_HOST",
+                                     "ssh.app.daytona.io")
+
         # Telemetry. Best-effort: telemetry never fails a test.
         self.clickhouse_url = _opt("GENTAR_CLICKHOUSE_URL", "http://clickhouse:8123")
         self.clickhouse_user = _opt("GENTAR_CLICKHOUSE_USER", "gentar")

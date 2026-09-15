@@ -1,5 +1,6 @@
-"""Bench hosts — where scenarios run. Three implementations behind one
-interface (decisions of record, gentar TASK.md 2026-08-18, 2026-09-04):
+"""Bench hosts — where scenarios run. Four implementations behind one
+interface (decisions of record, gentar TASK.md 2026-08-18, 2026-09-04,
+2026-09-15):
 
 - ``SbxBenchHost``: sbx sandboxes on a Linux bench-host (the default
   tier). The coordinator drives sbx over ssh; each bench is a per-run
@@ -16,6 +17,12 @@ interface (decisions of record, gentar TASK.md 2026-08-18, 2026-09-04):
   as transport (the osb CLI drops real exit codes — `exit 7` reads 1)
   and gentar's osb_pty_bridge as the pty transport (execd's /pty
   WebSocket behind its per-sandbox host port).
+- ``DaytonaBenchHost``: Daytona cloud sandboxes (daytona.io). Lifecycle
+  via the daytona SDK; command/pty transport is ssh with a per-sandbox
+  expiring token as the username (``ssh <token>@ssh.app.daytona.io``) —
+  the same ssh shape as tart, so exec/push/pty reuse that pattern. The
+  bench is an image ref (tag or digest, no ``latest``); sandboxes are
+  named ``gentar-<name>`` for ``exists``.
 
 Interface every runner (oracle, scripted, pty driver) codes against:
 create / exec / push_dir / rm / exists / workspace / template_digest /
@@ -501,6 +508,135 @@ class OpenSandboxBenchHost(BenchHost):
         return [sys.executable, "-u", bridge, base, remote]
 
 
+class DaytonaBenchHost(BenchHost):
+    """Daytona cloud sandboxes (daytona.io). The SDK owns the lifecycle
+    (create from an image ref / delete / list); everything interactive is
+    ssh — the SDK mints a per-sandbox expiring token that doubles as the
+    ssh username against a fixed gateway host, so exec/push/pty are the
+    tart pattern verbatim (batch ssh, tar over ssh stdin, ssh -tt), minus
+    the key file and the ProxyCommand hop. Benches run as root; the
+    workspace is minted at create like osb (nothing validates it remotely,
+    but every command's cwd assumption does)."""
+
+    def __init__(self, cfg: Config) -> None:
+        super().__init__(cfg)
+        if not cfg.daytona_api_key:
+            raise BenchHostError(
+                "daytona benches need GENTAR_DAYTONA_API_KEY (daytona.io "
+                "personal API key)")
+        self._sandboxes: dict[str, tuple[object, str]] = {}  # name -> (sb, token)
+
+    push_before_create = False   # workspace lives inside the sandbox
+
+    def _client(self):
+        from daytona import Daytona, DaytonaConfig
+        return Daytona(DaytonaConfig(api_key=self.cfg.daytona_api_key))
+
+    def _sb_ssh(self, name: str) -> list[str]:
+        """Batch ssh into the sandbox — token as username, no key file.
+        The gateway's host key is stable but tokens are ephemeral
+        identities, so no known-hosts bookkeeping (same policy as tart
+        guest keys)."""
+        if name not in self._sandboxes:
+            raise BenchHostError(
+                f"no live daytona sandbox named {name!r} — create() it first")
+        _, token = self._sandboxes[name]
+        return [
+            "ssh", "-o", "BatchMode=yes",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=15",
+            f"{token}@{self.cfg.daytona_ssh_host}",
+        ]
+
+    # -- interface -----------------------------------------------------------
+
+    def workspace(self, name: str) -> str:
+        return f"/root/workspaces/{name}"
+
+    def create(self, name: str, agent: str = "shell",
+               template: str | None = None) -> None:
+        from daytona import CreateSandboxFromImageParams
+        try:
+            sb = self._client().create(CreateSandboxFromImageParams(
+                name=f"gentar-{name}",
+                image=template or self.cfg.daytona_image,
+                # Idle-stop after 15 min: a wedged run must not burn
+                # cloud budget overnight; the coordinator's own rm is the
+                # normal teardown.
+                auto_stop_interval=15,
+            ))
+        except Exception as exc:
+            raise BenchHostError(f"daytona create failed: {exc}") from exc
+        ssh = sb.create_ssh_access(expires_in_minutes=120)
+        self._sandboxes[name] = (sb, ssh.token)
+        r = sb.process.exec(
+            f"mkdir -p {shlex.quote(self.workspace(name))}", timeout=60)
+        if r.exit_code not in (0, None):
+            raise BenchHostError(
+                f"daytona workspace mkdir failed (exit {r.exit_code})")
+
+    def exec(self, name: str, command: str, timeout: int = 300,
+             env: dict[str, str] | None = None) -> tuple[int, str]:
+        merged = {"WORKSPACE_DIR": self.workspace(name), **(env or {})}
+        proc = self._ssh_run(
+            self._sb_ssh(name),
+            _env_exports(merged) + command,
+            timeout=timeout, strict=False)
+        return proc.returncode, proc.stdout
+
+    def push_dir(self, local_dir: str, remote_dir: str) -> None:
+        """Tar over ssh stdin — the tart pattern. remote_dir's last
+        segment names the sandbox."""
+        name = remote_dir.rstrip("/").split("/")[-1]
+        if name not in self._sandboxes:
+            raise BenchHostError(
+                f"no live daytona sandbox maps to workspace {remote_dir!r}")
+        remote = f"mkdir -p {remote_dir} && tar -C {remote_dir} -xzf -"
+        proc = subprocess.run(
+            ["tar", "-C", local_dir, "-czf", "-", "."],
+            stdout=subprocess.PIPE,
+            env={**os.environ, "COPYFILE_DISABLE": "1"},
+        )
+        if proc.returncode != 0:
+            raise BenchHostError(f"local tar of {local_dir} failed")
+        ssh = subprocess.run(
+            self._sb_ssh(name) + [remote],
+            input=proc.stdout,
+            capture_output=True,
+            timeout=600,
+        )
+        if ssh.returncode != 0:
+            raise BenchHostError(
+                f"push to {remote_dir} failed: {ssh.stderr.decode()[:400]}")
+
+    def rm(self, name: str) -> None:
+        # Never raises: teardown must not mask the real verdict.
+        entry = self._sandboxes.pop(name, None)
+        if not entry:
+            return
+        try:
+            entry[0].delete()
+        except Exception as exc:
+            print(f"warn: daytona sandbox {name} teardown failed: {exc}")
+
+    def exists(self, name: str) -> bool:
+        try:
+            return any(sb.name == f"gentar-{name}"
+                       for sb in self._client().list())
+        except Exception:
+            return False
+
+    def pty_spawn_args(self, sandbox: str, columns: int, lines: int,
+                       env: dict[str, str], command: str) -> list[str]:
+        merged = {"WORKSPACE_DIR": self.workspace(sandbox), **env}
+        remote = " ".join([
+            "cd", self.workspace(sandbox), "&&", "env",
+            f"COLUMNS={columns}", f"LINES={lines}",
+            *([shlex.quote(f"{k}={v}") for k, v in merged.items()]),
+            "sh", "-c", _sq(command)])
+        return self._sb_ssh(sandbox) + ["-tt", remote]
+
+
 def make_bench(cfg: Config, kind: str = "") -> BenchHost:
     kind = kind or cfg.bench_kind
     if kind == "sbx":
@@ -509,5 +645,7 @@ def make_bench(cfg: Config, kind: str = "") -> BenchHost:
         return TartBenchHost(cfg)
     if kind == "osb":
         return OpenSandboxBenchHost(cfg)
+    if kind == "daytona":
+        return DaytonaBenchHost(cfg)
     raise BenchHostError(
-        f"unknown bench kind {kind!r} (known: sbx, tart, osb)")
+        f"unknown bench kind {kind!r} (known: sbx, tart, osb, daytona)")
