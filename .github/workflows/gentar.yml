@@ -80,6 +80,11 @@ jobs:
     runs-on: [self-hosted, gentar-bench]
     strategy:
       fail-fast: false
+      # One bench at a time: concurrent matrix jobs on the self-hosted
+      # runner fire concurrent `sbx create` on bench-host, and the
+      # cross-process docker-hub refresh lock turns that contention into
+      # an auth wedge (prompt timeouts) that fails every job.
+      max-parallel: 1
       matrix:
         scenario: ${{ fromJSON(needs.gate-setup.outputs.scenarios) }}
     env:
