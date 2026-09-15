@@ -44,6 +44,16 @@ def cred_env(scenario: TomlScenario) -> dict[str, str]:
             if os.environ.get(c)}
 
 
+def run_env(scenario: TomlScenario) -> dict[str, str]:
+    """Everything the bench run needs from the coordinator's env:
+    guarded credentials plus optional pass_env knobs (non-secret, no
+    guard — unset = default behavior, e.g. a cheaper model pin)."""
+    env = cred_env(scenario)
+    env.update({c: os.environ[c] for c in scenario.pass_env
+                if os.environ.get(c)})
+    return env
+
+
 def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
                spans: Spans, cfg: Config, subject: str = "arena",
                report: RunReport | None = None) -> str:
@@ -87,7 +97,7 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
     step_env = {"GENTAR_RUN_ID": run_id}
     if cfg.otlp_endpoint:
         step_env["OTEL_EXPORTER_OTLP_ENDPOINT"] = cfg.otlp_endpoint
-    step_env.update(cred_env(scenario))
+    step_env.update(run_env(scenario))
     for i, step_text in enumerate(scenario.steps):
         _step(bench, subject, run_id, name, spans, i, step_text, env=step_env,
               report=report)
@@ -96,7 +106,7 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
     if scenario.driver_command:
         from gentar.scripted import run_turns
         summary = run_turns(scenario, bench, run_id, spans, subject=subject,
-                            env=cred_env(scenario), report=report)
+                            env=run_env(scenario), report=report)
         if not scenario.files and not scenario.commands:
             return summary
 

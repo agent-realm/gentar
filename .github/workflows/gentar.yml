@@ -146,6 +146,9 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
+      # Optional model pin for the agent suite (e.g. glm-5.3-flash on the
+      # z.ai plan — slot var, see agent-smoke.toml). Unset = default.
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -185,6 +188,7 @@ jobs:
           if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$ANTHROPIC_AUTH_TOKEN" ]; then
             docker compose run --rm \
               -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL \
+              -e ANTHROPIC_DEFAULT_SONNET_MODEL \
               coordinator run agent-smoke
           else
             echo "no agent credential (API_KEY/AUTH_TOKEN) — agent-smoke skipped"
@@ -230,6 +234,8 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
       ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
+      # Optional model pin, same rule as nightly.
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -258,6 +264,7 @@ jobs:
           docker compose build coordinator
           docker compose run --rm \
             -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL \
+            -e ANTHROPIC_DEFAULT_SONNET_MODEL \
             coordinator run "${{ github.event.inputs.scenario }}"
 
       - name: teardown

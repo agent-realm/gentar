@@ -19,6 +19,13 @@
 name = "agent-smoke"
 template = "gentar-bench-v1"
 credentials = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
+# Optional cheaper-model pin: forwarded when set, no guard (unset =
+# endpoint default). Slot var, NOT ANTHROPIC_MODEL — claude-code's model
+# catalog hard-rejects unknown IDs like glm-5.3-flash on the main-model
+# path (proven live, 2.1.234), while the slot vars accept any ID the
+# endpoint serves. z.ai coding plan: ANTHROPIC_DEFAULT_SONNET_MODEL =
+# glm-5.3-flash runs the whole task on flash (proven live).
+pass_env = ["ANTHROPIC_DEFAULT_SONNET_MODEL"]
 
 [driver]
 # Headless -p mode: no human simulation, no turns. The driver runs the
