@@ -137,10 +137,15 @@ jobs:
       GENTAR_BUDGET_CAP: "50000"
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
       GENTAR_OTLP_HOST_PORT: "4319"
-      # Tier-1 credential for the agent suite; empty when the secret
-      # is absent — agent-smoke then skips with a notice (or refuses
-      # honestly if dispatched directly).
+      # Tier-1 credentials for the agent suite — providers are
+      # alternatives: first-party API key, or any Anthropic-compatible
+      # endpoint via token+base URL (GLM coding plan: ANTHROPIC_BASE_URL
+      # = https://api.z.ai/api/anthropic, repo var; token as secret).
+      # All empty when unset — agent-smoke then skips with a notice (or
+      # refuses honestly if dispatched directly).
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -173,13 +178,16 @@ jobs:
           docker compose build coordinator
           # Agent-tier suite always: pty driver, scripted agent (no LLM).
           docker compose run --rm coordinator run scripted-onboarding
-          # Real-agent suite when the credential exists (refuses with
-          # exit 2 otherwise — guard, not silent).
-          if [ -n "$ANTHROPIC_API_KEY" ]; then
-            docker compose run --rm -e ANTHROPIC_API_KEY \
+          # Real-agent suite when ANY provider credential exists
+          # (refuses with exit 2 otherwise — guard, not silent).
+          # `compose run -e NAME` with NAME unset on the host simply
+          # does not forward it, so one line covers all providers.
+          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$ANTHROPIC_AUTH_TOKEN" ]; then
+            docker compose run --rm \
+              -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL \
               coordinator run agent-smoke
           else
-            echo "ANTHROPIC_API_KEY absent — agent-smoke skipped"
+            echo "no agent credential (API_KEY/AUTH_TOKEN) — agent-smoke skipped"
           fi
           if [ -d subjects/kommander-playbook ]; then
             for s in claude-playbooks-install \
@@ -216,9 +224,12 @@ jobs:
       COMPOSE_PROJECT_NAME: gentar-dispatch
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
       GENTAR_OTLP_HOST_PORT: "4319"
-      # Pass-through for credential-declaring scenarios (agent-smoke):
-      # -e forwards it into the coordinator; absent → honest refuse 2.
+      # Pass-through for credential-declaring scenarios (agent-smoke);
+      # provider alternatives, same rule as nightly. Absent → honest
+      # refuse 2.
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -245,7 +256,8 @@ jobs:
       - name: run
         run: |
           docker compose build coordinator
-          docker compose run --rm -e ANTHROPIC_API_KEY \
+          docker compose run --rm \
+            -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL \
             coordinator run "${{ github.event.inputs.scenario }}"
 
       - name: teardown

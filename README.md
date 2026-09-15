@@ -83,7 +83,7 @@ contract.
 |---|---|---|
 | PR gate | every PR / push to main | 6 deterministic subjectless suites (matrix in [.github/workflows/gentar.yml](.github/workflows/gentar.yml)); exit code is the verdict |
 | keyword tags | tag pushed at ANY commit | `arena` → every gate suite at that commit (unmerged branches included); `arena-<scenario>` → that one suite (unknown name → exit-2 refusal, no bench spent); `v*` → release proof = every gate suite. Re-run: delete and re-push the tag |
-| nightly | post-merge, cron 00:17 | `scripted-onboarding`, `agent-smoke` (when `ANTHROPIC_API_KEY` is set) + all subject suites, behind `GENTAR_SUBJECT_TOKEN` and the budget guard |
+| nightly | post-merge, cron 00:17 | `scripted-onboarding`, `agent-smoke` (when an agent credential is set — `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN`+`ANTHROPIC_BASE_URL` for any Anthropic-compatible endpoint, e.g. the GLM coding plan) + all subject suites, behind `GENTAR_SUBJECT_TOKEN` and the budget guard |
 | dispatch | manual / from a subject repo | one named scenario, arbitrary gentar ref + subject ref (see [docs/subject-integration.md](docs/subject-integration.md)) |
 
 ## Scenario inventory
@@ -104,7 +104,7 @@ that proves failure detection itself.)
 | `budget-sim` | — | budget guard refuses over-cap runs (exit 2) |
 | `scripted-onboarding` | — | pty driver: answer / pick / confirm / expect turns |
 | `scripted-danger` | — | danger gate fires before any approval |
-| `agent-smoke` | — | real claude-code (bench template) does a trivial task headlessly; needs `ANTHROPIC_API_KEY`, refuses without it |
+| `agent-smoke` | — | real claude-code (bench template) does a trivial task headlessly; provider-agnostic credential (`ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN`+`ANTHROPIC_BASE_URL` — any Anthropic-compatible endpoint, GLM coding plan proven), refuses without any |
 | `claude-playbooks-install` | kommander-playbook | documented `claude-playbook` CLI install path, 9 reality assertions |
 | `claude-playbooks-install-macos` | kommander-playbook | the same suite on a tart Mac bench — installers and launchers behave identically on darwin/arm64 |
 | `kommander-install` | kommander-playbook | README standalone path: in-place install, alias, data dirs, helper |
@@ -205,10 +205,10 @@ all merged to main and gate-verified per PR:
   Not part of the CI gate — the runner would need the Daytona API key
   (see the daytona tier section below).
 
-**Not built yet** (deliberate, not forgotten): real-agent runs —
-claude-code driven by the pty driver inside a bench. The wiring exists
-(template, driver, env tier); what's missing is API-key injection, a
-credential-tier decision, not a code gap. Also deferred from plan v1:
+**Not built yet** (deliberate, not forgotten): interactive real-agent
+runs — claude-code driven through the pty driver's turns inside a
+bench (headless agent-smoke is live; see the scenario inventory).
+Also deferred from plan v1:
 Forgejo/Gitea forge swap, `--kit` evaluation, multi-bench parallel
 matrices.
 

@@ -2,16 +2,23 @@
 # bench template) does a trivial task headlessly; the verdict comes
 # from reality (the file), never from the agent's word.
 #
-# Credentials are tier-1 (env vars on a throwaway bench): the scenario
-# declares ANTHROPIC_API_KEY by NAME; the coordinator refuses (exit 2)
-# before any bench exists when it is not in its environment, and
-# exports it into the bench when it is. The plumbing is provable
-# without a valid key — an invalid key fails auth INSIDE the bench and
-# fails this suite honestly with the transcript as evidence.
+# Credentials are tier-1 (env vars on a throwaway bench) and
+# provider-agnostic: the scenario declares the auth env var NAMES,
+# the coordinator refuses (exit 2) before any bench exists when NONE
+# is present, and exports whichever are set into the bench. Two
+# provider shapes cover everything Anthropic-protocol:
+#   ANTHROPIC_API_KEY                                  — first-party
+#   ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL          — any
+#     Anthropic-compatible endpoint (GLM coding plan at
+#     https://api.z.ai/api/anthropic, routers, proxies); claude-code
+#     reads both natively, no CLI config needed.
+# The plumbing is provable without a valid key — an invalid key fails
+# auth INSIDE the bench and fails this suite honestly with the
+# transcript as evidence.
 [scenario]
 name = "agent-smoke"
 template = "gentar-bench-v1"
-credentials = ["ANTHROPIC_API_KEY"]
+credentials = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
 
 [driver]
 # Headless -p mode: no human simulation, no turns. The driver runs the
