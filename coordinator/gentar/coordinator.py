@@ -138,16 +138,22 @@ def run(name: str, cfg: Config | None = None) -> int:
             return 2
 
     # -- credential guard: refuse before any bench exists ----------------
-    # Declared credentials (env var names) must be present in the
-    # coordinator's environment; a missing one is a usage error (exit 2),
-    # not a test failure. Names only in the report — a value must never
-    # reach a span, a report, or a log line.
+    # Declared credentials (env var names) name the env vars a bench may
+    # need. Providers are alternatives, not conjunctions: a scenario can
+    # declare ANTHROPIC_API_KEY (first-party) alongside
+    # ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL (any Anthropic-compatible
+    # endpoint — GLM coding plan, routers, proxies) and each runner sets
+    # the one it has. The guard refuses (exit 2) only when NONE of the
+    # declared names is present — no auth at all is a usage error, not a
+    # test failure; a present-but-invalid value fails auth INSIDE the
+    # bench, honestly, with the transcript as evidence. Names only in the
+    # report — a value must never reach a span, a report, or a log line.
     if scenario and scenario.credentials:
         missing = [c for c in scenario.credentials if not os.environ.get(c)]
-        if missing:
-            msg = (f"credential guard: scenario {name!r} needs "
-                   f"{', '.join(missing)} — not provided (refusing before "
-                   f"any bench exists)")
+        if len(missing) == len(scenario.credentials):
+            msg = (f"credential guard: scenario {name!r} needs at least "
+                   f"one of {', '.join(scenario.credentials)} — none "
+                   f"provided (refusing before any bench exists)")
             print(f"Error: {msg}")
             spans = Spans(cfg)
             spans.emit(ARENA_SUBJECT, "", name, "credential.refuse", "error",

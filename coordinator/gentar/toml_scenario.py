@@ -18,6 +18,10 @@ oracle mode is phase 2's runner.
                                           # any bench exists; values travel
                                           # to the bench, names never values
                                           # to spans/reports
+    pass_env = ["ANTHROPIC_DEFAULT_SONNET_MODEL"]  # OPTIONAL non-secret
+                                          # knobs forwarded when set, no
+                                          # guard — unset means default
+                                          # (e.g. a cheaper model pin)
 
     [oracle]
     steps = ["…", "…"]        # shell lines; each must exit 0
@@ -58,6 +62,14 @@ class TomlScenario:
             if not isinstance(c, str) or not c.strip():
                 raise ScenarioError(
                     f"{path}: scenario.credentials[{i}] must be an env var name")
+        # Optional non-secret env knobs (e.g. a model pin). Forwarded to the
+        # bench when present, never guarded — unlike credentials, absence is
+        # a legitimate "use the default", not a usage error.
+        self.pass_env = list(sc.get("pass_env", []))
+        for i, c in enumerate(self.pass_env):
+            if not isinstance(c, str) or not c.strip():
+                raise ScenarioError(
+                    f"{path}: scenario.pass_env[{i}] must be an env var name")
 
         self.steps = list((doc.get("oracle") or {}).get("steps", []))
         verify = doc.get("verify") or {}
