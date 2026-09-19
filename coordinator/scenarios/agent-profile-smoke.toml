@@ -1,10 +1,12 @@
 # Agent-under-playbook smoke — the anti-ouroboros suite. A REAL
 # claude-code runs INSIDE an isolated kommander-playbook install whose
 # machinery is pinned to the newest RELEASE tag (last-known-good),
-# never the working-tree ref under test. The verdict is double reality:
-# version.txt must hold exactly the VERSION of the machinery the agent
-# ran under — proving both that the agent worked and that it truly ran
-# inside the pinned playbook (it had to read $CLAUDE_CONFIG_DIR/VERSION).
+# never the working-tree ref under test. The verdict is triple reality:
+# version.txt string-equals the pinned VERSION (task done, answer
+# sourced from the hook-injected banner), a session transcript exists
+# under the pinned dir's projects/ (claude-code HONORED the config dir
+# — no LLM cooperation involved), and the pinned tree sits at an exact
+# release tag.
 #
 # Credentials: same provider-agnostic tier-1 shape as agent-smoke.
 [scenario]
@@ -27,18 +29,31 @@ steps = [
 
 [driver]
 # Headless -p under the launcher shape: CLAUDE_CONFIG_DIR points the
-# agent at the pinned playbook install. The task forces the agent to
-# resolve the playbook's VERSION from inside its own config dir.
-command = 'cd "$WORKSPACE_DIR" && CLAUDE_CONFIG_DIR="$HOME/cpb-lkg" DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 300 claude -p "Print the content of the VERSION file in the directory named by the CLAUDE_CONFIG_DIR environment variable, then create a file named version.txt in the current working directory whose entire content is exactly that version string. Nothing else." --dangerously-skip-permissions'
+# agent at the pinned playbook install. The version string is NOT named
+# in the prompt — it arrives via the pinned playbook's own machinery:
+# the SessionStart hook injects the banner (playbook name + VERSION)
+# into the agent's startup context. A dead/ignored profile leaves the
+# agent without the answer.
+command = 'cd "$WORKSPACE_DIR" && CLAUDE_CONFIG_DIR="$HOME/cpb-lkg" DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 300 claude -p "Your session startup banner states the playbook you are running under and its version. Create a file named version.txt in the current working directory whose entire content is exactly that banner version string. Nothing else." --dangerously-skip-permissions'
 
 [budget]
 tokens = 20000
 
 [[verify.commands]]
-# Double reality: the file exists AND equals the pinned machinery's
-# VERSION — the agent ran, and it ran under the pinned playbook.
-command = 'test -f "$WORKSPACE_DIR/version.txt" && grep -F "$(cat "$HOME/cpb-lkg/VERSION")" "$WORKSPACE_DIR/version.txt" && echo under-pinned-playbook'
-contains = "under-pinned-playbook"
+# Task done AND under the pin, exactly: string-equal to the pinned
+# machinery's VERSION (no substring slack, trailing newline normalized
+# away by $(cat) on both sides).
+command = 'test "$(cat "$WORKSPACE_DIR/version.txt")" = "$(cat "$HOME/cpb-lkg/VERSION")" && echo exact-under-pinned-playbook'
+contains = "exact-under-pinned-playbook"
+
+[[verify.commands]]
+# Machinery-live proof that needs no LLM cooperation: claude-code writes
+# session transcripts under $CLAUDE_CONFIG_DIR/projects/ — a directory
+# install.sh never creates (it even excludes projects/ when copying).
+# A transcript there means the pinned dir was HONORED as the active
+# config dir, hooks and all.
+command = 'find "$HOME/cpb-lkg/projects" -name "*.jsonl" -print -quit | grep -q . && echo transcripts-in-pinned-dir'
+contains = "transcripts-in-pinned-dir"
 
 [[verify.commands]]
 # The machinery is at an exact release tag, not the ref under test.

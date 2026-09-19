@@ -106,7 +106,7 @@ that proves failure detection itself.)
 | `scripted-onboarding` | — | pty driver: answer / pick / confirm / expect turns |
 | `scripted-danger` | — | danger gate fires before any approval |
 | `agent-smoke` | — | real claude-code (bench template) does a trivial task headlessly; provider-agnostic credential (`ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN`+`ANTHROPIC_BASE_URL` — any Anthropic-compatible endpoint, GLM coding plan proven), refuses without any; optional `ANTHROPIC_DEFAULT_SONNET_MODEL` pin (e.g. `glm-5.3-flash`) rides `pass_env`, no guard |
-| `agent-profile-smoke` | kommander-playbook | real claude-code runs UNDER a playbook install pinned to the newest release tag (anti-ouroboros: the ref under test is never its own tool); verdict = version.txt equals the pinned machinery's VERSION — task done AND run under the pin |
+| `agent-profile-smoke` | kommander-playbook | real claude-code runs UNDER a playbook install pinned to the newest release tag (anti-ouroboros: the ref under test is never its own tool); triple reality: version.txt string-equals the pinned VERSION (banner-sourced via the pinned SessionStart hook), a session transcript lands in the pinned dir's `projects/` (config dir honored, no LLM cooperation), and the pin sits at an exact release tag |
 | `claude-playbooks-install` | kommander-playbook | documented `claude-playbook` CLI install path, 9 reality assertions |
 | `claude-playbooks-install-macos` | kommander-playbook | the same suite on a tart Mac bench — installers and launchers behave identically on darwin/arm64 |
 | `kommander-install` | kommander-playbook | README standalone path: in-place install, alias, data dirs, helper |

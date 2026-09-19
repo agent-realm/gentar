@@ -195,6 +195,17 @@ jobs:
               -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL \
               -e ANTHROPIC_DEFAULT_SONNET_MODEL \
               coordinator run agent-smoke
+            # Real agent under a PINNED playbook install (anti-ouroboros):
+            # needs the credential above AND the kommander-playbook
+            # subject (full clone — the pin clones the release from it).
+            if [ -d subjects/kommander-playbook ]; then
+              docker compose run --rm \
+                -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL \
+                -e ANTHROPIC_DEFAULT_SONNET_MODEL \
+                coordinator run agent-profile-smoke
+            else
+              echo "no kommander-playbook subject — agent-profile-smoke skipped"
+            fi
           else
             echo "no agent credential (API_KEY/AUTH_TOKEN) — agent-smoke skipped"
           fi
