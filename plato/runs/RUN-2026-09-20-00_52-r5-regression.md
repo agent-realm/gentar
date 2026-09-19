@@ -5,8 +5,12 @@ environment: "this Mac, OrbStack (docker context orbstack); bench-host 10.10.10.
 verdict: PASS WITH FINDINGS
 incomplete: false
 findings:
-  - "F1 (mechanism, not product): runbook step 8's capture line merges stderr (`> /tmp/s7r5-ls.log 2>&1`), so the literal step-9 diff is non-empty — 19 compose progress lines + the OrbStack secrets warning. The suite NAME set itself matches exactly (18 = 18, filtered diff empty). Recorded verbatim below."
-  - "F2 (mechanism, not product): runbook step 9's extraction grep `grep -oE '^\\| \\`[a-z0-9-]+\\`' README.md` also matches 3 rows of a DIFFERENT table (component table: coordinator, telemetry, dashboard), which are not suites and are correctly absent from `ls`. Restricted to the `| Suite |` table (README.md:94-112): all 17 listed suites appear in the ls output, 0 missing."
+  - name: F1
+    waived-by: "pilot — 'r5 PASS WITH FINDINGS (F1/F2, both runbook log-capture mechanics — pilot waives both by name so they do not block the bless)' at the s7 gate, steer round 2, 2026-09-20"
+    detail: (mechanism, not product) runbook step 8's capture line merges stderr (`> /tmp/s7r5-ls.log 2>&1`), so the literal step-9 diff is non-empty — 19 compose progress lines + the OrbStack secrets warning. The suite NAME set itself matches exactly (18 = 18, filtered diff empty). Recorded verbatim below.
+  - name: F2
+    waived-by: "pilot — 'r5 PASS WITH FINDINGS (F1/F2, both runbook log-capture mechanics — pilot waives both by name so they do not block the bless)' at the s7 gate, steer round 2, 2026-09-20"
+    detail: (mechanism, not product) runbook step 9's extraction grep `grep -oE '^\\| \\`[a-z0-9-]+\\`' README.md` also matches 3 rows of a DIFFERENT table (component table: coordinator, telemetry, dashboard), which are not suites and are correctly absent from `ls`. Restricted to the `| Suite |` table (README.md:94-112): all 17 listed suites appear in the ls output, 0 missing.
 teardown: done
 ---
 
