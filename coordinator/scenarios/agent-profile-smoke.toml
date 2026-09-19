@@ -21,8 +21,11 @@ pass_env = ["ANTHROPIC_DEFAULT_SONNET_MODEL"]
 steps = [
   # Pin last-known-good: private repo, so the release is cloned from the
   # subject's own mounted .git (full history + tags), checked out at the
-  # newest tag. The ref under test is never its own tool.
-  'git clone -q "$WORKSPACE_DIR" "$HOME/cpb-lkg" && LKG=$(git -C "$HOME/cpb-lkg" describe --tags --abbrev=0) && git -C "$HOME/cpb-lkg" checkout -q "$LKG" && echo "pinned:$LKG"',
+  # NEWEST release tag — selected by version sort over all v* tags,
+  # independent of the checkout's HEAD (describe --abbrev=0 would pick
+  # the nearest reachable tag: a dispatch pinned to an old subject_ref
+  # would make the ref under test its own machinery).
+  'git clone -q "$WORKSPACE_DIR" "$HOME/cpb-lkg" && LKG=$(git -C "$HOME/cpb-lkg" tag --list "v*" --sort=-version:refname | head -n 1) && git -C "$HOME/cpb-lkg" checkout -q "$LKG" && echo "pinned:$LKG"',
   # Isolated in-place install (README standalone path) under its own name.
   'cd "$HOME/cpb-lkg" && ./install.sh --name aps',
 ]
