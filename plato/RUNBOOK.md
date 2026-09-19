@@ -1,7 +1,7 @@
 ---
 node: /s7-docs-truth/r5-unchanged-regression
 scenario: /s7-docs-truth
-status: draft
+status: frozen
 touches:
   - "git diff f976be1..HEAD (read-only, in this worktree)"
   - "worktree .env (arena: COMPOSE_PROJECT_NAME=gentar-s7r5, GENTAR_NAME_PREFIX=gentar-s7arm, ports 18198/14398)"
