@@ -1,0 +1,46 @@
+# Agent-under-playbook smoke — the anti-ouroboros suite. A REAL
+# claude-code runs INSIDE an isolated kommander-playbook install whose
+# machinery is pinned to the newest RELEASE tag (last-known-good),
+# never the working-tree ref under test. The verdict is double reality:
+# version.txt must hold exactly the VERSION of the machinery the agent
+# ran under — proving both that the agent worked and that it truly ran
+# inside the pinned playbook (it had to read $CLAUDE_CONFIG_DIR/VERSION).
+#
+# Credentials: same provider-agnostic tier-1 shape as agent-smoke.
+[scenario]
+name = "agent-profile-smoke"
+subject = "kommander-playbook"
+template = "gentar-bench-v1"
+credentials = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
+# Cheap-model pin rides the same slot var as agent-smoke (no guard).
+pass_env = ["ANTHROPIC_DEFAULT_SONNET_MODEL"]
+
+[oracle]
+steps = [
+  # Pin last-known-good: private repo, so the release is cloned from the
+  # subject's own mounted .git (full history + tags), checked out at the
+  # newest tag. The ref under test is never its own tool.
+  'git clone -q "$WORKSPACE_DIR" "$HOME/cpb-lkg" && LKG=$(git -C "$HOME/cpb-lkg" describe --tags --abbrev=0) && git -C "$HOME/cpb-lkg" checkout -q "$LKG" && echo "pinned:$LKG"',
+  # Isolated in-place install (README standalone path) under its own name.
+  'cd "$HOME/cpb-lkg" && ./install.sh --name aps',
+]
+
+[driver]
+# Headless -p under the launcher shape: CLAUDE_CONFIG_DIR points the
+# agent at the pinned playbook install. The task forces the agent to
+# resolve the playbook's VERSION from inside its own config dir.
+command = 'cd "$WORKSPACE_DIR" && CLAUDE_CONFIG_DIR="$HOME/cpb-lkg" DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 300 claude -p "Print the content of the VERSION file in the directory named by the CLAUDE_CONFIG_DIR environment variable, then create a file named version.txt in the current working directory whose entire content is exactly that version string. Nothing else." --dangerously-skip-permissions'
+
+[budget]
+tokens = 20000
+
+[[verify.commands]]
+# Double reality: the file exists AND equals the pinned machinery's
+# VERSION — the agent ran, and it ran under the pinned playbook.
+command = 'test -f "$WORKSPACE_DIR/version.txt" && grep -F "$(cat "$HOME/cpb-lkg/VERSION")" "$WORKSPACE_DIR/version.txt" && echo under-pinned-playbook'
+contains = "under-pinned-playbook"
+
+[[verify.commands]]
+# The machinery is at an exact release tag, not the ref under test.
+command = 'git -C "$HOME/cpb-lkg" describe --tags --exact-match HEAD >/dev/null && echo at-release-tag'
+contains = "at-release-tag"
