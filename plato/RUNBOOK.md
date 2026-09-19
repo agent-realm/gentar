@@ -1,7 +1,7 @@
 ---
 node: /s7-docs-truth/r4-shadow-recovery
 scenario: /s7-docs-truth
-status: draft
+status: frozen
 touches:
   - "worktree .env (arena: COMPOSE_PROJECT_NAME=gentar-s7r4, GENTAR_NAME_PREFIX=gentar-s7arm, clickhouse knob pinned to 18197, otelcol 14396)"
   - "native loopback listener on 18197: python3 -m http.server 18197 --bind 127.0.0.1 (killed at teardown)"
