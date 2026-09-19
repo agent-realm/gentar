@@ -5,6 +5,7 @@ status: draft
 touches:
   - "worktree .env (arena: COMPOSE_PROJECT_NAME=gentar-s7r3, GENTAR_NAME_PREFIX=gentar-s7arm, ports 18192/14392)"
   - "shell-exported GENTAR_CLICKHOUSE_HOST_PORT drifts to 18193, 18194, 18195 (invocation-scoped)"
+  - "docker compose up -d clickhouse otelcol (setup — never the coordinator service, whose compose default command runs an unbidden smoke)"
   - "docker compose run --rm coordinator ls (drifted and clean), docker compose exec -T clickhouse clickhouse-client (drifted)"
   - "throwaway squatter container s7r3-squatter (nginx:alpine) publishing 127.0.0.1:18195; removed with docker rm -f -v"
 expect:
@@ -41,8 +42,13 @@ This runbook falsifies or confirms each clause against one live arena.
    - `GENTAR_OTELCOL_HOST_PORT=14392`
    - `GENTAR_BENCH_KEY_FILE=/Users/polat/.ssh/id_ed25519`
 3. `docker compose build coordinator`.
-4. `docker compose up -d`, wait until `curl -sf http://127.0.0.1:18192/ping`
-   prints `Ok.` (poll 3s, timeout 120s -> incomplete).
+4. `docker compose up -d clickhouse otelcol` (telemetry only — the
+   coordinator service must NOT start: its compose default command is
+   `[run, smoke]`, which would run an unbidden bench; the coordinator
+   appears only as the one-off `run --rm` invocations of steps 6-9).
+   Wait until `curl -sf http://127.0.0.1:18192/ping` prints `Ok.`
+   (poll 3s, timeout 120s -> incomplete). Confirm
+   `docker compose ps` lists no running coordinator (record listing).
 5. Record C0 = `docker compose ps -q clickhouse`; record
    `docker port $(docker compose ps -q clickhouse)` output.
 
