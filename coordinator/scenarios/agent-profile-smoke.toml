@@ -1,0 +1,83 @@
+# Agent-under-playbook smoke — the anti-ouroboros suite. A REAL
+# claude-code runs INSIDE an isolated kommander-playbook install whose
+# machinery is pinned to the newest RELEASE tag (last-known-good) that
+# is NOT the ref under test, never the working-tree ref itself. The
+# verdict is reality, four ways: version.txt string-equals the pinned
+# VERSION (task done, answer sourced from the hook-injected banner), a
+# session transcript exists under the pinned dir's projects/
+# (claude-code HONORED the config dir — no LLM cooperation involved),
+# the pinned tree sits at an exact release tag, and the pinned commit
+# differs from the subject HEAD (machinery is never the ref itself).
+#
+# Credentials: same provider-agnostic tier-1 shape as agent-smoke.
+[scenario]
+name = "agent-profile-smoke"
+subject = "kommander-playbook"
+template = "gentar-bench-v1"
+credentials = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
+# Cheap-model pin rides the same slot var as agent-smoke (no guard).
+pass_env = ["ANTHROPIC_DEFAULT_SONNET_MODEL"]
+
+[oracle]
+steps = [
+  # Pin last-known-good: private repo, so the release is cloned from the
+  # subject's own mounted .git (full history + tags), checked out at the
+  # NEWEST release tag — selected by version sort over all v* tags,
+  # independent of the checkout's HEAD (describe --abbrev=0 would pick
+  # the nearest reachable tag: a dispatch pinned to an old subject_ref
+  # would make the ref under test its own machinery). The pin also SKIPS
+  # any tag whose peeled commit equals the subject HEAD: a dispatch
+  # testing the newest release itself (subject_ref=v3.11.4) must fall
+  # back to the previous release, or the ref under test would BE its own
+  # machinery with every assertion still passing. No distinct release at
+  # all → the step fails loudly rather than self-test silently.
+  'git clone -q "$WORKSPACE_DIR" "$HOME/cpb-lkg" && SUBJ=$(git -C "$WORKSPACE_DIR" rev-parse HEAD) && LKG=$(git -C "$HOME/cpb-lkg" tag --list "v*" --sort=-version:refname | while read -r t; do [ "$(git -C "$HOME/cpb-lkg" rev-parse -q --verify "$t^{commit}")" != "$SUBJ" ] && { echo "$t"; break; }; done) && { [ -n "$LKG" ] || { echo "no release tag distinct from subject HEAD — refusing to test a ref against its own machinery"; false; }; } && git -C "$HOME/cpb-lkg" checkout -q "$LKG" && echo "pinned:$LKG"',
+  # Isolated in-place install (README standalone path) under its own name.
+  'cd "$HOME/cpb-lkg" && ./install.sh --name aps',
+]
+
+[driver]
+# Headless -p under the launcher shape: CLAUDE_CONFIG_DIR points the
+# agent at the pinned playbook install. Runs in a NEUTRAL dir — not
+# $WORKSPACE_DIR, whose project-level CLAUDE.md would pull the subject
+# ref's own instructions into the agent's context (the ref under test
+# must not supply machinery). The version string is NOT named in the
+# prompt — it arrives via the pinned playbook's own machinery: the
+# SessionStart hook injects the banner (playbook name + VERSION) into
+# the agent's startup context. A dead/ignored profile leaves the agent
+# without the answer.
+command = 'mkdir -p "$HOME/agent-work" && cd "$HOME/agent-work" && CLAUDE_CONFIG_DIR="$HOME/cpb-lkg" DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 300 claude -p "Your session startup banner states the playbook you are running under and its version. Create a file named version.txt in the current working directory whose entire content is exactly that banner version string. Nothing else." --dangerously-skip-permissions'
+
+[budget]
+tokens = 20000
+
+[[verify.commands]]
+# Task done AND under the pin, exactly: content string-equal to the
+# pinned machinery's VERSION with AT MOST one trailing newline
+# tolerated ($(cat) strips all trailing newlines, so the byte count
+# re-check rejects version + blank lines; interior junk fails the
+# string equality).
+command = 'v_raw=$(cat "$HOME/agent-work/version.txt"); v_bytes=$(($(wc -c < "$HOME/agent-work/version.txt"))); test "$v_raw" = "$(cat "$HOME/cpb-lkg/VERSION")" && test $(( v_bytes - ${#v_raw} )) -le 1 && echo exact-under-pinned-playbook'
+contains = "exact-under-pinned-playbook"
+
+[[verify.commands]]
+# Machinery-live proof that needs no LLM cooperation: claude-code writes
+# session transcripts under $CLAUDE_CONFIG_DIR/projects/ — a directory
+# install.sh never creates (it even excludes projects/ when copying).
+# A transcript there means the pinned dir was HONORED as the active
+# config dir, hooks and all.
+command = 'find "$HOME/cpb-lkg/projects" -name "*.jsonl" -print -quit | grep -q . && echo transcripts-in-pinned-dir'
+contains = "transcripts-in-pinned-dir"
+
+[[verify.commands]]
+# The machinery is at an exact release tag, not the ref under test.
+command = 'git -C "$HOME/cpb-lkg" describe --tags --exact-match HEAD >/dev/null && echo at-release-tag'
+contains = "at-release-tag"
+
+[[verify.commands]]
+# The anti-ouroboros invariant as an assertion of its own: the pinned
+# machinery commit differs from the subject HEAD commit. The pin step
+# already enforces this; asserting it makes the contract visible to the
+# verdict instead of living only in step-0 shell.
+command = 'test "$(git -C "$HOME/cpb-lkg" rev-parse HEAD)" != "$(git -C "$WORKSPACE_DIR" rev-parse HEAD)" && echo machinery-distinct-from-subject'
+contains = "machinery-distinct-from-subject"

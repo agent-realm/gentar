@@ -195,6 +195,17 @@ jobs:
               -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL \
               -e ANTHROPIC_DEFAULT_SONNET_MODEL \
               coordinator run agent-smoke
+            # Real agent under a PINNED playbook install (anti-ouroboros):
+            # needs the credential above AND the kommander-playbook
+            # subject (full clone — the pin clones the release from it).
+            if [ -d subjects/kommander-playbook ]; then
+              docker compose run --rm \
+                -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL \
+                -e ANTHROPIC_DEFAULT_SONNET_MODEL \
+                coordinator run agent-profile-smoke
+            else
+              echo "no kommander-playbook subject — agent-profile-smoke skipped"
+            fi
           else
             echo "no agent credential (API_KEY/AUTH_TOKEN) — agent-smoke skipped"
           fi
@@ -255,7 +266,10 @@ jobs:
           if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
             REF="${{ github.event.inputs.subject_ref }}"
             REF="${REF:-main}"
-            git clone --depth 1 \
+            # Full clone (no --depth): agent-profile-smoke pins the
+            # newest release by cloning it from this checkout's tags —
+            # same rule as the nightly job's kommander-playbook clone.
+            git clone \
               https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
               -b "$REF" subjects/kommander-playbook
             git clone --depth 1 \
