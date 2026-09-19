@@ -1,7 +1,7 @@
 ---
 node: /s7-docs-truth/r3-reconcile-bindtext
 scenario: /s7-docs-truth
-status: draft
+status: frozen
 touches:
   - "worktree .env (arena: COMPOSE_PROJECT_NAME=gentar-s7r3, GENTAR_NAME_PREFIX=gentar-s7arm, ports 18192/14392)"
   - "shell-exported GENTAR_CLICKHOUSE_HOST_PORT drifts to 18193, 18194, 18195 (invocation-scoped)"
