@@ -266,7 +266,10 @@ jobs:
           if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
             REF="${{ github.event.inputs.subject_ref }}"
             REF="${REF:-main}"
-            git clone --depth 1 \
+            # Full clone (no --depth): agent-profile-smoke pins the
+            # newest release by cloning it from this checkout's tags —
+            # same rule as the nightly job's kommander-playbook clone.
+            git clone \
               https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
               -b "$REF" subjects/kommander-playbook
             git clone --depth 1 \

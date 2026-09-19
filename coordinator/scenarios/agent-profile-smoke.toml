@@ -29,21 +29,26 @@ steps = [
 
 [driver]
 # Headless -p under the launcher shape: CLAUDE_CONFIG_DIR points the
-# agent at the pinned playbook install. The version string is NOT named
-# in the prompt — it arrives via the pinned playbook's own machinery:
-# the SessionStart hook injects the banner (playbook name + VERSION)
-# into the agent's startup context. A dead/ignored profile leaves the
-# agent without the answer.
-command = 'cd "$WORKSPACE_DIR" && CLAUDE_CONFIG_DIR="$HOME/cpb-lkg" DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 300 claude -p "Your session startup banner states the playbook you are running under and its version. Create a file named version.txt in the current working directory whose entire content is exactly that banner version string. Nothing else." --dangerously-skip-permissions'
+# agent at the pinned playbook install. Runs in a NEUTRAL dir — not
+# $WORKSPACE_DIR, whose project-level CLAUDE.md would pull the subject
+# ref's own instructions into the agent's context (the ref under test
+# must not supply machinery). The version string is NOT named in the
+# prompt — it arrives via the pinned playbook's own machinery: the
+# SessionStart hook injects the banner (playbook name + VERSION) into
+# the agent's startup context. A dead/ignored profile leaves the agent
+# without the answer.
+command = 'mkdir -p "$HOME/agent-work" && cd "$HOME/agent-work" && CLAUDE_CONFIG_DIR="$HOME/cpb-lkg" DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 300 claude -p "Your session startup banner states the playbook you are running under and its version. Create a file named version.txt in the current working directory whose entire content is exactly that banner version string. Nothing else." --dangerously-skip-permissions'
 
 [budget]
 tokens = 20000
 
 [[verify.commands]]
-# Task done AND under the pin, exactly: string-equal to the pinned
-# machinery's VERSION (no substring slack, trailing newline normalized
-# away by $(cat) on both sides).
-command = 'test "$(cat "$WORKSPACE_DIR/version.txt")" = "$(cat "$HOME/cpb-lkg/VERSION")" && echo exact-under-pinned-playbook'
+# Task done AND under the pin, exactly: content string-equal to the
+# pinned machinery's VERSION with AT MOST one trailing newline
+# tolerated ($(cat) strips all trailing newlines, so the byte count
+# re-check rejects version + blank lines; interior junk fails the
+# string equality).
+command = 'v_raw=$(cat "$HOME/agent-work/version.txt"); v_bytes=$(($(wc -c < "$HOME/agent-work/version.txt"))); test "$v_raw" = "$(cat "$HOME/cpb-lkg/VERSION")" && test $(( v_bytes - ${#v_raw} )) -le 1 && echo exact-under-pinned-playbook'
 contains = "exact-under-pinned-playbook"
 
 [[verify.commands]]
