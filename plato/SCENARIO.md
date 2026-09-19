@@ -41,9 +41,11 @@ Findings driven in, with the drill + finding name of record:
    names "neither project nor env file"; it names the endpoint
    (`plato-x-clickhouse-1`), so the project IS legible — the env file
    and knob are what it omits.
-4. **run-subcommand-recreates-telemetry** (d2) — any compose
-   invocation reconciles drifted config, `run` and `exec` included,
-   not just `up`.
+4. **run-subcommand-recreates-telemetry** (d2) — a drifted
+   `docker compose run` reconciles and recreates the running
+   clickhouse; a drifted `exec` does not (it runs inside the
+   already-running container). Docs must say which, not "any compose
+   call".
 5. **prefix-docs-vs-validator** (d2) — docs + refusal message omitted
    the leading-letter rule and digits-allowed (`1gentar` refused while
    every stated sub-rule was satisfied; `gentar-1a` legal but
@@ -64,9 +66,9 @@ Findings driven in, with the drill + finding name of record:
   can leave the publish absent).
 - **Scoping rule rewritten to the truth**: `--env-file` drives
   interpolation AND the project name (the cross-contamination seam
-  described concretely); any compose invocation reconciles; the bind
-  error names endpoint+port but not file/knob — grep the port number
-  to find the drift.
+  described concretely); `run` reconciles and recreates, `exec` does
+  not; the bind error names endpoint+port but not file/knob — grep the
+  port number to find the drift.
 - **Prefix shape stated completely** everywhere it appears (README,
   .env.example, refusal message): starts with a letter; lowercase
   letters, digits, single dashes; ≤24 chars — with legal/illegal

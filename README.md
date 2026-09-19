@@ -250,10 +250,11 @@ shell — see the scoping rule below):
 the shell.** The port knobs are `.env`-file-scoped while a shell
 `COMPOSE_PROJECT_NAME` export is invocation-scoped; mixing the two
 means a later compose call without the exports silently reverts to the
-file's values and reconciles your containers against them — and ANY
-compose invocation reconciles, not just `up`: a drifted `docker
-compose run` or `exec` will recreate the running clickhouse onto the
-exported port too. The bind error that follows names the endpoint
+file's values and reconciles your containers against them. A drifted
+`docker compose run` recreates the running clickhouse onto the drifted
+port; a drifted `docker compose exec` does not — it runs inside the
+already-running container, so nothing is recreated there. The bind
+error that follows names the endpoint
 (`plato-x-clickhouse-1: Bind for 127.0.0.1:18123 failed`) but neither
 the env file nor the `GENTAR_*_HOST_PORT` knob — grep the named port
 number across `.env` and your shell exports to find the drift.
