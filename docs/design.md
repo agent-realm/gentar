@@ -194,6 +194,32 @@ default images replace part of the terminal-bench adapter work; DinD/sysbox
 and apple/container-in-tart drop to fallbacks only. tart on macminim
 remains the macOS backend (sbx itself cannot host macOS sandboxes).
 
+Decided 2026-09-20: **simulated pilots** — the interactive real-agent
+tier (`agent-pty-smoke`). A real claude-code TUI at a bench pty is
+driven through scripted turns (onboarding dialogs → task → reply
+marker → paced ctrl-c exit), as a human pilot would be; the verdict
+stays with reality (verify checks the file, never the agent's word).
+Three mechanics proven live on the bench (probes 1–5) and encoded in
+the driver: (1) the TUI paste-guards a trailing Enter sent in the same
+write as text — submission is a separate `key enter` event, and it
+must be a real \r (sendline's trailing \n is ignored); (2) exit
+needs two ctrl-c inside claude-code's ~1s window (a paced pair, 0.4s);
+(3) the TUI is a diff renderer — each frame re-sends only changed
+cells and word gaps are cursor moves, so `screen()` is a cell-model
+replay of the pty stream, not a tail of raw bytes (a single frame
+literally lacks letters that stayed on screen). Credential shape pins
+`ANTHROPIC_AUTH_TOKEN`+`ANTHROPIC_BASE_URL` and the script declines
+the bench's inert placeholder API key — accepting it would fork the
+turn list on which provider is set (agent-smoke keeps the broader
+alternatives for the headless path). Turns are anchored, not blind:
+every Enter waits for its own screen (`after`), because a paced pair
+races the render and can pre-accept the next dialog's default, and
+the intermittent security-notes page is an `optional` turn (present
+on some fresh benches, absent on others — probe 5). The reply marker
+is derived from the task (filename uppercased), never quoted: a
+quoted marker self-matches the input-box echo on screen. Dispatchable
+today; nightly wiring deliberately left out (pilot's call).
+
 ## Provenance
 
 - Forked from task `agent-gauntlet` 2026-08-17-13_29; design conversation

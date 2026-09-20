@@ -26,6 +26,17 @@ oracle mode is phase 2's runner.
     [oracle]
     steps = ["…", "…"]        # shell lines; each must exit 0
 
+    [driver]                  # alternative to oracle: an interactive
+    command = "…"             # command at the bench pty, driven by turns
+    [[driver.turns]]          # kinds: answer (await prompt, type text),
+    type = "expect"           # expect (await pattern), pick (walk the
+    pattern = "…"             # ❯ picker to a label), abort (prove the
+                              # danger gate), key (raw \r/\x03 events —
+                              # the only Enter a TUI registers; optional
+                              # `after` pattern anchors the keys to a
+                              # screen so they cannot race the render
+                              # onto the next dialog's default)
+
     [[verify.files]]
     path = "~/.claude-playbooks/kommander/CLAUDE.md"
 
@@ -91,13 +102,33 @@ class TomlScenario:
             raise ScenarioError(f"{path}: needs [oracle].steps or a [driver] command")
         for i, t in enumerate(self.turns):
             kind = t.get("type")
-            if kind not in ("answer", "expect", "pick", "abort"):
+            if kind not in ("answer", "expect", "pick", "abort", "key"):
                 raise ScenarioError(
-                    f"{path}: driver.turns[{i}].type must be answer|expect|pick|abort")
+                    f"{path}: driver.turns[{i}].type must be "
+                    f"answer|expect|pick|abort|key")
             if kind in ("answer", "expect") and not t.get(("prompt" if kind == "answer" else "pattern")):
                 raise ScenarioError(f"{path}: driver.turns[{i}] missing prompt/pattern")
             if kind == "pick" and not t.get("label"):
                 raise ScenarioError(f"{path}: driver.turns[{i}] missing label")
+            if kind == "key":
+                keys = t.get("keys") or ([t["key"]] if t.get("key") else [])
+                if not keys:
+                    raise ScenarioError(f"{path}: driver.turns[{i}] missing key/keys")
+                from gentar.pty_driver import _KEYS
+                bad = [k for k in keys if k not in _KEYS]
+                if bad:
+                    raise ScenarioError(
+                        f"{path}: driver.turns[{i}] unknown key(s) "
+                        f"{', '.join(map(repr, bad))} — supported: "
+                        f"{' '.join(sorted(_KEYS))}")
+                if "after" in t and not (isinstance(t["after"], str) and t["after"].strip()):
+                    raise ScenarioError(
+                        f"{path}: driver.turns[{i}].after must be a "
+                        f"non-empty screen pattern")
+            if "optional" in t and not isinstance(t["optional"], bool):
+                raise ScenarioError(
+                    f"{path}: driver.turns[{i}].optional must be a boolean "
+                    f"(skip the turn when its screen never shows)")
         for i, f in enumerate(self.files):
             if "path" not in f:
                 raise ScenarioError(f"{path}: verify.files[{i}] missing path")

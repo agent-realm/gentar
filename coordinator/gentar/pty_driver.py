@@ -88,15 +88,28 @@ class PtyDriver:
                 break
 
     def screen(self) -> str:
-        """Visible screen approximation: last `lines` lines of transcript."""
+        """Visible screen approximation: a cell-model render (see
+        _render) over a transcript window spanning MANY frames — the
+        diff-rendered TUI re-sends only changed cells per frame, so a
+        short window shows a screen with holes in it."""
         self._pump()
-        return "\n".join(self.transcript.splitlines()[-self.lines:])
+        rendered = _render(self.transcript[-400000:])
+        return "\n".join(rendered.splitlines()[-self.lines:])
 
     def send_line(self, text: str) -> None:
         self.child.sendline(text)
 
     def send_key(self, key: str) -> None:  # "enter", "escape", "down", "ctrl-c"
         self.child.send(_KEYS[key])
+
+    def send_keys(self, keys: list[str], delay: float = 0.5) -> None:
+        """A key sequence with pacing — interactive TUIs read single keys,
+        and shortcuts like claude-code's exit need two C-c INSIDE its
+        ~1s window; a bare double-send races it (proven live, probe 3/4:
+        1.5s apart never exits, 0.4s apart does)."""
+        for key in keys:
+            self.send_key(key)
+            time.sleep(delay)
 
     def abort(self, why: str) -> None:
         print(f"DRIVE ABORT: {why}")
@@ -194,6 +207,105 @@ class _TranscriptTap:
 
 _KEYS = {"enter": "\r", "escape": "\x1b", "down": "\x1b[B", "up": "\x1b[A",
          "ctrl-c": "\x03"}
+
+
+def _render(raw: str) -> str:
+    """Terminal-screen reconstruction from a raw pty byte stream.
+    claude-code's TUI is a DIFF renderer: each frame re-sends only the
+    cells that changed since the last one, positioning runs with
+    absolute-column and relative cursor moves — so a single frame's
+    bytes omit everything that stayed on screen (proven live, probe 5:
+    "Press Enter…" arrived as "Press Ente\\x1b[13G to continue…"; the
+    "r" was simply never re-sent), and word gaps are cursor jumps, not
+    space bytes. The only faithful screen is a cell model: replay the
+    stream's cursor moves and writes into a (row, col) buffer, honor
+    the clears, read the buffer back. Covers exactly the ops the TUI
+    emits — CHA/CUP/VPA, CUU/CUD/CUF/CUB, EL, ED, CR/LF/BS; SGR and
+    everything else drops."""
+    rows: list[dict[int, str]] = [{}]
+    r = c = 0
+
+    def _row(idx: int) -> dict[int, str]:
+        while len(rows) <= idx:
+            rows.append({})
+        return rows[idx]
+
+    i, n = 0, len(raw)
+    while i < n:
+        ch = raw[i]
+        if ch == "\x1b":
+            nxt = raw[i + 1] if i + 1 < n else ""
+            if nxt == "[":                       # CSI
+                j = i + 2
+                while j < n and raw[j] not in "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz~":
+                    j += 1
+                if j >= n:
+                    break                        # escape cut at chunk edge
+                body, final = raw[i + 2:j], raw[j]
+                nums = [int(p) if p.isdigit() else 1
+                        for p in body.lstrip("?").split(";")]
+                def p(k: int, d: int = 1) -> int:
+                    return nums[k] if k < len(nums) and nums[k] else d
+                if final == "A":                 r = max(0, r - p(0))
+                elif final == "B" or final == "e": r += p(0)
+                elif final == "C" or final == "a": c += p(0)
+                elif final == "D":               c = max(0, c - p(0))
+                elif final == "G" or final == "`": c = max(0, p(0) - 1)
+                elif final == "d":               r = max(0, p(0) - 1)
+                elif final in ("H", "f"):
+                    r = max(0, p(0) - 1)
+                    c = max(0, p(1) - 1)
+                elif final == "K":               # EL — clear in row
+                    mode = nums[0] if body.isdigit() and nums[0] in (1, 2) else 0
+                    cells = _row(r)
+                    if mode == 0:
+                        rows[r] = {k: v for k, v in cells.items() if k < c}
+                    elif mode == 1:
+                        rows[r] = {k: v for k, v in cells.items() if k > c}
+                    else:
+                        rows[r] = {}
+                elif final == "J":               # ED — clear screen
+                    mode = nums[0] if body.isdigit() and nums[0] in (1, 2) else 0
+                    if mode == 2:
+                        rows[:] = [{} for _ in rows]
+                    elif mode == 0:
+                        for rr in range(r + 1, len(rows)):
+                            rows[rr] = {}
+                        rows[r] = {k: v for k, v in _row(r).items() if k < c}
+                    elif mode == 1:
+                        for rr in range(0, r):
+                            rows[rr] = {}
+                        rows[r] = {k: v for k, v in _row(r).items() if k > c}
+                i = j + 1
+                continue
+            if nxt == "]":                       # OSC — drop to BEL/ST
+                j = raw.find("\x07", i)
+                k = raw.find("\x1b\\", i)
+                ends = [x for x in (j, k + 1 if k != -1 else -1) if x != -1]
+                i = min(ends) if ends else n
+                continue
+            i += 2                               # other 2-byte escapes
+            continue
+        if ch == "\n":
+            r += 1; c = 0
+        elif ch == "\r":
+            c = 0
+        elif ch == "\b":
+            c = max(0, c - 1)
+        elif ch == "\t":
+            c += 8 - (c % 8)
+        elif ch >= " ":                          # printable only
+            _row(r)[c] = ch
+            c += 1
+        i += 1
+    out = []
+    for cells in rows:
+        if not cells:
+            out.append("")
+            continue
+        width = max(cells)
+        out.append("".join(cells.get(k, " ") for k in range(width + 1)))
+    return "\n".join(out).rstrip("\n")
 
 
 def _tail(s: str, n: int) -> str:

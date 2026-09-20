@@ -88,9 +88,9 @@ contract.
 
 ## Scenario inventory
 
-19 suites today — every verdict from reality; two (`agent-smoke`,
-`agent-profile-smoke`) put a real claude-code in the loop, behind a
-declared credential.
+20 suites today — every verdict from reality; three (`agent-smoke`,
+`agent-profile-smoke`, `agent-pty-smoke`) put a real claude-code in
+the loop, behind a declared credential.
 (`coordinator ls` also lists `smoke-fail`, the built-in sabotage probe
 that proves failure detection itself.)
 
@@ -107,6 +107,7 @@ that proves failure detection itself.)
 | `scripted-danger` | — | danger gate fires before any approval |
 | `agent-smoke` | — | real claude-code (bench template) does a trivial task headlessly; provider-agnostic credential (`ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN`+`ANTHROPIC_BASE_URL` — any Anthropic-compatible endpoint, GLM coding plan proven), refuses without any; optional `ANTHROPIC_DEFAULT_SONNET_MODEL` pin (e.g. `glm-5.3-flash`) rides `pass_env`, no guard |
 | `agent-profile-smoke` | kommander-playbook | real claude-code runs UNDER a playbook install pinned to the newest release tag (anti-ouroboros: the ref under test is never its own tool); triple reality: version.txt string-equals the pinned VERSION (banner-sourced via the pinned SessionStart hook), a session transcript lands in the pinned dir's `projects/` (config dir honored, no LLM cooperation), and the pin sits at an exact release tag |
+| `agent-pty-smoke` | — | simulated pilot: a real claude-code TUI at a bench pty, driven through first-run onboarding (theme → decline the detected key → security notes → trust) and a task by scripted turns; the cell-model screen reads the diff-rendered TUI, and a paced ctrl-c pair exits inside the ~1s window; credential pins `ANTHROPIC_AUTH_TOKEN`+`ANTHROPIC_BASE_URL`; dispatchable, not nightly-wired |
 | `claude-playbooks-install` | kommander-playbook | documented `claude-playbook` CLI install path, 9 reality assertions |
 | `claude-playbooks-install-macos` | kommander-playbook | the same suite on a tart Mac bench — installers and launchers behave identically on darwin/arm64 |
 | `kommander-install` | kommander-playbook | README standalone path: in-place install, alias, data dirs, helper |
@@ -207,12 +208,19 @@ all merged to main and gate-verified per PR:
   Not part of the CI gate — the runner would need the Daytona API key
   (see the daytona tier section below).
 
-**Not built yet** (deliberate, not forgotten): interactive real-agent
-runs — claude-code driven through the pty driver's turns inside a
-bench (headless agent-smoke is live; see the scenario inventory).
-Also deferred from plan v1:
-Forgejo/Gitea forge swap, `--kit` evaluation, multi-bench parallel
-matrices.
+**Simulated pilots — interactive real-agent runs** (`agent-pty-smoke`):
+a real claude-code TUI at a bench pty, driven through scripted turns
+(onboarding dialogs → task → reply marker → paced ctrl-c exit) as a
+human would — the pilot simulation. Verdict stays with reality: the
+file on disk, never the agent's word. Credentials pin the
+token+endpoint shape and the script declines sbx's inert placeholder
+API key, keeping the turn list deterministic. Dispatchable today
+(`workflow_dispatch` with the token+endpoint pair in the runner env);
+nightly wiring deliberately not added — that's a pilot call, not a
+default. See the scenario inventory.
+
+**Not built yet** (deliberate, not forgotten): Forgejo/Gitea forge swap,
+`--kit` evaluation, multi-bench parallel matrices.
 
 ## Quickstart
 
