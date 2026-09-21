@@ -1,0 +1,74 @@
+# A gentar scenario: decisions and reality assertions, never scripts.
+# Schema and vocabulary: coordinator/gentar/toml_scenario.py in
+# agent-realm/gentar. This template suite is deliberately runnable
+# AS-IS — run it once to prove the plumbing, then replace [oracle]
+# and [[verify]] with what your repo actually does.
+
+[scenario]
+name = "first-suite"          # defaults to the filename stem
+subject = "REPLACE-ME"        # your repo's name — the subjects-root dir
+                              # name run.sh stages, and the telemetry
+                              # `subject` column. Match run.sh's SUBJECT.
+agent = "shell"               # oracle vehicle: a plain sandbox shell
+
+# template = "gentar-bench-v1"  # optional sbx template tag; the default
+                                # bench already has shell, git and Docker
+# bench = "tart"                # optional tier override (sbx is the
+                                # default): tart = macOS VM,
+                                # osb/daytona = template is an image ref
+
+# credentials = ["ANTHROPIC_API_KEY",
+#                ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]
+# Env var NAMES an agent-in-the-loop suite needs. Entries are
+# ALTERNATIVES; a list entry is an all-of GROUP (a token without its
+# endpoint is half a provider and refuses, exit 2, before any bench
+# exists). Names travel to spans/reports — never values. Omit for
+# oracle suites like this one.
+
+# pass_env = ["SOME_NON_SECRET_KNOB"]
+# Optional non-secret knobs forwarded when set (e.g. a cheaper-model
+# pin), never guarded — absence means "use the default".
+
+[oracle]
+# Shell lines, run in order inside the bench; each must exit 0.
+# $WORKSPACE_DIR is the bench's workspace dir. State WHAT the subject
+# does here; let [[verify]] below assert against reality.
+steps = [
+    "printf 'gentar-first-suite\\n' > \"$WORKSPACE_DIR/probe.txt\"",
+]
+
+# A file that must exist after the steps ran. ~ = the bench pilot's
+# home. Shown commented — an EMPTY [[verify.files]] table is a load
+# error; uncomment together with its path.
+# [[verify.files]]
+# path = "~/.your-tool/config.toml"
+
+[[verify.commands]]
+# A command whose exit code (and optional output substring) is the
+# verdict. Assert against reality — files, processes, tool output —
+# never "the agent said it worked".
+command = "test \"$(cat \"$WORKSPACE_DIR/probe.txt\")\" = gentar-first-suite"
+# contains = "expected substring of stdout+stderr"
+
+# -- pty suites: a scripted pilot instead of a shell script ----------------
+# A [driver] block makes the scenario run at a pty, so interactive
+# paths (onboarding, confirmation prompts, a real agent TUI) become
+# testable. Turns replay in order:
+#
+# [driver]
+# command = "your-tool interactive-command"
+# [[driver.turns]]
+# type = "answer"          # wait for `prompt` (regex), send `send` + Enter
+# prompt = "Proceed\\?"
+# send = "y"               # default: empty line = plain Enter
+# timeout = 60
+# [[driver.turns]]
+# type = "expect"          # wait for `pattern` (regex), send nothing
+# pattern = "installed"
+# type = "pick"            # navigate a picker to a line matching `label`
+# type = "abort"           # hard safety gate: danger text on screen
+
+# -- budget (agent suites): spend ceiling for the budget guard -------------
+# [budget]
+# tokens = 50000           # refuse the run when it would exceed the cap
+# simulate_spend = 100     # units a passing no-LLM run records as burned

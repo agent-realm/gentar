@@ -13,6 +13,11 @@ Two modes, pick either or both:
   its own CI. Scenarios live in your repo; any trigger conditions you
   want; the arena is a `git clone` away.
 
+Both modes start from the same kit: [`subject-template/`](../subject-template/)
+in this repo — a copyable `gentar/` dir with every file, every field
+commented, and the seven-step checklist. Adoption is copy-and-fill,
+not archaeology.
+
 ## What a subject contributes
 
 1. **Scenario configs** — the subject states install *decisions* and
@@ -141,4 +146,5 @@ self-hosted runner inside the network (any machine with Docker; the
 pilot's Mac qualifies).
 
 `claude-playbooks` is the reference own-arena subject (see its
-`gentar/` dir).
+`gentar/` dir); [`subject-template/`](../subject-template/) is that
+shape genericized into a copyable kit.
