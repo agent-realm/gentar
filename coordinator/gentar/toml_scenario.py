@@ -14,10 +14,16 @@ oracle mode is phase 2's runner.
                               # tart = template names a local tart VM;
                               # osb/daytona = template is an image ref
     credentials = ["ANTHROPIC_API_KEY"]  # env var NAMES the run needs;
-                                          # missing → refuse (exit 2) before
-                                          # any bench exists; values travel
-                                          # to the bench, names never values
-                                          # to spans/reports
+                                          # entries are ALTERNATIVES and a
+                                          # list entry is an all-of group:
+                                          # ["KEY", ["TOKEN","BASE_URL"]] =
+                                          # the key alone or the token+
+                                          # endpoint pair, nothing less;
+                                          # no group fully present → refuse
+                                          # (exit 2) before any bench exists;
+                                          # values travel to the bench,
+                                          # names never values to
+                                          # spans/reports
     pass_env = ["ANTHROPIC_DEFAULT_SONNET_MODEL"]  # OPTIONAL non-secret
                                           # knobs forwarded when set, no
                                           # guard — unset means default
@@ -53,6 +59,13 @@ class ScenarioError(ValueError):
     pass
 
 
+def credentials_satisfied(groups: list[list[str]], get) -> bool:
+    """True when at least one alternative group is FULLY present — the
+    guard's whole rule, pure so it is testable without a run. `get` is
+    an env lookup (os.environ.get)."""
+    return any(all(get(name) for name in g) for g in groups)
+
+
 class TomlScenario:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -68,11 +81,21 @@ class TomlScenario:
         # container bench (template = image ref; default per config
         # otherwise, i.e. the sbx tier).
         self.bench = sc.get("bench")
+        # Entries are ALTERNATIVE providers; an entry may be a single env
+        # var name or a LIST of names that must travel together — a token
+        # without its endpoint is half a provider (PR #26 review: the old
+        # any-of guard let the pair half-pass and start a misconfigured
+        # credentialed bench instead of refusing).
         self.credentials = list(sc.get("credentials", []))
-        for i, c in enumerate(self.credentials):
-            if not isinstance(c, str) or not c.strip():
+        for i, entry in enumerate(self.credentials):
+            names = entry if isinstance(entry, list) else [entry]
+            if (not names
+                    or any(not isinstance(n, str) or not n.strip() for n in names)
+                    or any(isinstance(n, list) for n in names)):
                 raise ScenarioError(
-                    f"{path}: scenario.credentials[{i}] must be an env var name")
+                    f"{path}: scenario.credentials[{i}] must be an env "
+                    f"var name or a flat list of them (a group that "
+                    f"travels together)")
         # Optional non-secret env knobs (e.g. a model pin). Forwarded to the
         # bench when present, never guarded — unlike credentials, absence is
         # a legitimate "use the default", not a usage error.
@@ -140,6 +163,16 @@ class TomlScenario:
         parts = [f"subject={self.subject or '-'}", f"agent={self.agent}",
                  f"steps={len(self.steps)}", f"verify={len(self.files)}f/{len(self.commands)}c"]
         return " ".join(parts)
+
+    def credential_groups(self) -> list[list[str]]:
+        """Declared credentials as ALTERNATIVES: one group per entry —
+        a str entry is a group of one, a list entry an all-of group."""
+        return [e if isinstance(e, list) else [e] for e in self.credentials]
+
+    def credential_names(self) -> list[str]:
+        """Flat env-var names (forwarding, reports, spans) — the group
+        structure is guard-only and never reaches the record."""
+        return [n for g in self.credential_groups() for n in g]
 
 
 def load_dir(scenarios_dir: str | Path) -> dict[str, TomlScenario]:

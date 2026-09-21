@@ -93,7 +93,7 @@ class PtyDriver:
         diff-rendered TUI re-sends only changed cells per frame, so a
         short window shows a screen with holes in it."""
         self._pump()
-        rendered = _render(self.transcript[-400000:])
+        rendered = _render(self.transcript[-400000:], self.lines)
         return "\n".join(rendered.splitlines()[-self.lines:])
 
     def send_line(self, text: str) -> None:
@@ -209,7 +209,7 @@ _KEYS = {"enter": "\r", "escape": "\x1b", "down": "\x1b[B", "up": "\x1b[A",
          "ctrl-c": "\x03"}
 
 
-def _render(raw: str) -> str:
+def _render(raw: str, height: int = 0) -> str:
     """Terminal-screen reconstruction from a raw pty byte stream.
     claude-code's TUI is a DIFF renderer: each frame re-sends only the
     cells that changed since the last one, positioning runs with
@@ -221,9 +221,17 @@ def _render(raw: str) -> str:
     stream's cursor moves and writes into a (row, col) buffer, honor
     the clears, read the buffer back. Covers exactly the ops the TUI
     emits — CHA/CUP/VPA, CUU/CUD/CUF/CUB, EL, ED, CR/LF/BS; SGR and
-    everything else drops."""
+    everything else drops.
+
+    With `height` the buffer is a SCROLLING viewport: an LF on the
+    last row scrolls (top row lost) instead of growing the model.
+    After a scroll, absolute addressing (CUP/VPA row N) means viewport
+    row N, not history row N — an unbounded model parks those writes
+    above the visible window, so anchored turns (`after`, pickers)
+    time out on a sufficiently chatty session (PR #26 review).
+    height=0 keeps the unbounded model: whole history, no scroll."""
     rows: list[dict[int, str]] = [{}]
-    r = c = 0
+    r = c = offset = 0        # cursor is viewport-relative; offset = top
 
     def _row(idx: int) -> dict[int, str]:
         while len(rows) <= idx:
@@ -255,39 +263,53 @@ def _render(raw: str) -> str:
                 elif final in ("H", "f"):
                     r = max(0, p(0) - 1)
                     c = max(0, p(1) - 1)
-                elif final == "K":               # EL — clear in row
+                if height and r > height - 1:    # no rows below the
+                    r = height - 1               # viewport on a real screen
+                if final == "K":                 # EL — clear in row
                     mode = nums[0] if body.isdigit() and nums[0] in (1, 2) else 0
-                    cells = _row(r)
+                    cells = _row(r + offset)
                     if mode == 0:
-                        rows[r] = {k: v for k, v in cells.items() if k < c}
+                        rows[r + offset] = {k: v for k, v in cells.items() if k < c}
                     elif mode == 1:
-                        rows[r] = {k: v for k, v in cells.items() if k > c}
+                        rows[r + offset] = {k: v for k, v in cells.items() if k > c}
                     else:
-                        rows[r] = {}
-                elif final == "J":               # ED — clear screen
+                        rows[r + offset] = {}
+                elif final == "J":               # ED — clear the viewport
                     mode = nums[0] if body.isdigit() and nums[0] in (1, 2) else 0
+                    top = offset if height else 0
+                    bottom = offset + height if height else len(rows)
                     if mode == 2:
-                        rows[:] = [{} for _ in rows]
+                        rows[:] = [{} if top <= idx < bottom else rw
+                                   for idx, rw in enumerate(rows)]
                     elif mode == 0:
-                        for rr in range(r + 1, len(rows)):
-                            rows[rr] = {}
-                        rows[r] = {k: v for k, v in _row(r).items() if k < c}
+                        for rr in range(r + offset + 1, bottom):
+                            if rr < len(rows):
+                                rows[rr] = {}
+                        rows[r + offset] = {k: v for k, v in _row(r + offset).items() if k < c}
                     elif mode == 1:
-                        for rr in range(0, r):
-                            rows[rr] = {}
-                        rows[r] = {k: v for k, v in _row(r).items() if k > c}
+                        for rr in range(top, r + offset):
+                            if rr < len(rows):
+                                rows[rr] = {}
+                        rows[r + offset] = {k: v for k, v in _row(r + offset).items() if k > c}
                 i = j + 1
                 continue
             if nxt == "]":                       # OSC — drop to BEL/ST
                 j = raw.find("\x07", i)
                 k = raw.find("\x1b\\", i)
-                ends = [x for x in (j, k + 1 if k != -1 else -1) if x != -1]
+                # ST is TWO bytes (ESC + \): land past BOTH, or the \
+                # itself renders as a visible cell and shifts every
+                # column after it (PR #26 review).
+                ends = [x for x in (j, k + 2 if k != -1 else -1) if x != -1]
                 i = min(ends) if ends else n
                 continue
             i += 2                               # other 2-byte escapes
             continue
         if ch == "\n":
-            r += 1; c = 0
+            if height and r >= height - 1:
+                offset += 1                      # viewport scrolls; the
+            else:                                # cursor stays on the
+                r += 1                           # last row
+            c = 0
         elif ch == "\r":
             c = 0
         elif ch == "\b":
@@ -295,16 +317,24 @@ def _render(raw: str) -> str:
         elif ch == "\t":
             c += 8 - (c % 8)
         elif ch >= " ":                          # printable only
-            _row(r)[c] = ch
+            _row(r + offset)[c] = ch
             c += 1
         i += 1
+    # Pad the viewport to height: a trailing LF scrolls a blank row in,
+    # and the storage list (grown lazily by writes) may not have it.
+    visible = ([_row(idx) for idx in range(offset, offset + height)]
+               if height else rows)
     out = []
-    for cells in rows:
+    for cells in visible:
         if not cells:
             out.append("")
             continue
         width = max(cells)
         out.append("".join(cells.get(k, " ") for k in range(width + 1)))
+    # Viewport mode keeps blank trailing rows (a real screen has them);
+    # unbounded mode trims them (it renders history, not a screen).
+    if height:
+        return "\n".join(out)
     return "\n".join(out).rstrip("\n")
 
 

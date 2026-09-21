@@ -38,7 +38,10 @@ name = "agent-pty-smoke"
 # real.
 agent = "shell"
 template = "gentar-bench-v1"
-credentials = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
+# The pair is a GROUP (all-or-nothing): a token without its endpoint
+# is half a provider — the guard refuses (exit 2) unless BOTH are set,
+# never starts a misconfigured credentialed bench (PR #26 review).
+credentials = [["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]
 # Optional cheaper-model pin, same slot var as agent-smoke (proven
 # live on the z.ai plan): forwarded when set, no guard.
 pass_env = ["ANTHROPIC_DEFAULT_SONNET_MODEL"]
@@ -128,5 +131,9 @@ delay = 0.4
 [budget]
 tokens = 20000
 
+# EXACT content, not substring: the task says "exactly this content",
+# so grep -F is too forgiving — an agent that wraps the text in prose
+# or markdown must fail. $(cat) strips trailing newlines, so a plain
+# "content + newline" write still passes (PR #26 review).
 [[verify.commands]]
-command = 'test -f "$WORKSPACE_DIR/hello.txt" && grep -F gentar-agent-pty "$WORKSPACE_DIR/hello.txt"'
+command = 'test -f "$WORKSPACE_DIR/hello.txt" && test "$(cat "$WORKSPACE_DIR/hello.txt")" = gentar-agent-pty'

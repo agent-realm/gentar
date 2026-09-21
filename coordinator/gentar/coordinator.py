@@ -17,7 +17,8 @@ from gentar.provenance import run_attrs
 from gentar.report import RunReport
 from gentar.scenarios import REGISTRY, known_names
 from gentar.spans import Spans, new_run_id
-from gentar.toml_scenario import TomlScenario, load_dir
+from gentar.toml_scenario import (TomlScenario, credentials_satisfied,
+                                  load_dir)
 
 # Subject label for subjectless builtins/scenarios: the arena itself.
 ARENA_SUBJECT = "arena"
@@ -139,31 +140,36 @@ def run(name: str, cfg: Config | None = None) -> int:
 
     # -- credential guard: refuse before any bench exists ----------------
     # Declared credentials (env var names) name the env vars a bench may
-    # need. Providers are alternatives, not conjunctions: a scenario can
-    # declare ANTHROPIC_API_KEY (first-party) alongside
+    # need. Entries are ALTERNATIVE providers, not conjunctions: a
+    # scenario can declare ANTHROPIC_API_KEY (first-party) alongside
     # ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL (any Anthropic-compatible
     # endpoint — GLM coding plan, routers, proxies) and each runner sets
-    # the one it has. The guard refuses (exit 2) only when NONE of the
-    # declared names is present — no auth at all is a usage error, not a
-    # test failure; a present-but-invalid value fails auth INSIDE the
-    # bench, honestly, with the transcript as evidence. Names only in the
-    # report — a value must never reach a span, a report, or a log line.
+    # the one it has — but a provider that IS a pair travels as a group
+    # entry (all-or-nothing): a token without its endpoint is half a
+    # provider and must refuse, not start a misconfigured bench (PR #26
+    # review). The guard refuses (exit 2) when NO group is fully present
+    # — no auth at all is a usage error, not a test failure; a
+    # present-but-invalid value fails auth INSIDE the bench, honestly,
+    # with the transcript as evidence. Names only in the report — a
+    # value must never reach a span, a report, or a log line.
     if scenario and scenario.credentials:
-        missing = [c for c in scenario.credentials if not os.environ.get(c)]
-        if len(missing) == len(scenario.credentials):
+        groups = scenario.credential_groups()
+        if not credentials_satisfied(groups, os.environ.get):
+            shapes = ", ".join("+".join(g) if len(g) > 1 else g[0]
+                               for g in groups)
             msg = (f"credential guard: scenario {name!r} needs at least "
-                   f"one of {', '.join(scenario.credentials)} — none "
-                   f"provided (refusing before any bench exists)")
+                   f"one of {shapes} — no group fully provided (refusing "
+                   f"before any bench exists)")
             print(f"Error: {msg}")
             spans = Spans(cfg)
             spans.emit(ARENA_SUBJECT, "", name, "credential.refuse", "error",
-                       attrs={"credentials": ",".join(scenario.credentials)},
+                       attrs={"credentials": ",".join(scenario.credential_names())},
                        detail="run refused: missing credentials")
             report = RunReport(
                 scenario=name,
                 run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
                 subject=(scenario.subject or ARENA_SUBJECT),
-                credentials=scenario.credentials,
+                credentials=scenario.credential_names(),
                 reproduce=f"docker compose run --rm coordinator run {name}",
                 error=msg)
             report.mark("refuse", 2)
@@ -181,7 +187,7 @@ def run(name: str, cfg: Config | None = None) -> int:
         scenario=name, run_id=run_id, subject=subject,
         agent=(scenario.agent if scenario else "shell"),
         template=(scenario.template or "") if scenario else "",
-        credentials=(scenario.credentials if scenario else []),
+        credentials=(scenario.credential_names() if scenario else []),
         sandbox=run_id,
         started=time.strftime("%Y-%m-%d %H:%M:%S %z"),
         reproduce=f"docker compose run --rm coordinator run {name}")

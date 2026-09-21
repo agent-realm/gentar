@@ -38,9 +38,11 @@ def _step(bench: BenchHost, subject: str, run_id: str, scenario_name: str,
 def cred_env(scenario: TomlScenario) -> dict[str, str]:
     """Declared credentials present in the coordinator's environment —
     the tier-1 transport (env vars on a throwaway bench). The guard in
-    coordinator.run refused already when any was missing, so presence
-    here is expected; the `if` keeps direct library use safe."""
-    return {c: os.environ[c] for c in scenario.credentials
+    coordinator.run refused already when no alternative group was fully
+    present, so a satisfied group's members are expected here; the `if`
+    keeps direct library use safe (a partial group forwards only what
+    exists — the guard's refusal is the real gate)."""
+    return {c: os.environ[c] for c in scenario.credential_names()
             if os.environ.get(c)}
 
 

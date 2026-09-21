@@ -9,12 +9,13 @@
 # the pinned tree sits at an exact release tag, and the pinned commit
 # differs from the subject HEAD (machinery is never the ref itself).
 #
-# Credentials: same provider-agnostic tier-1 shape as agent-smoke.
+# Credentials: same provider-agnostic tier-1 shape as agent-smoke
+# (alternatives; the token+endpoint pair is an all-of group).
 [scenario]
 name = "agent-profile-smoke"
 subject = "kommander-playbook"
 template = "gentar-bench-v1"
-credentials = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
+credentials = ["ANTHROPIC_API_KEY", ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]
 # Cheap-model pin rides the same slot var as agent-smoke (no guard).
 pass_env = ["ANTHROPIC_DEFAULT_SONNET_MODEL"]
 

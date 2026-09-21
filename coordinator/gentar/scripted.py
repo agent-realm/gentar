@@ -95,8 +95,16 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
         # Wait for the command itself to finish (EOF), not for a quiet
         # screen — headless agents are silent mid-run. Headless
         # scenarios bound themselves (`timeout` in the command); 300s
-        # covers the tail of a scripted one.
-        driver.wait_done(300)
+        # covers the tail of a scripted one. A TUI that never exits is
+        # NOT a pass: the file may exist while the interactive exit
+        # (e.g. the ctrl-c pair) silently failed, and close() below
+        # would mask that with a force kill — fail honestly instead
+        # (PR #26 review).
+        if not driver.wait_done(300):
+            raise TurnFailure(
+                "driver command never exited after the final turn "
+                "(wait_done 300s) — the scripted exit keys did not "
+                "produce EOF")
         return f"driver ok: {len(scenario.turns)} turns"
     finally:
         spans.emit(subject, run_id, name, "driver.transcript",
