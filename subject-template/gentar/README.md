@@ -12,7 +12,7 @@ A subject states five things, all of them in this directory:
 |---|---|---|
 | subject name | `subject = "…"` in every scenario TOML + `SUBJECT` in `run.sh` | `<REPO>` |
 | suites | `scenarios/*.toml` — decisions + reality assertions | see below |
-| credentials | `credentials = [names]` per suite (alternatives; a list entry is an all-of group) | per suite |
+| credentials | `credentials = [names]` per suite — entries are alternatives; missing them all refuses (exit 2) before a bench exists. Keep them flat: all-of groups (a nested list) are not in the engine on `main` yet | per suite |
 | trigger | `.github/workflows/<arena workflow>` (or a dispatch job into the central arena) | see workflow |
 | engine pin | `GENTAR_REF` (default `main`), re-fetched every run | `main` |
 
@@ -67,15 +67,24 @@ gentar/dryrun.py                                   # every suite
 gentar/dryrun.py gentar/scenarios/first-suite.toml
 ```
 
-Runs a suite's steps, driver turns and assertions in a scratch `HOME` in about
+Runs a suite's steps, driver turns and assertions in a scratch home in about
 a second — no bench, no sandbox, no network. A scenario is shell inside TOML,
 three levels of quoting deep, and the arena was the only thing that ever ran
 it: one missing quote cost a bench VM and several minutes to find. This finds
 it before the push.
 
+The layout mirrors a bench: your checkout is staged into `WORKSPACE_DIR`,
+which sits *under* `HOME` rather than being it, and steps run with the
+workspace as cwd. So a `~/…` assertion asks about the pilot's home, never
+about a file that shipped in your repo.
+
 It is not a substitute for the arena. There is no sandbox, no template and no
 network policy, so it proves the shell and the assertions while the arena
-proves the isolation. Suites declaring `credentials` are skipped.
+proves the isolation. Two kinds of suite it will not claim to have checked:
+those declaring `credentials` are skipped (they need a real agent and a real
+key), and those whose `[driver]` uses `pick` or `abort` turns come back
+`UNVERIFIED` with a nonzero exit — those need the real driver, and a picker
+that never matched must not read as a pass.
 
 Add a suite = add a TOML here. Schema and vocabulary:
 [gentar scenario schema](https://github.com/agent-realm/gentar/blob/main/coordinator/gentar/toml_scenario.py)

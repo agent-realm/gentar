@@ -63,13 +63,24 @@ cd "$ARENA"
 
 # Stage THIS checkout (working tree, uncommitted changes included) as
 # the subject. Plain copy: symlinks don't resolve through the bind.
-# Exclude the arena itself — it holds .env and the bench key, which
-# must never ride into the subject.
+#
+# Three exclusions, each for a reason:
+#   gentar/.arena    holds .env and the bench key — secrets must never
+#                    ride into a bench the subject's own agent can read
+#   gentar/reports   previous verdicts; dead weight
+#   .git             a CREDENTIAL on CI. actions/checkout leaves its
+#                    auth header in .git/config, so shipping .git hands
+#                    the job token to anything running in the bench
+#                    (PR #27 review). It is also useless there — a
+#                    worktree's .git is a host-absolute pointer file —
+#                    which is why .gentar-version is frozen below.
+# A subject whose scenarios genuinely need git history must ship it
+# deliberately, from a checkout that persists no credentials.
 mkdir -p subjects out
 rm -rf "subjects/$SUBJECT"
 mkdir "subjects/$SUBJECT"
 (cd "$REPO" && tar \
-  --exclude=./gentar/.arena --exclude=./gentar/reports \
+  --exclude=./.git --exclude=./gentar/.arena --exclude=./gentar/reports \
   -cf - .) | tar -xf - -C "subjects/$SUBJECT"
 # A worktree's .git is a pointer file with a host-absolute path — dead
 # on the bench — so `git describe` there finds nothing. Freeze the
@@ -100,18 +111,51 @@ docker compose -p "arena-$SUBJECT" build coordinator
 # boundary. Forward only the ones actually set, so an unset variable stays
 # unset inside rather than arriving empty-but-present.
 #
-#   ANTHROPIC_*                  credential, endpoint, and EVERY model slot
-#                                (pinning one slot is not enough)
-#   GENTAR_BUDGET_CAP            ceiling the budget guard enforces
+# The names are READ FROM THE SCENARIOS about to run, not from a fixed
+# list: `credentials` and `pass_env` are arbitrary env var names in the
+# schema, so a hardcoded ANTHROPIC_* allowlist silently drops
+# OPENAI_API_KEY or any subject's own knob — the coordinator then
+# refuses (exit 2) for a variable the caller did set, or quietly runs
+# without an optional one (PR #27 review). Parsed with awk rather than a
+# TOML library: this must work on a stock runner with no python
+# dependency. The two shapes the schema allows are
+# `credentials = ["A", ["B", "C"]]` (groups, possibly spanning lines)
+# and `pass_env = ["D"]`; tracking bracket depth reads both and stops at
+# the array's real end rather than at the first `]` on a later line.
+# Commented-out examples are skipped — a `#` line is not a declaration.
+#
+# GENTAR_BUDGET_CAP is the one fixed addition: it configures the budget
+# guard itself, so no scenario declares it.
+extract_env_names() {         # files... -> one env var name per line
+  awk '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
+    inarr {
+      line = $0
+      while (match(line, /"[A-Za-z_][A-Za-z0-9_]*"/)) {
+        print substr(line, RSTART + 1, RLENGTH - 2)
+        line = substr(line, RSTART + RLENGTH)
+      }
+      depth += gsub(/\[/, "[") - gsub(/\]/, "]")
+      if (depth <= 0) inarr = 0
+    }
+  ' "$@"
+}
 # ${FORWARD[@]+"..."} rather than "${FORWARD[@]}": under `set -u`, bash 3.2
 # (still the system bash on macOS) treats an EMPTY array expansion as an
 # unbound variable and aborts. Credential-less is the normal case on a dev
 # machine, so the plain form would break every local run.
+SCENARIO_FILES=()
+for s in "$SCENARIO" "$@"; do
+  [ -f "$HERE/scenarios/$s.toml" ] && SCENARIO_FILES+=("$HERE/scenarios/$s.toml")
+done
+declared=$(
+  { [ ${#SCENARIO_FILES[@]} -eq 0 ] \
+      || extract_env_names ${SCENARIO_FILES[@]+"${SCENARIO_FILES[@]}"}
+    echo GENTAR_BUDGET_CAP
+  } | sort -u)
 FORWARD=()
-for var in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL \
-           ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL \
-           ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL \
-           GENTAR_BUDGET_CAP; do
+for var in $declared; do
   [ -n "${!var:-}" ] && FORWARD+=(-e "$var")
 done
 

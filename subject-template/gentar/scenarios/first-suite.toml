@@ -17,13 +17,20 @@ agent = "shell"               # oracle vehicle: a plain sandbox shell
                                 # default): tart = macOS VM,
                                 # osb/daytona = template is an image ref
 
-# credentials = ["ANTHROPIC_API_KEY",
-#                ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]
-# Env var NAMES an agent-in-the-loop suite needs. Entries are
-# ALTERNATIVES; a list entry is an all-of GROUP (a token without its
-# endpoint is half a provider and refuses, exit 2, before any bench
-# exists). Names travel to spans/reports — never values. Omit for
-# oracle suites like this one.
+# credentials = ["ANTHROPIC_API_KEY"]
+# Env var NAMES an agent-in-the-loop suite needs — never values; the
+# names travel to spans and reports, the values only into the bench.
+# Entries are ALTERNATIVES: any one present satisfies the guard, and
+# missing them all refuses (exit 2) before a bench exists. Omit
+# entirely for oracle suites like this one.
+#
+# All-of GROUPS — a nested list like
+#   credentials = ["ANTHROPIC_API_KEY",
+#                  ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]
+# meaning "a token without its endpoint is half a provider, refuse" —
+# are NOT in the engine on main yet (the parser requires flat strings
+# and raises on a nested list, so a scenario using one fails to load).
+# Keep entries flat until your pinned GENTAR_REF has group support.
 
 # pass_env = ["SOME_NON_SECRET_KNOB"]
 # Optional non-secret knobs forwarded when set (e.g. a cheaper-model

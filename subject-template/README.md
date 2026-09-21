@@ -20,7 +20,7 @@ Adopting gentar is five declarations, all living in the copied
 |---|---|---|---|
 | 1 | **Subject name** | `subject = "…"` in every scenario TOML; `SUBJECT` in `run.sh` | your repo's basename |
 | 2 | **Suites** | `gentar/scenarios/*.toml` — install *decisions* + reality assertions, never scripts | `first-suite.toml`, fully commented |
-| 3 | **Credentials** | `credentials = [names]` per suite — env var NAMES, alternatives; a list entry is an all-of group; none = oracle suite | none (first-suite is credential-less) |
+| 3 | **Credentials** | `credentials = [names]` per suite — env var NAMES (flat strings; all-of groups aren't in the engine on `main` yet), alternatives, none = oracle suite | none (first-suite is credential-less) |
 | 4 | **Trigger** | `.github/workflows/gentar-arena.yml` (own arena) and/or a ~10-line dispatch job (central arena — below) | own-arena workflow, push + tags + dispatch |
 | 5 | **Engine pin** | `GENTAR_REF` (default `main`), re-fetched and rebuilt every run | `main` |
 

@@ -15,15 +15,24 @@ same way.
 What it is NOT: a bench. There is no sandbox, no template, no network policy,
 no real agent. It proves the shell and the assertions; the arena still proves
 the isolation. Suites declaring `credentials` are skipped -- they need a real
-agent and a real key.
+agent and a real key. Suites whose [driver] uses `pick` or `abort` turns come
+back UNVERIFIED with a nonzero exit: those turns need the real driver, and a
+picker that never matched or a danger gate that never fired must not read as
+a pass.
 
 Two adaptations live at the top of the file (the only edits most subjects
 need):
 
   prepare(env)      called once before the sweep; build your CLI or stage
-                    fixtures into the scratch HOME here
+                    fixtures here (env["HOME"] is the scratch home,
+                    env["WORKSPACE_DIR"] the staged checkout)
   SKIP_STEP_SUBSTR  substrings of [oracle].steps that prepare() already
                     covered locally (e.g. "docker build"), skipped verbatim
+
+Layout matches the bench: the repo is staged into WORKSPACE_DIR, which is a
+directory UNDER HOME, and steps run with WORKSPACE_DIR as cwd. So a `~/...`
+assertion is about the pilot's home, never about a file that shipped in the
+checkout.
 
 One difference from the bench has bitten before, so expect more of its kind:
 the scratch HOME always has a stub `claude` on PATH, and a default bench has
@@ -32,7 +41,7 @@ itself rather than inherit it from this harness.
 
 Genericized from the reference subject (claude-playbooks/gentar).
 """
-import os, pty, re, select, shutil, subprocess, sys, tempfile, time
+import os, pty, re, select, shlex, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -89,8 +98,8 @@ def scratch_home() -> str:
     return home
 
 
-def stage_subject(home: str) -> None:
-    """Copy the repo into the scratch home, as the bench does.
+def stage_subject(workspace: str) -> None:
+    """Copy the repo into the scratch WORKSPACE, as the bench does.
 
     In the arena, oracle pushes the staged subject INTO the bench
     workspace, so $WORKSPACE_DIR contains the checkout at its root and
@@ -98,6 +107,11 @@ def stage_subject(home: str) -> None:
     same must hold here or a suite that passes locally and fails in the
     bench (or worse, the reverse) is a harness lie. .git, the engine
     clone and old reports stay out — dead weight on the bench too.
+
+    The workspace is a directory UNDER the home, never the home itself
+    (the bench's is `<home>/gentar-workspaces/<run>`). Collapsing the
+    two made a repo file named `.config/tool` satisfy a `~/.config/tool`
+    assertion before any step created it (PR #27 review).
     """
     def skip(directory, contents):
         d = Path(directory)
@@ -106,17 +120,19 @@ def stage_subject(home: str) -> None:
         if d == REPO / "gentar":
             return [c for c in contents if c in (".arena", "reports")]
         return []
-    shutil.copytree(REPO, home, dirs_exist_ok=True, symlinks=True,
+    shutil.copytree(REPO, workspace, dirs_exist_ok=True, symlinks=True,
                     ignore=skip)
 
 
-def run_one(path: Path, env: dict, home: str) -> int:
+def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
     sc = TomlScenario(path)
     if sc.credentials:
         print(f"{path.name}: SKIPPED (declares credentials; needs a real agent)")
         return 0
     fails, log = 0, []
-    sh = lambda c: subprocess.run(["sh", "-c", c], env=env, cwd=home,
+    # cwd is the WORKSPACE (where the checkout was staged), as on a
+    # bench; HOME in env stays a separate directory.
+    sh = lambda c: subprocess.run(["sh", "-c", c], env=env, cwd=workspace,
                                   capture_output=True, text=True)
 
     for i, step in enumerate(sc.steps):
@@ -127,14 +143,32 @@ def run_one(path: Path, env: dict, home: str) -> int:
             fails += 1
             log.append(f"  step {i} EXIT {r.returncode}\n    {step[:160]}\n    {(r.stderr or r.stdout).strip()[:300]}")
 
+    unreplayed: list[str] = []
     if sc.driver_command:
-        fails += drive(sc, env, home, log)
+        fails += drive(sc, env, workspace, log, unreplayed)
 
+    # File assertions go through the same shell as the steps, for the
+    # same reason the engine runs them inside the bench: `test -e` and
+    # `grep -F` resolve a RELATIVE path against the workspace there, so
+    # checking from the harness's own cwd would answer a different
+    # question than the arena does. `~` is expanded to the scratch home
+    # exactly as check_files expands it to the bench pilot's.
     for f in sc.files:
         p = f["path"].replace("~", home, 1) if f["path"].startswith("~") else f["path"]
-        if not os.path.lexists(p):
-            fails += 1
-            log.append(f"  file MISSING {f['path']}")
+        contains = f.get("contains")
+        if contains is None:
+            # file-exists
+            if sh(f"test -e {shlex.quote(p)}").returncode:
+                fails += 1
+                log.append(f"  file MISSING {f['path']}")
+        else:
+            # file-contains — the engine greps, so a file with the wrong
+            # contents must fail here too, not just be present (PR #27
+            # review). grep also reports a missing file as nonzero,
+            # matching check_files exactly.
+            if sh(f"grep -F -- {shlex.quote(contains)} {shlex.quote(p)}").returncode:
+                fails += 1
+                log.append(f"  file {f['path']} LACKS {contains!r} (or is missing)")
 
     for i, c in enumerate(sc.commands):
         r = sh(c["command"])
@@ -144,7 +178,18 @@ def run_one(path: Path, env: dict, home: str) -> int:
             want = f"  (wanted {c['contains']!r})" if "contains" in c else ""
             log.append(f"  verify {i} FAIL{want}\n    {c['command'][:180]}\n    {(r.stdout + r.stderr).strip()[:300] or '(no output)'}")
 
-    print(f"{path.name}: {'ALL PASS' if not fails else f'{fails} FAILURES'}")
+    if not fails:
+        verdict = "ALL PASS"
+    elif unreplayed and fails == len(unreplayed):
+        # Nothing actually failed — the harness just cannot verify
+        # these. Say so instead of either lying (ALL PASS) or crying
+        # wolf (FAILURES); the exit code is still nonzero, so CI and the
+        # caller treat "unverified" as "not proven".
+        verdict = (f"UNVERIFIED ({', '.join(sorted(set(unreplayed)))} "
+                   "turns need the arena)")
+    else:
+        verdict = f"{fails} FAILURES"
+    print(f"{path.name}: {verdict}")
     for line in log:
         print(line)
     if fails:
@@ -152,11 +197,15 @@ def run_one(path: Path, env: dict, home: str) -> int:
     return fails
 
 
-def drive(sc, env, home, log) -> int:
-    """Replay [driver].turns over a pty, as gentar/scripted.py does."""
+def drive(sc, env, cwd, log, unreplayed) -> int:
+    """Replay [driver].turns over a pty, as gentar/scripted.py does.
+
+    `unreplayed` collects turn types this harness cannot exercise, so
+    the caller can refuse to print ALL PASS for them.
+    """
     pid, fd = pty.fork()
     if pid == 0:
-        os.chdir(home)
+        os.chdir(cwd)
         os.execvpe("sh", ["sh", "-c", sc.driver_command], env)
     buf, fails = "", 0
 
@@ -190,8 +239,17 @@ def drive(sc, env, home, log) -> int:
             if not ok:
                 log.append(f"  turn {i} expect /{t['pattern']}/: pattern never appeared")
         else:
-            ok = True
-            log.append(f"  turn {i}: type {kind!r} not replayed locally (arena only)")
+            # `pick` (navigate a picker by ❯ cursor line) and `abort`
+            # (the danger gate) need the real driver. Counting them as
+            # passes printed ALL PASS for a suite whose picker label was
+            # absent or whose danger gate never fired — a harness lie in
+            # the dangerous direction (PR #27 review). Not replayed is
+            # not verified: the suite is reported UNVERIFIED and the
+            # dry-run does not claim success for it.
+            ok = False
+            unreplayed.append(kind)
+            log.append(f"  turn {i}: type {kind!r} needs the real driver "
+                       f"— NOT verified here (run it in the arena)")
         if not ok:
             fails += 1
     try:
@@ -207,11 +265,15 @@ def drive(sc, env, home, log) -> int:
 def main() -> int:
     paths = [Path(a) for a in sys.argv[1:]] or sorted((REPO / "gentar/scenarios").glob("*.toml"))
     home = scratch_home()
-    stage_subject(home)
-    env = dict(os.environ, HOME=home, WORKSPACE_DIR=home,
+    # Workspace UNDER home, as on a bench — never equal to it, or a
+    # checkout file can satisfy a `~/...` assertion for free.
+    workspace = os.path.join(home, "gentar-workspaces/dryrun")
+    os.makedirs(workspace, exist_ok=True)
+    stage_subject(workspace)
+    env = dict(os.environ, HOME=home, WORKSPACE_DIR=workspace,
                PATH=f"{home}/.local/bin:" + os.environ["PATH"])
     prepare(env)
-    return 1 if sum(run_one(p, env, home) for p in paths) else 0
+    return 1 if sum(run_one(p, env, home, workspace) for p in paths) else 0
 
 
 if __name__ == "__main__":
