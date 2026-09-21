@@ -11,7 +11,7 @@ from gentar.benchhost import BenchHost
 from gentar.config import Config
 from gentar.report import AssertRecord, RunReport, StepRecord
 from gentar.spans import Spans
-from gentar.toml_scenario import TomlScenario
+from gentar.toml_scenario import TomlScenario, satisfied_group
 
 
 def _step(bench: BenchHost, subject: str, run_id: str, scenario_name: str,
@@ -36,14 +36,20 @@ def _step(bench: BenchHost, subject: str, run_id: str, scenario_name: str,
 
 
 def cred_env(scenario: TomlScenario) -> dict[str, str]:
-    """Declared credentials present in the coordinator's environment —
-    the tier-1 transport (env vars on a throwaway bench). The guard in
-    coordinator.run refused already when no alternative group was fully
-    present, so a satisfied group's members are expected here; the `if`
-    keeps direct library use safe (a partial group forwards only what
-    exists — the guard's refusal is the real gate)."""
-    return {c: os.environ[c] for c in scenario.credential_names()
-            if os.environ.get(c)}
+    """The ONE winning alternative group, forwarded whole — the tier-1
+    transport (env vars on a throwaway bench).
+
+    Not every declared name that happens to be set: a second, partially
+    configured alternative would then ride along and reconfigure the
+    winner. Concretely, `ANTHROPIC_API_KEY` satisfies the guard while a
+    stray `ANTHROPIC_BASE_URL` (its token absent, so its own group never
+    won) redirects that key at another endpoint — the exact mixed
+    provider the all-of grouping exists to prevent (PR #26 review round
+    3). The guard in coordinator.run refused already when no group was
+    complete; if a caller reaches here anyway, forward nothing rather
+    than a half provider."""
+    group = satisfied_group(scenario.credential_groups(), os.environ.get)
+    return {c: os.environ[c] for c in (group or [])}
 
 
 def run_env(scenario: TomlScenario) -> dict[str, str]:

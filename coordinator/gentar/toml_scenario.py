@@ -59,11 +59,24 @@ class ScenarioError(ValueError):
     pass
 
 
+def satisfied_group(groups: list[list[str]], get) -> list[str] | None:
+    """The FIRST fully-present alternative group, or None when none is
+    complete. Declaration order is the preference order, and the result
+    is also what may be FORWARDED: a name outside the winning group is a
+    stray half-provider, not a credential this run chose (PR #26 review
+    round 3 — a set ANTHROPIC_BASE_URL rode along with a winning
+    ANTHROPIC_API_KEY and redirected it). Pure so the guard's whole rule
+    is testable without a run; `get` is an env lookup (os.environ.get)."""
+    for g in groups:
+        if all(get(name) for name in g):
+            return list(g)
+    return None
+
+
 def credentials_satisfied(groups: list[list[str]], get) -> bool:
     """True when at least one alternative group is FULLY present — the
-    guard's whole rule, pure so it is testable without a run. `get` is
-    an env lookup (os.environ.get)."""
-    return any(all(get(name) for name in g) for g in groups)
+    guard's rule as a predicate."""
+    return satisfied_group(groups, get) is not None
 
 
 class TomlScenario:

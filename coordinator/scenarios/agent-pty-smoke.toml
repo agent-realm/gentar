@@ -131,9 +131,13 @@ delay = 0.4
 [budget]
 tokens = 20000
 
-# EXACT content, not substring: the task says "exactly this content",
-# so grep -F is too forgiving — an agent that wraps the text in prose
-# or markdown must fail. $(cat) strips trailing newlines, so a plain
-# "content + newline" write still passes (PR #26 review).
+# EXACT content, byte for byte — the task says "exactly this content",
+# so grep -F is too forgiving (an agent that wraps the text in prose or
+# markdown must fail) and `test "$(cat f)" = …` is too forgiving in the
+# other direction: command substitution strips ALL trailing newlines, so
+# the text plus three blank lines passed too (PR #26 review round 3).
+# cmp compares bytes; the two accepted representations are spelled out —
+# the bare text, or the text with the one ordinary trailing newline a
+# line-oriented writer adds.
 [[verify.commands]]
-command = 'test -f "$WORKSPACE_DIR/hello.txt" && test "$(cat "$WORKSPACE_DIR/hello.txt")" = gentar-agent-pty'
+command = '''f="$WORKSPACE_DIR/hello.txt"; test -f "$f" && { printf 'gentar-agent-pty' | cmp -s - "$f" || printf 'gentar-agent-pty\n' | cmp -s - "$f"; }'''
