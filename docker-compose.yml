@@ -94,10 +94,26 @@ services:
       # it is named here. Interpolation order is shell, then .env, then
       # empty — and empty is what the guard refuses (exit 2). The engine
       # ships no default for any of them.
+      # Vars the bench-config guard can REQUIRE, plus the run knobs a
+      # caller sets per invocation. Compose forwards nothing from the
+      # caller's shell unless it is named here, and CI has no .env — so
+      # an unforwarded required var reads as unset inside the container
+      # and the guard refuses a run the caller configured correctly.
+      #
+      # ONLY vars whose absence means "empty" belong here. `${VAR:-}`
+      # sets the name to an EMPTY STRING, which is present as far as
+      # os.environ.get is concerned, so a var with a non-empty default in
+      # config.py (GENTAR_BENCH_KIND="sbx", GENTAR_OSB_SERVER=…) would
+      # lose that default for every caller. Those stay .env-only.
       GENTAR_BENCH_HOST: ${GENTAR_BENCH_HOST:-}
       GENTAR_BENCH_USER: ${GENTAR_BENCH_USER:-}
+      GENTAR_BENCH_JUMP: ${GENTAR_BENCH_JUMP:-}
       GENTAR_TART_HOST: ${GENTAR_TART_HOST:-}
       GENTAR_TART_USER: ${GENTAR_TART_USER:-}
+      GENTAR_DAYTONA_API_KEY: ${GENTAR_DAYTONA_API_KEY:-}
+      GENTAR_OSB_API_KEY: ${GENTAR_OSB_API_KEY:-}
+      GENTAR_BUDGET_CAP: ${GENTAR_BUDGET_CAP:-}
+      GENTAR_QUARANTINE: ${GENTAR_QUARANTINE:-}
     volumes:
       # Subject checkouts, mounted read-only — never baked into images.
       - ${GENTAR_SUBJECTS_DIR:-./subjects}:/subjects:ro
