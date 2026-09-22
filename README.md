@@ -399,6 +399,12 @@ accident.
 
 ---
 
+## License
+
+MIT — see [LICENSE](LICENSE). The repository is private today; the
+license is the terms under which it is shared, not a statement about
+who can reach it.
+
 ## Design tenets
 
 - **Verdicts from reality.** Files, exit codes, processes, SQL, spans,
