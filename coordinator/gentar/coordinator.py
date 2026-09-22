@@ -7,16 +7,18 @@ row is the one a duration-comparison query selects. Exit code is the
 verdict: 0 pass · 1 fail · 2 usage/config refusal. Dispatches Python
 builtins (smoke) and TOML scenarios (oracle runner)."""
 
+import os
 import time
 
-from gentar.benchhost import BenchHost
+from gentar.benchhost import BenchHost, make_bench
 from gentar.config import Config
 from gentar.oracle import run_oracle
 from gentar.provenance import run_attrs
 from gentar.report import RunReport
 from gentar.scenarios import REGISTRY, known_names
 from gentar.spans import Spans, new_run_id
-from gentar.toml_scenario import TomlScenario, load_dir
+from gentar.toml_scenario import (TomlScenario, credentials_satisfied,
+                                  load_dir)
 
 # Subject label for subjectless builtins/scenarios: the arena itself.
 ARENA_SUBJECT = "arena"
@@ -136,15 +138,94 @@ def run(name: str, cfg: Config | None = None) -> int:
             _write_report(report, cfg)
             return 2
 
+    # -- credential guard: refuse before any bench exists ----------------
+    # Declared credentials (env var names) name the env vars a bench may
+    # need. Entries are ALTERNATIVE providers, not conjunctions: a
+    # scenario can declare ANTHROPIC_API_KEY (first-party) alongside
+    # ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL (any Anthropic-compatible
+    # endpoint — GLM coding plan, routers, proxies) and each runner sets
+    # the one it has — but a provider that IS a pair travels as a group
+    # entry (all-or-nothing): a token without its endpoint is half a
+    # provider and must refuse, not start a misconfigured bench (PR #26
+    # review). The guard refuses (exit 2) when NO group is fully present
+    # — no auth at all is a usage error, not a test failure; a
+    # present-but-invalid value fails auth INSIDE the bench, honestly,
+    # with the transcript as evidence. Names only in the report — a
+    # value must never reach a span, a report, or a log line.
+    if scenario and scenario.credentials:
+        groups = scenario.credential_groups()
+        if not credentials_satisfied(groups, os.environ.get):
+            shapes = ", ".join("+".join(g) if len(g) > 1 else g[0]
+                               for g in groups)
+            msg = (f"credential guard: scenario {name!r} needs at least "
+                   f"one of {shapes} — no group fully provided (refusing "
+                   f"before any bench exists)")
+            print(f"Error: {msg}")
+            spans = Spans(cfg)
+            spans.emit(ARENA_SUBJECT, "", name, "credential.refuse", "error",
+                       attrs={"credentials": ",".join(scenario.credential_names())},
+                       detail="run refused: missing credentials")
+            report = RunReport(
+                scenario=name,
+                run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+                subject=(scenario.subject or ARENA_SUBJECT),
+                credentials=scenario.credential_names(),
+                reproduce=f"docker compose run --rm coordinator run {name}",
+                error=msg)
+            report.mark("refuse", 2)
+            _write_report(report, cfg)
+            return 2
+
+    # -- bench-config guard: refuse before any bench exists --------------
+    # The bench tier this run will actually use — the scenario's `bench`
+    # key, else the install default. Install-identity vars (which host,
+    # which account) have no defaults in config.py: unset means this
+    # install was never configured, which is a usage error (exit 2), not
+    # a test failure. Refusing here rather than at Config load keeps an
+    # unused tier's absence harmless — an sbx-only install never has to
+    # configure tart. Names only; a value must never reach a log line.
+    bench_kind = (scenario.bench if scenario and scenario.bench
+                  else cfg.bench_kind)
+    missing = cfg.missing_bench_env(bench_kind)
+    if missing:
+        # Two shapes: an unknown tier names what it needs in prose, a
+        # known-but-unconfigured one names env vars that are unset.
+        if len(missing) == 1 and missing[0].startswith("a known bench"):
+            msg = (f"bench config: {missing[0]} — refusing before any "
+                   f"bench exists.")
+        else:
+            msg = (f"bench config: {bench_kind} benches need "
+                   f"{' and '.join(missing)} — unset (refusing before any "
+                   f"bench exists). Copy .env.example to .env and set it.")
+        print(f"Error: {msg}")
+        spans = Spans(cfg)
+        spans.emit(ARENA_SUBJECT, "", name, "bench.config.refuse", "error",
+                   attrs={"bench_kind": bench_kind,
+                          "missing": ",".join(missing)},
+                   detail="run refused: bench tier not configured")
+        report = RunReport(
+            scenario=name,
+            run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+            subject=(scenario.subject if scenario and scenario.subject
+                     else ARENA_SUBJECT),
+            reproduce=f"docker compose run --rm coordinator run {name}",
+            error=msg)
+        report.mark("refuse", 2)
+        _write_report(report, cfg)
+        return 2
+
     subject = (scenario.subject or ARENA_SUBJECT) if scenario else ARENA_SUBJECT
     run_kind = "scripted" if (scenario and scenario.driver_command) else "oracle"
-    bench = BenchHost(cfg)
+    # Bench tier: the scenario's `bench` key overrides the install default
+    # (config bench_kind, "sbx"); builtins always use the default tier.
+    bench = make_bench(cfg, kind=(scenario.bench if scenario else ""))
     spans = Spans(cfg)
     run_id = new_run_id(cfg.name_prefix)
     report = RunReport(
         scenario=name, run_id=run_id, subject=subject,
         agent=(scenario.agent if scenario else "shell"),
         template=(scenario.template or "") if scenario else "",
+        credentials=(scenario.credential_names() if scenario else []),
         sandbox=run_id,
         started=time.strftime("%Y-%m-%d %H:%M:%S %z"),
         reproduce=f"docker compose run --rm coordinator run {name}")
@@ -192,7 +273,6 @@ def run(name: str, cfg: Config | None = None) -> int:
         # The scenario owns a sandbox named run_id; rm is idempotent and
         # warns instead of raising so teardown never masks the verdict.
         # GENTAR_KEEP_BENCH=1 preserves it for post-mortem (debugging).
-        import os
         if not os.environ.get("GENTAR_KEEP_BENCH"):
             bench.rm(sandbox)
 

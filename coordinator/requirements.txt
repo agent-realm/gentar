@@ -1,2 +1,5 @@
 clickhouse-connect>=0.8,<0.9
+daytona>=0.198,<1
+opensandbox>=0.1,<0.2
 pexpect>=4.9,<5
+websockets>=13,<18

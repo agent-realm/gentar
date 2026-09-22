@@ -1,0 +1,203 @@
+# <REPO> × gentar (own arena)
+
+This repo carries its own [gentar](https://github.com/agent-realm/gentar)
+arena: scenarios live here, run here, and every run writes a report you
+can hand to an agent to fix what failed.
+
+## What this directory declares
+
+| Declaration | Where | This repo's value |
+|---|---|---|
+| subject name | `subject = "…"` in every scenario TOML + `SUBJECT` in `run.sh` | `<REPO>` |
+| suites | `scenarios/*.toml` — decisions + reality assertions | see below |
+| credentials | `credentials = [names]` per suite — entries are ALTERNATIVES, a list entry is an all-of group (`["KEY", ["TOKEN","BASE_URL"]]` = the key alone, or the token and its endpoint together). None present refuses (exit 2) before a bench exists | per suite |
+| trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | see workflow |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.1.1` |
+
+## Quickstart (local)
+
+Prereqs: Docker, and network reach to a **bench-host** you provide: any
+Linux machine with [`sbx`](https://docs.docker.com/ai/sandboxes/)
+installed and logged in once, reachable over SSH.
+
+```bash
+gentar/run.sh --stage-engine   # clone the pinned engine; no Docker, no bench
+gentar/dryrun.py               # replay every suite locally (~1s)
+gentar/run.sh first-suite      # the real thing
+ls gentar/reports/             # report-<run_id>.md per run
+```
+
+`--stage-engine` also seeds `gentar/.arena/.env` from the engine's
+`.env.example`, whose values are **placeholders**. Set
+`GENTAR_BENCH_HOST` and `GENTAR_BENCH_USER` there to your own machine,
+and `GENTAR_BENCH_KEY_FILE` (there or in the shell) to the key that
+reaches it. gentar ships no bench-host: left unset the coordinator
+refuses with exit 2 before any bench exists, and left as the shipped
+placeholder the run fails at ssh with `Could not resolve hostname
+bench.example.internal`.
+
+Exit code is the verdict: `0` pass · `1` fail · `2` usage/config
+refusal.
+
+Two arenas on one Docker host collide on the published ClickHouse and
+OTLP ports. Move yours without editing anything — the engine's compose
+file reads both as env knobs:
+
+```bash
+GENTAR_CLICKHOUSE_HOST_PORT=8124 GENTAR_OTLP_HOST_PORT=14320 \
+  gentar/run.sh first-suite
+```
+
+A run leaves no containers or volumes behind, guaranteed twice over.
+(Plain `docker compose run --rm` would not: `--rm` removes only the
+coordinator, while `clickhouse` and `otelcol` come up via `depends_on` as
+ordinary `up` containers and `clickhouse` owns a named volume.)
+
+- **Every container is `--rm`.** The compose spec has no per-service
+  auto-remove key and `compose up` has no `--rm`, so the runner starts
+  each arena service as a one-off `compose run -d --rm` — the only way to
+  get daemon-level `AutoRemove`. A stopped container is then removed by
+  the Docker daemon itself, whatever stopped it: ctrl-c, `SIGKILL`, OOM,
+  or the runner dying before its trap can fire.
+- **A trap tears the project down anyway** — pass, fail, refusal and
+  ctrl-c alike — covering the network and anything else left over.
+
+Check residue by this project's own label, never global counts (another
+arena may share the host):
+
+```bash
+docker ps -a --filter label=com.docker.compose.project=arena-<REPO>
+```
+
+To keep a stack up and inspect ClickHouse, set `GENTAR_KEEP_ARENA=1`; you
+then own the teardown, which the runner prints as two commands. Both are
+needed: `compose down` alone refuses the network with "Resource is still
+in use", because it does not stop one-off containers.
+
+## When this repo's code changes
+
+The suites here assert what is true of this repo, so the two move
+together.
+
+- **Code changed, behaviour did not** — nothing to do. The PR trigger
+  re-runs the suites against the change before it lands; the pass is the
+  evidence.
+- **Behaviour changed** — the scenarios change in the **same pull
+  request**. A scenario asserts reality; stale reality fails honestly,
+  and that failure is the suite working. New behaviour is usually a new
+  suite: dry-run it, run it once for real, ship it with the feature.
+  Splitting the code change and the scenario change across two PRs
+  leaves main red in between, and a red main teaches people to ignore
+  the arena.
+- **The engine changed** — nothing happens until someone bumps
+  `GENTAR_REF` in `run.sh`. That is a deliberate change: bump, run every
+  suite, commit the bump on its own with the outcome in the message.
+
+## The fix loop
+
+Every terminal outcome writes `gentar/reports/report-<run_id>.md`
+stating what ran (every step, with output), what was asserted and what
+it actually saw, and a reproduce command (`gentar/run.sh <suite>` — the
+runner rewrites the engine's central-arena default on copy). On a
+failure, that file is a work order:
+
+```
+Read gentar/reports/report-<id>.md, fix the repo, rerun
+`gentar/run.sh <suite>`, iterate until it passes.
+```
+
+The subject is the **working tree** (uncommitted changes included) — fix
+and rerun, no commit needed to test.
+
+Exit `1` is a verdict: an assertion saw something other than the claim.
+Exit `2` is a refusal before any bench existed — a missing credential,
+an unknown scenario name, a budget cap below the suite's declared spend.
+A refusal is a usage error in the invocation, never a red test.
+
+The engine is pinned by `GENTAR_REF`, re-fetched and re-checked-out on
+every run, **and the coordinator image is rebuilt from it**. That last
+part is not optional: the compose service is `build: ./coordinator`, so
+without a build step `docker compose run` reuses a cached image, and on a
+long-lived runner that image drifts months behind the source while
+`GENTAR_REF` looks perfectly honoured. A fresh checkout is not a fresh
+engine.
+
+## Suites
+
+| Suite | Proves |
+|---|---|
+| `first-suite` | the template suite — arena plumbing only; replace with your first real suite |
+
+## Before you push a suite
+
+```bash
+gentar/dryrun.py                                   # every suite
+gentar/dryrun.py gentar/scenarios/first-suite.toml
+```
+
+Runs a suite's steps, driver turns and assertions in a scratch home in about
+a second — no bench, no sandbox, no network. A scenario is shell inside TOML,
+three levels of quoting deep, and the arena was the only thing that ever ran
+it: one missing quote cost a bench VM and several minutes to find. This finds
+it before the push.
+
+It needs a checkout of the engine for its scenario parser — the one
+`gentar/run.sh --stage-engine` makes, so a suite is validated by the
+same engine version that will run it. `GENTAR_ENGINE=/path/to/gentar/coordinator`
+points it at an existing checkout instead.
+
+The layout mirrors a bench: your checkout is staged into `WORKSPACE_DIR`,
+which sits *under* `HOME` rather than being it, and steps run with the
+workspace as cwd. So a `~/…` assertion asks about the pilot's home, never
+about a file that shipped in your repo.
+
+It is not a substitute for the arena. There is no sandbox, no template and no
+network policy, so it proves the shell and the assertions while the arena
+proves the isolation. Two kinds of suite it will not claim to have checked:
+those declaring `credentials` are skipped (they need a real agent and a real
+key), and those whose `[driver]` uses `pick` or `abort` turns come back
+`UNVERIFIED` with a nonzero exit — those need the real driver, and a picker
+that never matched must not read as a pass.
+
+Add a suite = add a TOML here. The schema is the engine's
+`coordinator/gentar/toml_scenario.py` — read the pinned copy under
+`gentar/.arena/` after staging, since that is the parser your suite will
+face. Decisions and reality assertions, never scripts.
+
+## CI (`.github/workflows/`)
+
+The arena workflow runs every suite on pull requests, pushes to main,
+and `v*`/`arena*` tags (edit its `on:` block to taste — triggers are
+yours, the arena doesn't care; the PR trigger's cost is documented in
+the file). It needs a self-hosted runner labeled `arena` with Docker +
+reach to the bench-host; GitHub-hosted runners cannot reach an internal
+bench-host. One-time setup, ~5 min on any always-on machine with Docker:
+
+GitHub → this repo → Settings → Actions → Runners → New self-hosted
+runner → follow the commands → when configuring, labels: `arena`.
+
+Secrets/vars the workflow reads:
+
+- `secrets.BENCH_SSH_KEY` — key the coordinator uses to reach the bench-host
+- `secrets.GENTAR_CLONE_KEY` — read-only deploy key, only if the ENGINE repo is private
+- `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
+- `secrets.ANTHROPIC_API_KEY` or `secrets.ANTHROPIC_AUTH_TOKEN` + `vars.ANTHROPIC_BASE_URL` — agent suites
+- `vars.ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL` — all four, for a routed endpoint
+- `GENTAR_BUDGET_CAP` in the workflow — ceiling the budget guard enforces
+
+All are optional except the bench key; unset agent credentials simply
+leave agent suites out of the sweep, named in the log either way.
+
+The workflow stages the checkout exactly like `run.sh` does, so local
+and CI run the same way.
+
+## Layout
+
+```
+gentar/
+  scenarios/*.toml   # suites (this repo's own)
+  run.sh             # local kickoff — stage, run, report
+  dryrun.py          # local, bench-less step/assertion replay
+  reports/           # run reports land here (gitignored)
+  .arena/            # gentar checkout (gitignored, auto-cloned)
+```

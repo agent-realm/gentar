@@ -1,0 +1,25 @@
+# First daytona-tier scenario: proves the Daytona bench end-to-end —
+# cloud sandbox create through the SDK, ssh access via the per-sandbox
+# expiring token (the username), exec with real exit codes, workspace
+# mint, and teardown. No subject: the substrate is the thing under test
+# (cloud-tier twin of smoke-osb / smoke-macos). python:3.12-slim carries
+# bash and python3; the image restriction is tag/digest, no `latest`.
+# Needs GENTAR_DAYTONA_API_KEY in the coordinator env — NOT declared as a
+# scenario credential (declared values travel into the bench; the api key
+# that mints sandboxes must not live inside one). Missing key fails the
+# tier constructor cleanly before any bench exists.
+[scenario]
+name = "smoke-daytona"
+bench = "daytona"
+template = "python:3.12-slim"
+
+[oracle]
+steps = ["uname -s"]
+
+[[verify.commands]]
+command = "uname -sm"
+contains = "Linux"
+
+[[verify.commands]]
+command = "python3 --version"
+contains = "Python 3.12"

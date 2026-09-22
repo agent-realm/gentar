@@ -16,3 +16,6 @@ subjects/*
 dashboard/out/
 __pycache__/
 *.pyc
+
+# Run reports (out/ bind) — per-run artifacts, never committed
+out/

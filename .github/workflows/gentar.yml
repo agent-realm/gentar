@@ -5,11 +5,14 @@
 #   nightly   — subject + budget-guarded suites, post-merge.
 #   dispatch  — arbitrary scenario/ref, manual or from a subject repo.
 #
-# Everything runs on the self-hosted `gentar-bench` runner (VM 9100 —
-# the arena's own bench-host: Docker + sbx + this compose stack in one
-# place; the coordinator spawns benches by SSHing to itself with the
-# GENTAR_BENCH_KEY repo secret). `docker compose run` exit code IS the
-# verdict — no test-report layer in between.
+# Everything runs on a self-hosted runner labelled `gentar-bench`: a machine
+# with Docker, sbx, and ssh reach to the bench-host named by the repository
+# variables GENTAR_BENCH_HOST / GENTAR_BENCH_USER (in the usual setup the
+# runner IS that bench-host, and the coordinator spawns benches by SSHing to
+# itself with the GENTAR_BENCH_KEY repo secret). Those two variables have no
+# built-in default — unset, the coordinator refuses every run with exit 2.
+# `docker compose run` exit code IS the verdict — no test-report layer in
+# between.
 
 name: gentar
 
@@ -17,6 +20,14 @@ on:
   pull_request:
   push:
     branches: [main]
+    # Keyword tags — run the gate on ANY commit, no merge needed
+    # (same grammar as the claude-playbooks arena):
+    #   arena            → every gate suite, at that commit
+    #   arena-<scenario> → that one suite (e.g. arena-smoke);
+    #                      unknown name → coordinator refuses, exit 2
+    #   v*               → release proof (every gate suite)
+    # Re-run: delete and re-push the tag.
+    tags: ['arena', 'arena-*', 'v*']
   schedule:
     # Off-round minute; nightly post-merge sweep.
     - cron: "17 0 * * *"
@@ -39,19 +50,72 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate suite list lives HERE (single source) — the gate matrix below
+  # consumes it via fromJSON. A keyword tag narrows it: `arena` / `v*`
+  # keep everything, `arena-<scenario>` picks one (name validated by the
+  # coordinator itself — unknown → exit 2 refusal, no bench spent).
+  gate-setup:
+    name: gate setup
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      scenarios: ${{ steps.pick.outputs.scenarios }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Release proof, first gate: a `v*` tag must name the VERSION file
+      # at the commit it points at. Fails here, before the matrix —
+      # a disagreeing tag spends no bench.
+      - name: version matches tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          WANT="v$(cat VERSION)"
+          [ "$TAG" = "$WANT" ] || {
+            echo "release tag $TAG != $WANT (VERSION file) — refusing" >&2
+            exit 1
+          }
+          echo "release tag $TAG matches VERSION"
+
+      - id: pick
+        run: |
+          ALL='["smoke","bench-template-verify","otlp-selfreport","budget-sim","scripted-onboarding","scripted-danger"]'
+          OUT="$ALL"
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$TAG" != "$GITHUB_REF" ]; then
+            case "$TAG" in
+              arena|v*)  OUT="$ALL" ;;
+              arena-*)   OUT="[\"${TAG#arena-}\"]" ;;
+            esac
+          fi
+          echo "scenarios=$OUT" >> "$GITHUB_OUTPUT"
+
   gate:
     name: gate / ${{ matrix.scenario }}
-    # Subjectless deterministic suites gate every PR and main push.
+    # Subjectless deterministic suites gate every PR, main push, and
+    # keyword-tagged commit.
+    needs: [gate-setup]
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: [self-hosted, gentar-bench]
     strategy:
       fail-fast: false
+      # One bench at a time: concurrent matrix jobs on the self-hosted
+      # runner fire concurrent `sbx create` on bench-host, and the
+      # cross-process docker-hub refresh lock turns that contention into
+      # an auth wedge (prompt timeouts) that fails every job.
+      max-parallel: 1
       matrix:
-        scenario: [smoke, bench-template-verify, otlp-selfreport, budget-sim, scripted-onboarding, scripted-danger]
+        scenario: ${{ fromJSON(needs.gate-setup.outputs.scenarios) }}
     env:
       COMPOSE_PROJECT_NAME: gentar-ci
+      GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
+      GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
       SCENARIO: ${{ matrix.scenario }}
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
+      # The runner may host another arena too (a subject repo's
+      # own-arena), whose otelcol publishes the default 4318 — pin ours
+      # aside (same rule as the ClickHouse 8123/8126 split).
+      GENTAR_OTLP_HOST_PORT: "4319"
     steps:
       - uses: actions/checkout@v4
 
@@ -67,17 +131,29 @@ jobs:
         # `run` propagates the coordinator's exit code; a failing
         # scenario fails the job — that IS the contract.
 
+      - name: upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # Per-suite name — matrix jobs upload in parallel.
+          name: gentar-report-${{ matrix.scenario }}
+          path: out/
+          if-no-files-found: warn
+          # A refusal (exit 2) writes no report; the job is already red.
+
       - name: teardown
         if: always()
         run: |
           docker compose down -v --remove-orphans || true
-          rm -f /tmp/gentar_ci_bench_key
           # Anything a crashed run left on the bench-host (informational;
           # the coordinator already rms its own sandbox best-effort).
+          # Same key file the coordinator used — ssh BEFORE removing it.
           ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
-            -i "$HOME/.ssh/gentar_ci_key" polat@10.10.10.200 \
+            -i /tmp/gentar_ci_bench_key \
+            "${GENTAR_BENCH_USER}@${GENTAR_BENCH_HOST}" \
             'sbx ls | grep gentar- || echo "bench-host clean"' || true
+          rm -f /tmp/gentar_ci_bench_key
 
   nightly:
     name: nightly / subject suites
@@ -85,12 +161,33 @@ jobs:
     runs-on: [self-hosted, gentar-bench]
     env:
       COMPOSE_PROJECT_NAME: gentar-nightly
-      GENTAR_BUDGET_CAP: "5000"
+      GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
+      GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
+      GENTAR_BUDGET_CAP: "50000"
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
+      GENTAR_OTLP_HOST_PORT: "4319"
+      # Tier-1 credentials for the agent suite — providers are
+      # alternatives: first-party API key, or any Anthropic-compatible
+      # endpoint via token+base URL (GLM coding plan: ANTHROPIC_BASE_URL
+      # = https://api.z.ai/api/anthropic, repo var; token as secret).
+      # All empty when unset — agent-smoke then skips with a notice (or
+      # refuses honestly if dispatched directly).
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
+      # Optional model pin for the agent suite (e.g. glm-5.3-flash on the
+      # z.ai plan — slot var, see agent-smoke.toml). Unset = default.
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
     steps:
       - uses: actions/checkout@v4
 
       - name: bench key + subjects
+        # Through env, not `${{ }}` pasted into the script body: a
+        # value containing a quote would otherwise reach the shell
+        # parser (it happens to produce a syntax error rather than
+        # injection, but a repo variable should not get that far).
+        env:
+          GENTAR_NIGHTLY_SUBJECTS: ${{ vars.GENTAR_NIGHTLY_SUBJECTS }}
         run: |
           umask 077
           echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
@@ -101,15 +198,28 @@ jobs:
           if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
             REF="${{ github.event.inputs.subject_ref }}"
             REF="${REF:-main}"
-            # Full clone (no --depth): kommander-update clones the old
-            # release locally from this checkout's history — it needs tags.
-            git clone \
-              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
-              -b "$REF" subjects/kommander-playbook
-            git clone --depth 1 \
-              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/agent-realm/memhouse \
-              subjects/memhouse 2>/dev/null || \
-              echo "memhouse clone failed — its suites will fail honestly"
+            # WHICH subjects this arena tests is an install's choice, not
+            # the engine's: a fork inheriting hardcoded repo paths would
+            # clone someone else's subjects (or fail trying). The list
+            # lives in the repo variable GENTAR_NIGHTLY_SUBJECTS as
+            # space-separated `owner/repo[:full]` entries; `:full` means
+            # clone with history and tags (kommander-update and
+            # agent-profile-smoke both clone an old release from the
+            # checkout's own tags). Unset = subjectless, the right
+            # default for a fork that has named no subjects.
+            SUBJECTS="$GENTAR_NIGHTLY_SUBJECTS"
+            [ -n "$SUBJECTS" ] || echo "GENTAR_NIGHTLY_SUBJECTS unset — subject suites skipped"
+            for entry in $SUBJECTS; do
+              repo="${entry%%:*}"; depth="--depth 1"; branch=""
+              case "$entry" in
+                *:full) depth=""; branch="-b $REF" ;;
+              esac
+              name="${repo##*/}"
+              git clone $depth $branch \
+                "https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/$repo" \
+                "subjects/$name" 2>/dev/null || \
+                echo "$repo clone failed — its suites will fail honestly"
+            done
           else
             echo "GENTAR_SUBJECT_TOKEN absent — subject suites skipped"
           fi
@@ -119,6 +229,29 @@ jobs:
           docker compose build coordinator
           # Agent-tier suite always: pty driver, scripted agent (no LLM).
           docker compose run --rm coordinator run scripted-onboarding
+          # Real-agent suite when ANY provider credential exists
+          # (refuses with exit 2 otherwise — guard, not silent).
+          # `compose run -e NAME` with NAME unset on the host simply
+          # does not forward it, so one line covers all providers.
+          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$ANTHROPIC_AUTH_TOKEN" ]; then
+            docker compose run --rm \
+              -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL \
+              -e ANTHROPIC_DEFAULT_SONNET_MODEL \
+              coordinator run agent-smoke
+            # Real agent under a PINNED playbook install (anti-ouroboros):
+            # needs the credential above AND the kommander-playbook
+            # subject (full clone — the pin clones the release from it).
+            if [ -d subjects/kommander-playbook ]; then
+              docker compose run --rm \
+                -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL \
+                -e ANTHROPIC_DEFAULT_SONNET_MODEL \
+                coordinator run agent-profile-smoke
+            else
+              echo "no kommander-playbook subject — agent-profile-smoke skipped"
+            fi
+          else
+            echo "no agent credential (API_KEY/AUTH_TOKEN) — agent-smoke skipped"
+          fi
           if [ -d subjects/kommander-playbook ]; then
             for s in claude-playbooks-install \
                      kommander-install kommander-task-lock kommander-update \
@@ -152,13 +285,30 @@ jobs:
     runs-on: [self-hosted, gentar-bench]
     env:
       COMPOSE_PROJECT_NAME: gentar-dispatch
+      GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
+      GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
+      GENTAR_OTLP_HOST_PORT: "4319"
+      # Pass-through for credential-declaring scenarios (agent-smoke);
+      # provider alternatives, same rule as nightly. Absent → honest
+      # refuse 2.
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+      ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
+      # Optional model pin, same rule as nightly.
+      ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
       - name: bench key + subjects (opt-in)
+        # Through env, not `${{ }}` pasted into the script body: a
+        # value containing a quote would otherwise reach the shell
+        # parser (it happens to produce a syntax error rather than
+        # injection, but a repo variable should not get that far).
+        env:
+          GENTAR_NIGHTLY_SUBJECTS: ${{ vars.GENTAR_NIGHTLY_SUBJECTS }}
         run: |
           umask 077
           echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
@@ -167,19 +317,38 @@ jobs:
           if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
             REF="${{ github.event.inputs.subject_ref }}"
             REF="${REF:-main}"
-            git clone --depth 1 \
-              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
-              -b "$REF" subjects/kommander-playbook
-            git clone --depth 1 \
-              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/agent-realm/memhouse \
-              subjects/memhouse 2>/dev/null || true
+            # WHICH subjects this arena tests is an install's choice, not
+            # the engine's: a fork inheriting hardcoded repo paths would
+            # clone someone else's subjects (or fail trying). The list
+            # lives in the repo variable GENTAR_NIGHTLY_SUBJECTS as
+            # space-separated `owner/repo[:full]` entries; `:full` means
+            # clone with history and tags (kommander-update and
+            # agent-profile-smoke both clone an old release from the
+            # checkout's own tags). Unset = subjectless, the right
+            # default for a fork that has named no subjects.
+            SUBJECTS="$GENTAR_NIGHTLY_SUBJECTS"
+            [ -n "$SUBJECTS" ] || echo "GENTAR_NIGHTLY_SUBJECTS unset — subject suites skipped"
+            for entry in $SUBJECTS; do
+              repo="${entry%%:*}"; depth="--depth 1"; branch=""
+              case "$entry" in
+                *:full) depth=""; branch="-b $REF" ;;
+              esac
+              name="${repo##*/}"
+              git clone $depth $branch \
+                "https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/$repo" \
+                "subjects/$name" 2>/dev/null || \
+                echo "$repo clone failed — its suites will fail honestly"
+            done
             git clone -q --depth 1 "$GITHUB_WORKSPACE" subjects/gentar 2>/dev/null || true
           fi
 
       - name: run
         run: |
           docker compose build coordinator
-          docker compose run --rm coordinator run "${{ github.event.inputs.scenario }}"
+          docker compose run --rm \
+            -e ANTHROPIC_API_KEY -e ANTHROPIC_AUTH_TOKEN -e ANTHROPIC_BASE_URL \
+            -e ANTHROPIC_DEFAULT_SONNET_MODEL \
+            coordinator run "${{ github.event.inputs.scenario }}"
 
       - name: teardown
         if: always()

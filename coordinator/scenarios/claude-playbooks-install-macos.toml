@@ -1,0 +1,54 @@
+# claude-playbooks-install on the tart macOS tier — the first subject
+# suite to run on a Mac bench (macOS twin of claude-playbooks-install).
+# Same documented path, same assertions: the installer CLI and the
+# playbook layout must behave identically on darwin/arm64. Differences
+# the tier absorbs: install.sh falls back to ~/.local/bin (/usr/local/bin
+# is root-owned on a stock macOS guest) and the guest resolves it via
+# ~/.zshenv PATH from the template.
+
+[scenario]
+name = "claude-playbooks-install-macos"
+bench = "tart"
+template = "gentar-bench-macos-v1"
+subject = "kommander-playbook"
+agent = "shell"
+
+[oracle]
+steps = [
+  # Documented install path (README): public release asset, SHA-verified,
+  # VERSION pinned for reproducibility (see claude-playbooks-install).
+  "curl -fsSL https://raw.githubusercontent.com/ramazanpolat/claude-playbooks/main/install.sh | VERSION=v3.2.0 sh",
+  # Playbook install from the mounted subject dir (private repo → local dir).
+  "claude-playbook install \"$WORKSPACE_DIR\" --name kommander",
+]
+
+[[verify.files]]
+path = "~/.claude-playbooks/kommander/CLAUDE.md"
+
+[[verify.files]]
+path = "~/.claude-playbooks/kommander/settings.json"
+
+[[verify.files]]
+path = "~/.claude-playbooks/kommander/hooks"
+
+[[verify.files]]
+path = "~/.local/bin/claude-playbook"
+
+[[verify.files]]
+path = "~/.local/bin/cpb"
+
+[[verify.commands]]
+command = "claude-playbook --version"
+contains = "v3."
+
+[[verify.commands]]
+# Version must match the subject checkout's VERSION file — floats, never hardcoded.
+command = "V=$(sed 's/^v//' \"$WORKSPACE_DIR/VERSION\"); claude-playbook info kommander | grep -E \"Version:[[:space:]]*$V\""
+
+[[verify.commands]]
+command = "claude-playbook list | grep -c kommander"
+
+[[verify.commands]]
+# Launcher alias exists (cpb-style single-letter launcher).
+command = "test -x \"$HOME/.local/bin/k\" && echo launcher-k-ok"
+contains = "launcher-k-ok"

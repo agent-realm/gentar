@@ -8,7 +8,7 @@ import re
 import time
 
 from gentar.benchhost import BenchHost
-from gentar.pty_driver import DriverAbort, PtyDriver
+from gentar.pty_driver import _KEYS, DriverAbort, PtyDriver
 from gentar.spans import Spans
 
 
@@ -17,10 +17,12 @@ class TurnFailure(AssertionError):
 
 
 def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
-              subject: str = "arena") -> str:
+              subject: str = "arena",
+              env: dict[str, str] | None = None,
+              report=None) -> str:
     name = scenario.name
     driver = PtyDriver(bench, run_id)
-    driver.start(scenario.driver_command)
+    driver.start(scenario.driver_command, env=env)
     spans.emit(subject, run_id, name, "driver.start",
                attrs={"command": scenario.driver_command[:120]})
     try:
@@ -39,8 +41,48 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                 _ok(spans, subject, run_id, name, i, f"expect {pattern!r}")
             elif kind == "pick":
                 if not driver.pick_option(turn["label"], turn.get("tries", 8)):
+                    if turn.get("optional"):
+                        # Screen never showed (claude-code's onboarding
+                        # interleaves an intermittent security-notes page
+                        # — probe 5 saw it in some fresh benches, not
+                        # others). Skip, don't fail.
+                        _ok(spans, subject, run_id, name, i,
+                            f"pick /{turn['label']}/ skipped (optional)")
+                        continue
                     raise TurnFailure(f"turn {i}: picker option /{turn['label']}/ not reachable")
                 _ok(spans, subject, run_id, name, i, f"pick /{turn['label']}/")
+            elif kind == "key":
+                # Raw key events, optionally as a paced sequence. Two jobs
+                # today: submitting the claude-code input box (text arrives
+                # via `answer`, but its trailing \r is paste-guarded — the
+                # Enter must be a SEPARATE write) and exiting it (ctrl-c
+                # ctrl-c inside the ~1s window). Also the ONLY way to
+                # press Enter at all: sendline's trailing \n is ignored
+                # by the TUI (proven live, probe 5) — a "press enter to
+                # continue" screen needs key enter, not answer send="".
+                # `after` anchors the keys to a screen: a blind Enter
+                # races the render and can land on the NEXT dialog's
+                # default (probe 5: it pre-accepted the trust folder) —
+                # the keys fire only once the pattern is on screen.
+                keys = turn.get("keys") or ([turn["key"]] if turn.get("key") else [])
+                if not keys:
+                    raise TurnFailure(f"turn {i}: key turn needs key or keys")
+                after = turn.get("after")
+                if after:
+                    limit = turn.get("timeout", 10 if turn.get("optional") else 60)
+                    if not _await(driver, re.compile(after, re.IGNORECASE), limit):
+                        if turn.get("optional"):
+                            _ok(spans, subject, run_id, name, i,
+                                f"key {'+'.join(keys)} skipped (optional)")
+                            continue
+                        raise TurnFailure(f"turn {i}: after {after!r} never appeared")
+                try:
+                    driver.send_keys(keys, float(turn.get("delay", 0.5)))
+                except KeyError as bad:
+                    raise TurnFailure(
+                        f"turn {i}: unknown key {bad.args[0]!r} "
+                        f"(supported: {' '.join(sorted(_KEYS))})") from None
+                _ok(spans, subject, run_id, name, i, f"key {'+'.join(keys)}")
             elif kind == "abort":
                 try:
                     driver.drive_until("__never_matches__", turn.get("timeout", 30))
@@ -50,11 +92,25 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                                attrs={"turn": str(i)}, detail=str(abort))
                     return f"danger gate ok: {abort}"
                 raise TurnFailure(f"turn {i}: danger gate did NOT fire")
-        driver.wait_idle(60)
+        # Wait for the command itself to finish (EOF), not for a quiet
+        # screen — headless agents are silent mid-run. Headless
+        # scenarios bound themselves (`timeout` in the command); 300s
+        # covers the tail of a scripted one. A TUI that never exits is
+        # NOT a pass: the file may exist while the interactive exit
+        # (e.g. the ctrl-c pair) silently failed, and close() below
+        # would mask that with a force kill — fail honestly instead
+        # (PR #26 review).
+        if not driver.wait_done(300):
+            raise TurnFailure(
+                "driver command never exited after the final turn "
+                "(wait_done 300s) — the scripted exit keys did not "
+                "produce EOF")
         return f"driver ok: {len(scenario.turns)} turns"
     finally:
         spans.emit(subject, run_id, name, "driver.transcript",
                    detail=driver.transcript[-8000:])
+        if report is not None:
+            report.transcript = driver.transcript
         driver.close()
 
 

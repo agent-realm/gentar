@@ -1,0 +1,326 @@
+#!/usr/bin/env bash
+# gentar arena runner — the local entry point, and the one that cannot leak.
+#
+# `docker compose run --rm coordinator run <scenario>` removes only the
+# coordinator. clickhouse and otelcol are started by depends_on as ordinary
+# `up` containers (AutoRemove=false) and survive, and clickhouse owns a named
+# volume — so every distinct compose project strands two containers plus a
+# volume, forever. CI compensates with an `if: always()` teardown step;
+# nothing local did, and a machine accumulated 13 stranded stacks.
+#
+# Two independent guarantees here, belt and braces:
+#
+#   1. Every container is --rm. The compose spec has no per-service
+#      auto-remove key and `compose up` has no `--rm`, so this wrapper starts
+#      EVERY service as a one-off `compose run -d --rm` — the only way to get
+#      daemon-level AutoRemove. A stopped arena container is removed by the
+#      Docker daemon itself, whatever killed it: ctrl-c, SIGKILL, OOM, a
+#      daemon restart, or this script dying before its trap runs.
+#      compose.rm.yml turns clickhouse's named volume anonymous so --rm
+#      reclaims that too.
+#   2. The trap tears the project down anyway — networks, and any container a
+#      future edit forgets to route through here.
+#
+# The scenario's exit code is still the verdict — that contract is unchanged.
+#
+#   bin/arena run <scenario> [scenario...]   build, run, tear down
+#   bin/arena sql "<query>"                  clickhouse-client against the arena
+#   bin/arena dashboard                      render dashboard/out/dashboard.html
+#   bin/arena ls                             list scenarios
+#   bin/arena down                           tear this project's arena down
+#   bin/arena gc [--yes]                     remove STRANDED arenas (see below)
+#
+# GENTAR_KEEP_ARENA=1 keeps the stack up after a run (to inspect ClickHouse);
+# you then own the teardown — `bin/arena down`.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$HERE"
+
+# Local runs layer compose.rm.yml. The documented compose contract in
+# docker-compose.yml is untouched — `docker compose run --rm coordinator …`
+# still works exactly as the README and CI describe it.
+compose() { docker compose -f docker-compose.yml -f compose.rm.yml "$@"; }
+
+# docker-compose.yml mounts the bench ssh key as a compose SECRET
+# (`file: ${GENTAR_BENCH_KEY_FILE:-~/.ssh/id_ed25519}`). When that file
+# does not exist, the daemon rejects the bind at container-create time
+# ("invalid mount config ... bind source path does not exist"), exit 1 —
+# before the coordinator's own exit-2 refusal can say what is missing. An
+# adopter with no ed25519 key would see a Docker error, not ours. Ask
+# compose for the path it actually resolved (it honours .env and the
+# shell the same way the run will) and refuse with the usage/config code.
+# Credentials an agent suite declares must reach the COORDINATOR, or the
+# guard refuses a run the caller configured correctly: the coordinator
+# reads them from its own environment and forwards only the winning
+# group into the bench. compose passes nothing from this shell that the
+# compose file does not name, and these names are arbitrary per scenario
+# (`credentials` / `pass_env` in the schema), so they cannot be a fixed
+# list in docker-compose.yml — they are read FROM the scenarios about to
+# run and passed with -e. The kit's run.sh does the same; same awk, for
+# the same reason (a stock runner has no python).
+#
+# Values never appear here: -e NAME passes the name and lets Docker read
+# the value from the environment, so nothing lands in argv or a log.
+extract_env_names() {         # scenario files... -> one name per line
+  awk '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
+    inarr {
+      line = $0
+      while (match(line, /"[A-Za-z_][A-Za-z0-9_]*"/)) {
+        print substr(line, RSTART + 1, RLENGTH - 2)
+        line = substr(line, RSTART + RLENGTH)
+      }
+      depth += gsub(/\[/, "[") - gsub(/\]/, "]")
+      if (depth <= 0) inarr = 0
+    }
+  ' "$@"
+}
+
+# Sets FORWARD to the -e flags for the names the given scenarios declare
+# that are actually set in this shell. Unset stays unset inside, rather
+# than arriving empty-but-present.
+forward_flags() {             # scenario names... -> FORWARD=(-e A -e B)
+  local files=() s names
+  for s in "$@"; do
+    [ -f "coordinator/scenarios/$s.toml" ] && files+=("coordinator/scenarios/$s.toml")
+  done
+  FORWARD=()
+  [ ${#files[@]} -eq 0 ] && return 0
+  names=$(extract_env_names "${files[@]}" | sort -u)
+  for s in $names; do
+    [ -n "${!s:-}" ] && FORWARD+=(-e "$s")
+  done
+  return 0
+}
+
+require_bench_key() {
+  local key
+  # `config --format json` PRETTY-PRINTS: "bench_ssh_key" and its "file"
+  # land on different lines, so a single-line match finds nothing and the
+  # fallback to the shell variable passes while the run mounts a different,
+  # missing file named only in .env. Range-match from the key to its
+  # closing brace instead — line-oriented, no JSON parser needed.
+  key=$({ compose config --format json 2>/dev/null || true; } \
+    | sed -n '/"bench_ssh_key"/,/}/{ s/.*"file": *"\(\([^"\\]\|\\.\)*\)".*/\1/p; }' | head -1)
+  # JSON-escaped: a path may legitimately contain a quote or backslash.
+  key=$(printf '%s' "$key" | sed 's/\\"/"/g; s/\\\\/\\/g')
+  [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"
+  case "$key" in "~/"*) key="$HOME/${key#\~/}" ;; esac
+  [ -r "$key" ] && return 0
+  echo "arena: bench ssh key not found at $key — set GENTAR_BENCH_KEY_FILE" \
+       "(in .env or the shell) to the key the coordinator uses to reach the bench-host" >&2
+  exit 2
+}
+
+_torn_down=0
+teardown() {
+  # Never let teardown change the verdict: it runs under a trap, and its
+  # own failure must not mask the scenario's exit code.
+  local rc=$?
+  # INT/TERM fire the trap and then EXIT fires it again — tear down once.
+  [ "$_torn_down" = "1" ] && return "$rc"
+  _torn_down=1
+  if [ "${GENTAR_KEEP_ARENA:-0}" = "1" ]; then
+    echo "arena: kept up (GENTAR_KEEP_ARENA=1) — tear down with: bin/arena down" >&2
+    return "$rc"
+  fi
+  echo "arena: tearing down" >&2
+  down_all
+  return "$rc"
+}
+
+# `compose down` does NOT stop `run`-created containers (they are one-offs,
+# not services), so stop them by label first — stopping is what triggers the
+# daemon's AutoRemove — then let `down -v` clear the network and anything a
+# future edit starts the ordinary way.
+down_all() {
+  local proj cids
+  proj=$(compose config --format json 2>/dev/null \
+    | sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' | head -1)
+  if [ -n "$proj" ]; then
+    cids=$(docker ps -q --filter "label=com.docker.compose.project=$proj" 2>/dev/null || true)
+    [ -n "$cids" ] && docker stop $cids >/dev/null 2>&1 || true
+  fi
+  compose down -v --remove-orphans >/dev/null 2>&1 || true
+}
+
+# Start one service as an auto-removing one-off. --no-deps because this
+# script owns dependency order; letting depends_on do it would start plain
+# `up` containers, which are exactly what leaks.
+#
+# Idempotent: a service already up (GENTAR_KEEP_ARENA from an earlier run) is
+# reused. Starting a second copy would fail anyway — --service-ports binds the
+# same host port twice.
+start_rm() {
+  [ -n "$(svc_container "$1")" ] && return 0
+  compose run -d --rm --use-aliases --service-ports --no-deps "$1" >/dev/null
+}
+
+svc_container() {
+  compose config --format json 2>/dev/null \
+    | sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' | head -1 \
+    | xargs -I{} docker ps -q --filter "label=com.docker.compose.project={}" \
+        --filter "label=com.docker.compose.service=$1" 2>/dev/null | head -1
+}
+
+wait_healthy() {
+  local cid=$1 name=$2 i h
+  for i in $(seq 1 90); do
+    h=$(docker inspect "$cid" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || echo gone)
+    case "$h" in
+      healthy|none) return 0 ;;
+      gone) echo "arena: $name died before becoming healthy" >&2; return 1 ;;
+    esac
+    sleep 1
+  done
+  echo "arena: $name never became healthy (90s)" >&2
+  return 1
+}
+
+# clickhouse healthy, then otelcol — the same order depends_on declares.
+start_arena() {
+  start_rm clickhouse
+  wait_healthy "$(svc_container clickhouse)" clickhouse
+  start_rm otelcol
+}
+
+cmd_run() {
+  [ $# -ge 1 ] || { echo "usage: bin/arena run <scenario> [scenario...]" >&2; exit 64; }
+  require_bench_key
+  trap teardown EXIT INT TERM
+  compose build coordinator
+  start_arena
+  local status=0 rc
+  for s in "$@"; do
+    forward_flags "$s"
+    set +e
+    compose run --rm --no-deps ${FORWARD[@]+"${FORWARD[@]}"} coordinator run "$s"
+    rc=$?
+    set -e
+    # Worst verdict wins: a refusal (2) outranks a failure (1).
+    [ "$rc" -gt "$status" ] && status=$rc
+  done
+  exit "$status"
+}
+
+cmd_sql() {
+  [ $# -ge 1 ] || { echo 'usage: bin/arena sql "<query>"' >&2; exit 64; }
+  local cid
+  cid=$(svc_container clickhouse)
+  [ -n "$cid" ] || { echo "arena: no clickhouse up — run with GENTAR_KEEP_ARENA=1 first" >&2; exit 69; }
+  docker exec -i "$cid" clickhouse-client \
+    --user "${GENTAR_CH_USER:-gentar}" --password "${GENTAR_CH_PASSWORD:-gentar}" \
+    -q "$1"
+}
+
+cmd_dashboard() {
+  require_bench_key
+  trap teardown EXIT INT TERM
+  start_arena
+  compose run --rm --no-deps dashboard
+}
+
+cmd_ls() {
+  # No arena needed: `ls` reads the scenario files, nothing else.
+  require_bench_key
+  trap teardown EXIT INT TERM
+  compose run --rm --no-deps coordinator ls
+}
+
+cmd_down() { down_all; }
+
+# --- gc: the recovery tool for arenas stranded before this wrapper existed ---
+#
+# An arena is identified by the label its services carry (dev.gentar.arena=1).
+# That label is authoritative going forward. Stacks created BEFORE it shipped
+# carry no label, and their compose file is often gone with the worktree that
+# held it, so they are matched structurally instead: a `clickhouse` service
+# whose CLICKHOUSE_DB is the arena database, in a project that also has one of
+# this compose file's other services. Deliberately narrow — an unrelated
+# ClickHouse container does not match.
+#
+# A project with a RUNNING container is never touched — someone is using it.
+cmd_gc() {
+  local apply=0
+  [ "${1:-}" = "--yes" ] && apply=1
+
+  local projects=() p
+  while read -r p; do [ -n "$p" ] && projects+=("$p"); done < <(
+    docker ps -a --format '{{.Label "com.docker.compose.project"}}' | sort -u | grep -v '^$' || true
+  )
+
+  local stranded=() running_skipped=()
+  for p in ${projects[@]+"${projects[@]}"}; do
+    local labelled is_arena=0 ch services
+    labelled=$(docker ps -a --filter "label=com.docker.compose.project=$p" \
+      --filter "label=dev.gentar.arena=1" --format '{{.Names}}' | head -1)
+    if [ -n "$labelled" ]; then
+      is_arena=1
+    else
+      # Legacy (pre-label) stack: match the arena's own shape.
+      ch=$(docker ps -a --filter "label=com.docker.compose.project=$p" \
+        --filter "label=com.docker.compose.service=clickhouse" --format '{{.Names}}' | head -1)
+      if [ -n "$ch" ] && docker inspect "$ch" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+           | grep -qx "CLICKHOUSE_DB=${GENTAR_CH_DB:-gentar}"; then
+        services=$(docker ps -a --filter "label=com.docker.compose.project=$p" \
+          --format '{{.Label "com.docker.compose.service"}}' | sort -u)
+        case "$services" in
+          *otelcol*|*coordinator*|*dashboard*) is_arena=1 ;;
+        esac
+      fi
+    fi
+    [ "$is_arena" = "1" ] || continue
+
+    if [ -n "$(docker ps --filter "label=com.docker.compose.project=$p" --format '{{.Names}}' | head -1)" ]; then
+      running_skipped+=("$p"); continue
+    fi
+    stranded+=("$p")
+  done
+
+  if [ ${#stranded[@]} -eq 0 ]; then
+    echo "arena gc: no stranded arenas"
+  else
+    for p in "${stranded[@]}"; do
+      echo "arena gc: $p"
+      docker ps -a --filter "label=com.docker.compose.project=$p" --format '    container {{.Names}} [{{.State}}]'
+      docker volume ls --filter "label=com.docker.compose.project=$p" --format '    volume    {{.Name}}'
+    done
+  fi
+  for p in ${running_skipped[@]+"${running_skipped[@]}"}; do
+    echo "arena gc: SKIP $p (has a running container)"
+  done
+
+  if [ ${#stranded[@]} -gt 0 ] && [ "$apply" = "0" ]; then
+    echo
+    echo "arena gc: dry run — re-run with --yes to remove the above"
+    return 0
+  fi
+
+  for p in ${stranded[@]+"${stranded[@]}"}; do
+    local cids=() vols=() nets=() x
+    while read -r x; do [ -n "$x" ] && cids+=("$x"); done < <(docker ps -a --filter "label=com.docker.compose.project=$p" --format '{{.Names}}')
+    while read -r x; do [ -n "$x" ] && vols+=("$x"); done < <(docker volume ls --filter "label=com.docker.compose.project=$p" --format '{{.Name}}')
+    while read -r x; do [ -n "$x" ] && nets+=("$x"); done < <(docker network ls --filter "label=com.docker.compose.project=$p" --format '{{.Name}}')
+    # -v matters: clickhouse/clickhouse-server declares a VOLUME, so a plain
+    # `docker rm` orphans an anonymous volume per container.
+    [ ${#cids[@]} -gt 0 ] && docker rm -f -v "${cids[@]}" >/dev/null || true
+    [ ${#vols[@]} -gt 0 ] && docker volume rm "${vols[@]}" >/dev/null || true
+    [ ${#nets[@]} -gt 0 ] && docker network rm "${nets[@]}" >/dev/null 2>&1 || true
+    echo "arena gc: removed $p"
+  done
+}
+
+case "${1:-}" in
+  run)       shift; cmd_run "$@" ;;
+  sql)       shift; cmd_sql "$@" ;;
+  dashboard) shift; cmd_dashboard ;;
+  ls)        shift; cmd_ls ;;
+  down)      shift; cmd_down ;;
+  gc)        shift; cmd_gc "${1:-}" ;;
+  ""|-h|--help|help)
+    sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  *) echo "arena: unknown command '$1' (try: run sql dashboard ls down gc)" >&2; exit 64 ;;
+esac
