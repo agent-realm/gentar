@@ -16,7 +16,10 @@ no less faithful than the VM was. Replacing VMs with a single Docker Compose
 stack deletes the whole apparatus, both known gaps, and makes the engine
 runnable anywhere.
 
-gentar supersedes agent-gauntlet as the constellation's shared test engine.
+gentar supersedes agent-gauntlet as the constellation's shared test engine —
+and, because the compose substrate carries no constellation dependency, it
+stands alone: a test runner, reviver and pilot simulator any repo can adopt.
+The constellation's components are its first adopters, not its scope.
 
 ## Architecture
 
