@@ -33,12 +33,24 @@ First run clones gentar into `gentar/.arena` and seeds `.env` from
 Exit code is the verdict: `0` pass · `1` fail · `2` usage/config
 refusal.
 
-The runner tears its arena down on every exit path — pass, fail, refusal
-and ctrl-c — so a run leaves no containers or volumes behind. (Plain
-`docker compose run --rm` would not: `--rm` removes only the coordinator,
-while `clickhouse` and `otelcol` come up via `depends_on` and `clickhouse`
-owns a named volume.) To keep a stack up and inspect ClickHouse, set
-`GENTAR_KEEP_ARENA=1`; you then own the teardown, which the runner prints.
+A run leaves no containers or volumes behind, guaranteed twice over.
+(Plain `docker compose run --rm` would not: `--rm` removes only the
+coordinator, while `clickhouse` and `otelcol` come up via `depends_on` as
+ordinary `up` containers and `clickhouse` owns a named volume.)
+
+- **Every container is `--rm`.** The compose spec has no per-service
+  auto-remove key and `compose up` has no `--rm`, so the runner starts
+  each arena service as a one-off `compose run -d --rm` — the only way to
+  get daemon-level `AutoRemove`. A stopped container is then removed by
+  the Docker daemon itself, whatever stopped it: ctrl-c, `SIGKILL`, OOM,
+  or the runner dying before its trap can fire.
+- **A trap tears the project down anyway** — pass, fail, refusal and
+  ctrl-c alike — covering the network and anything else left over.
+
+To keep a stack up and inspect ClickHouse, set `GENTAR_KEEP_ARENA=1`; you
+then own the teardown, which the runner prints as two commands. Both are
+needed: `compose down` alone refuses the network with "Resource is still
+in use", because it does not stop one-off containers.
 
 ## The fix loop
 

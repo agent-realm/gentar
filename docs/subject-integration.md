@@ -133,6 +133,15 @@ conditions, reports on disk):
    bind; the scenarios dir needs the explicit `-e`/`-v` pair because
    the coordinator reads it at runtime, inside the container.)
    Exit code is the verdict, same contract.
+
+   **That invocation leaks, and must be wrapped.** `--rm` removes only
+   the coordinator: `clickhouse` and `otelcol` come up via `depends_on`
+   as ordinary `up` containers, and `clickhouse` owns a named volume, so
+   every project strands two containers and a volume per run. Tear the
+   project down after it — CI in an `if: always()` step — or copy
+   `subject-template/gentar/run.sh`, which starts every service as a
+   one-off `compose run -d --rm` (daemon-level `AutoRemove`, so a
+   `SIGKILL`ed run still cleans up) and traps teardown on top.
 3. Every run writes `out/report-<run_id>.md` — steps with output
    tails, assertions with actuals, verdict, reproduce command. On
    failure, feed that file to an agent (or a human): it states

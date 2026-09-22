@@ -100,14 +100,45 @@ mkdir "subjects/$SUBJECT"
 # GENTAR_REF was honoured perfectly the whole time; the code that ran was not
 # the code that was fetched. gentar's own gate builds before every run for
 # this reason.
-# Tear the arena down on EVERY exit path, before anything can start it.
+# Nothing this script starts may outlive it. Two independent guarantees,
+# because each covers what the other cannot.
 #
 # `docker compose run --rm` removes only the coordinator: clickhouse and
-# otelcol come up via depends_on and survive, and clickhouse owns a named
-# volume. Without this trap each project strands two containers and a volume
-# per run -- invisible until a laptop is full of them. The trap fires on a
-# pass, a failing verdict, a refusal, and ctrl-c alike, and never changes the
-# verdict: teardown failure is swallowed, the scenario's exit code is not.
+# otelcol come up via depends_on as ordinary `up` containers
+# (AutoRemove=false) and survive, and clickhouse owns a named volume. Each
+# project then strands two containers and a volume per run -- invisible
+# until a laptop is full of them.
+#
+#   1. EVERY container is --rm. The compose spec has no per-service
+#      auto-remove key and `compose up` has no `--rm`, so the arena's
+#      services are started as one-off `compose run -d --rm` containers --
+#      the only way to get daemon-level AutoRemove. A stopped container is
+#      then removed by the Docker daemon itself, whatever stopped it: ctrl-c,
+#      SIGKILL, OOM, or this script dying before its trap can run. The
+#      engine's compose.rm.yml overlay turns clickhouse's named volume
+#      anonymous so --rm reclaims that too.
+#   2. The trap tears the project down anyway, on a pass, a failing verdict,
+#      a refusal and ctrl-c alike -- and never changes the verdict: teardown
+#      failure is swallowed, the scenario's exit code is not.
+#
+# The overlay ships with the engine, so an older GENTAR_REF may not have it;
+# guarantee 1 still holds for the containers, only the named volume survives
+# until the trap's `down -v`.
+ARENA_FILES=(-f docker-compose.yml)
+[ -f "$ARENA/compose.rm.yml" ] && ARENA_FILES+=(-f compose.rm.yml)
+
+arena() { docker compose "${ARENA_FILES[@]}" -p "arena-$SUBJECT" "$@"; }
+
+# `compose down` does not stop `run`-created containers (they are one-offs,
+# not services), and stopping is what triggers AutoRemove -- so stop by
+# label first, then let `down -v` clear the network.
+arena_stop_all() {
+  local cids
+  cids=$(docker ps -q --filter "label=com.docker.compose.project=arena-$SUBJECT" 2>/dev/null || true)
+  [ -n "$cids" ] && docker stop $cids >/dev/null 2>&1 || true
+  arena down -v --remove-orphans >/dev/null 2>&1 || true
+}
+
 _torn_down=0
 teardown_arena() {
   local rc=$?
@@ -115,17 +146,53 @@ teardown_arena() {
   [ "$_torn_down" = "1" ] && return "$rc"
   _torn_down=1
   if [ "${GENTAR_KEEP_ARENA:-0}" = "1" ]; then
+    # Two steps, not one: `compose down` alone refuses the network with
+    # "Resource is still in use", because it does not stop one-off
+    # containers. Stopping them is also what triggers their AutoRemove.
     echo "arena kept up (GENTAR_KEEP_ARENA=1) -- tear down with:" >&2
+    echo "  docker stop \$(docker ps -q --filter label=com.docker.compose.project=arena-$SUBJECT)" >&2
     echo "  docker compose -p arena-$SUBJECT down -v --remove-orphans" >&2
     return "$rc"
   fi
-  docker compose -p "arena-$SUBJECT" down -v --remove-orphans >/dev/null 2>&1 || true
+  arena_stop_all
   return "$rc"
 }
+
 trap teardown_arena EXIT INT TERM
 
+arena_container() {   # service -> container id, empty if not up
+  docker ps -q --filter "label=com.docker.compose.project=arena-$SUBJECT" \
+    --filter "label=com.docker.compose.service=$1" 2>/dev/null | head -1
+}
+
+# --no-deps because this script owns dependency order: letting depends_on do
+# it would start plain `up` containers, which are exactly what leaks.
+arena_start() {
+  [ -n "$(arena_container "$1")" ] && return 0
+  arena run -d --rm --use-aliases --service-ports --no-deps "$1" >/dev/null
+}
+
+arena_wait_healthy() {
+  local cid=$1 name=$2 i h
+  for i in $(seq 1 90); do
+    h=$(docker inspect "$cid" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || echo gone)
+    case "$h" in
+      healthy|none) return 0 ;;
+      gone) echo "$name died before becoming healthy" >&2; return 1 ;;
+    esac
+    sleep 1
+  done
+  echo "$name never became healthy (90s)" >&2
+  return 1
+}
+
 echo "building the coordinator image from $sha..." >&2
-docker compose -p "arena-$SUBJECT" build coordinator
+arena build coordinator
+
+# clickhouse healthy, then otelcol -- the order depends_on declares.
+arena_start clickhouse
+arena_wait_healthy "$(arena_container clickhouse)" clickhouse
+arena_start otelcol
 
 # The coordinator runs in a CONTAINER, so nothing in this script's
 # environment reaches it unless it is forwarded. Agent-in-the-loop suites
@@ -191,7 +258,7 @@ for s in "$SCENARIO" "$@"; do
   MARKER=$(mktemp)
   set +e
   GENTAR_SUBJECTS_DIR="$PWD/subjects" \
-    docker compose -p "arena-$SUBJECT" run --rm \
+    arena run --rm --no-deps \
       -e GENTAR_SCENARIOS_DIR=/extra \
       ${FORWARD[@]+"${FORWARD[@]}"} \
       -v "$HERE/scenarios:/extra:ro" \
