@@ -24,13 +24,15 @@ agent = "shell"               # oracle vehicle: a plain sandbox shell
 # missing them all refuses (exit 2) before a bench exists. Omit
 # entirely for oracle suites like this one.
 #
-# All-of GROUPS — a nested list like
+# A list ENTRY is an all-of GROUP — every name in it must be present
+# together:
 #   credentials = ["ANTHROPIC_API_KEY",
 #                  ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]
-# meaning "a token without its endpoint is half a provider, refuse" —
-# are NOT in the engine on main yet (the parser requires flat strings
-# and raises on a nested list, so a scenario using one fails to load).
-# Keep entries flat until your pinned GENTAR_REF has group support.
+# reads as "the first-party key alone, OR the token and its endpoint
+# together". A token without its endpoint is half a provider, so the
+# guard refuses rather than starting a misconfigured credentialed
+# bench. Only the winning group's values are forwarded, so a stray
+# variable from a losing group cannot redirect the run.
 
 # pass_env = ["SOME_NON_SECRET_KNOB"]
 # Optional non-secret knobs forwarded when set (e.g. a cheaper-model

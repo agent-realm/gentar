@@ -39,25 +39,28 @@ the scratch HOME always has a stub `claude` on PATH, and a default bench has
 none. A suite that depends on an agent EXISTING must put the stub on PATH
 itself rather than inherit it from this harness.
 
-Genericized from the reference subject (claude-playbooks/gentar).
+Needs a checkout of the engine for its scenario parser (no Docker, no
+bench): `gentar/run.sh --stage-engine` once, or GENTAR_ENGINE pointing
+at an existing one.
 """
 import os, pty, re, select, shlex, shutil, subprocess, sys, tempfile, time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-# Engine resolution order: an explicit override, the same pinned clone
-# run.sh makes (gentar/.arena — run run.sh once and this stays on the
-# pinned engine), then a plain checkout of agent-realm/gentar.
+# The engine supplies the scenario PARSER, so a dry run needs a checkout
+# of it — not a bench, not Docker. Resolution order: an explicit
+# override, then the pinned clone run.sh maintains at gentar/.arena, so
+# the parser that validates a suite here is the same version the arena
+# will run it with. `gentar/run.sh --stage-engine` creates that clone
+# without spending a bench.
 _engine_env = os.environ.get("GENTAR_ENGINE")
 _here = Path(__file__).resolve().parent
-_CANDIDATES = [_here / ".arena/coordinator",
-               Path.home() / "agent-realm/gentar/coordinator"]
-ENGINE = (Path(_engine_env) if _engine_env
-          else next((c for c in _CANDIDATES if c.exists()), _CANDIDATES[1]))
+ENGINE = Path(_engine_env) if _engine_env else _here / ".arena/coordinator"
 if not ENGINE.exists():
-    sys.exit(f"gentar engine not found at {ENGINE} "
-             "(run gentar/run.sh once, or set GENTAR_ENGINE, "
-             "or clone agent-realm/gentar)")
+    sys.exit(f"gentar engine not found at {ENGINE}\n"
+             "  stage it once:  gentar/run.sh --stage-engine\n"
+             "  or point at an existing checkout:  "
+             "GENTAR_ENGINE=/path/to/gentar/coordinator gentar/dryrun.py")
 sys.path.insert(0, str(ENGINE))
 
 # tomllib is 3.11+. Stock macOS ships 3.9, so rather than fail on the default
