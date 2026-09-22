@@ -271,6 +271,12 @@ a token without its endpoint is half a provider, which never gets to start
 a misconfigured bench. Any Anthropic-protocol endpoint works, not just the
 first-party one.
 
+The value has to reach the *coordinator* first, and a container inherits
+nothing from your shell: `bin/arena` reads the names each scenario
+declares and passes them through with `-e NAME`, so exporting them is
+enough. Bare `docker compose run` does not — add the same `-e` flags, as
+the CI contract above does.
+
 Today the agent under the pty is `claude-code`, pinned by
 `bench-template/VERSION` and baked into the bench template so no run
 depends on a registry at test time. The driver itself is agent-agnostic;
