@@ -10,6 +10,10 @@ expecting a second runner to give you a second bench.
 There is a rendered version of this page at [`scope-map.html`](./scope-map.html) —
 same content, hand-drawn figures, open it in a browser from a checkout.
 
+First drawn 2026-08-19, against the engine as it then was; refreshed at **0.1.1** for
+the four bench backends and the teardown guarantee. The structure and the cardinalities
+did not change — that is the point of writing them down.
+
 > **Conventions used below.** Nesting means containment: an inner thing lives inside
 > the outer one and cannot outlive it. Cardinality is written `1 → N` and read as
 > *one of the left relates to this many of the right*.
@@ -147,6 +151,20 @@ its own kernel and its own Docker daemon, so the nested boundary for a stack-und
 comes free and cannot touch the host's daemon. The macOS tier is tart VMs on a Mac
 behind a `[gentar, macos]` runner, because sbx cannot host macOS sandboxes.
 
+**Four backends, not two** (added in 0.1.0, after this map was first drawn). A scenario
+picks one with `bench = "…"`; the cardinalities above are per bench and hold for all of
+them, but what sits at the bench-host end differs:
+
+| tier | what a bench is | what the "bench-host" is |
+|---|---|---|
+| `sbx` (default) | a microVM: own kernel, own Docker daemon | a Linux box running `sbx` |
+| `tart` | a macOS VM cloned from a template | a Mac running the `tart` CLI |
+| `osb` | a Linux container | an OpenSandbox server (no SSH; exec and pty go through its daemon) |
+| `daytona` | a Linux cloud sandbox | Daytona's ssh gateway — no infrastructure of your own |
+
+The `1 → 1` between a scenario run and a bench is the same in every tier. What changes
+is who mints the bench and how the coordinator reaches it.
+
 > **The subject copy inside the bench is writable.** Only the coordinator-side
 > `/subjects` bind carries `:ro`. `push_dir()` extracts a *copy* into the bench
 > workspace and `sbx create` mounts it with no read-only flag — scenarios such as
@@ -230,7 +248,7 @@ straight to an agent.
 | `run.sh` invocation | `1 → N` | scenarios | own-arena: looped sequentially in one job |
 | ref | `1 → 1` | concurrent arena | `concurrency: gentar-<ref>`, `cancel-in-progress` |
 | job | `1 → 1` | arena compose project | `COMPOSE_PROJECT_NAME` per tier |
-| scenario run | `1 → 1` | coordinator container | `docker compose run --rm`, one per scenario |
+| scenario run | `1 → 1` | coordinator container | `docker compose run --rm`, one per scenario. Since 0.1.0 `bin/arena` starts the supporting services the same way (`run -d --rm`), so every arena container is `AutoRemove`, not just this one |
 | scenario run | `1 → 1` | bench | the container is the reset |
 | scenario run | `1 → 1` | report + verdict | `report-<run_id>.md` in `out/`; exit `0` pass, `1` fail, `2` refusal |
 | coordinator | `N → 1` | bench-host | **the bottleneck.** `GENTAR_BENCH_HOST` is one static hostname |
@@ -349,6 +367,16 @@ Two things worth checking against any bench-host:
   `/tmp/gentar-workspaces/<run-id>` behind; one was observed on 2026-08-18. "The
   container is the reset" is a contract about the *next* run getting a fresh bench, not
   a guarantee that the previous one was reaped.
+
+  **Confirmed, and fixed in 0.1.0.** The arena side of exactly this gap put the pilot's
+  machine under: `compose run --rm` removed only the coordinator, while `clickhouse` and
+  `otelcol` came up via `depends_on` as ordinary containers and survived, stranding two
+  containers and a named volume per compose project. `bin/arena` now starts every
+  service as a one-off `compose run -d --rm`, which is the only way to get daemon-level
+  `AutoRemove` — the compose spec has no per-service auto-remove key and `compose up`
+  has no `--rm`. A stopped arena container is now removed by the Docker daemon itself,
+  whatever stopped it, including a `SIGKILL` that never lets a trap run. The bench side
+  of the finding stands as written: a bench is still reaped best-effort, by design.
 
 ---
 

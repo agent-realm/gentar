@@ -479,12 +479,25 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
         <tr><td class="ent"><code>run.sh</code> invocation</td><td class="card">1 → N</td><td>scenarios</td><td>own-arena: looped sequentially in one job</td></tr>
         <tr><td class="ent">ref</td><td class="card">1 → 1</td><td>concurrent arena</td><td><code>concurrency: gentar-&lt;ref&gt;</code>, <code>cancel-in-progress</code></td></tr>
         <tr><td class="ent">job</td><td class="card">1 → 1</td><td>arena compose project</td><td><code>COMPOSE_PROJECT_NAME</code> per tier</td></tr>
-        <tr><td class="ent">scenario run</td><td class="card">1 → 1</td><td>coordinator container</td><td><code>docker compose run --rm</code>, one per scenario</td></tr>
+        <tr><td class="ent">scenario run</td><td class="card">1 → 1</td><td>coordinator container</td><td><code>docker compose run --rm</code>, one per scenario. Since 0.1.0 <code>bin/arena</code> starts the supporting services the same way, so every arena container is <code>AutoRemove</code>, not just this one</td></tr>
         <tr><td class="ent">scenario run</td><td class="card">1 → 1</td><td>bench</td><td>the container is the reset</td></tr>
         <tr><td class="ent">scenario run</td><td class="card">1 → 1</td><td>report + verdict</td><td><code>report-&lt;run_id&gt;.md</code> in <code>out/</code>; exit 0 pass · 1 fail · 2 refusal</td></tr>
         <tr><td class="ent">coordinator</td><td class="card">N → 1</td><td>bench-host</td><td><strong>the bottleneck.</strong> <code>GENTAR_BENCH_HOST</code> is one static hostname</td></tr>
         <tr><td class="ent">bench-host</td><td class="card">1 → N</td><td>benches</td><td>concurrent, bounded by CPU, RAM and nested KVM</td></tr>
         <tr><td class="ent">runners</td><td class="card">N → M</td><td>bench-hosts</td><td>possible in principle; today N → 1, because the hostname is a constant</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tscroll">
+    <table>
+      <caption>Four bench backends (added in 0.1.0, after this map was first drawn). A scenario picks one with <code>bench = "…"</code>. The cardinalities above hold for all four — what changes is who mints the bench and how the coordinator reaches it.</caption>
+      <thead><tr><th>tier</th><th>what a bench is</th><th>what the &ldquo;bench-host&rdquo; is</th></tr></thead>
+      <tbody>
+        <tr><td class="ent"><code>sbx</code> <span class="m">(default)</span></td><td>a microVM: own kernel, own Docker daemon</td><td>a Linux box running <code>sbx</code></td></tr>
+        <tr><td class="ent"><code>tart</code></td><td>a macOS VM cloned from a template</td><td>a Mac running the <code>tart</code> CLI</td></tr>
+        <tr><td class="ent"><code>osb</code></td><td>a Linux container</td><td>an OpenSandbox server — no SSH; exec and pty go through its daemon</td></tr>
+        <tr><td class="ent"><code>daytona</code></td><td>a Linux cloud sandbox</td><td>Daytona&rsquo;s ssh gateway — no infrastructure of your own</td></tr>
       </tbody>
     </table>
   </div>
@@ -591,7 +604,7 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
   <div class="note">
     <span class="lbl">TWO THINGS WORTH CHECKING AGAINST ANY BENCH-HOST</span>
     <p><strong><code>cpu=host</code> is mandatory on a virtualised bench-host.</strong> An sbx sandbox has its own kernel, so nested virt is required. Confirm <code>/dev/kvm</code> exists <em>inside</em> the guest before believing a bench-host works — the failure is otherwise silent until the first <code>sbx create</code>.</p>
-    <p><strong>Bench teardown is best-effort by design, so leftovers are possible.</strong> <code>BenchHost.rm()</code> never raises — a failed teardown must not mask the real verdict — and the CI teardown step only <em>reports</em> what is left. A crashed or cancelled run can leave a sandbox and its <code>/tmp/gentar-workspaces/&lt;run-id&gt;</code> behind; one was observed on 2026-08-18. "The container is the reset" is a contract about the <em>next</em> run getting a fresh bench, not a guarantee that the previous one was reaped.</p>
+    <p><strong>Bench teardown is best-effort by design, so leftovers are possible.</strong> <code>BenchHost.rm()</code> never raises — a failed teardown must not mask the real verdict — and the CI teardown step only <em>reports</em> what is left. A crashed or cancelled run can leave a sandbox and its <code>/tmp/gentar-workspaces/&lt;run-id&gt;</code> behind; one was observed on 2026-08-18. "The container is the reset" is a contract about the <em>next</em> run getting a fresh bench, not a guarantee that the previous one was reaped. <strong>Confirmed, and fixed in 0.1.0:</strong> the arena side of this gap put the pilot&rsquo;s machine under — <code>compose run --rm</code> removed only the coordinator while <code>clickhouse</code> and <code>otelcol</code> survived via <code>depends_on</code>, stranding two containers and a named volume per project. <code>bin/arena</code> now starts every service as a one-off <code>compose run -d --rm</code>, the only way to get daemon-level <code>AutoRemove</code>, so a stopped arena container is removed by the daemon itself even when a <code>SIGKILL</code> prevents any trap from running. The bench side of the finding stands as written: a bench is still reaped best-effort, by design.</p>
   </div>
 </section>
 
