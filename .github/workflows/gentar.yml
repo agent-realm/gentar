@@ -182,6 +182,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: bench key + subjects
+        # Through env, not `${{ }}` pasted into the script body: a
+        # value containing a quote would otherwise reach the shell
+        # parser (it happens to produce a syntax error rather than
+        # injection, but a repo variable should not get that far).
+        env:
+          GENTAR_NIGHTLY_SUBJECTS: ${{ vars.GENTAR_NIGHTLY_SUBJECTS }}
         run: |
           umask 077
           echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
@@ -192,15 +198,28 @@ jobs:
           if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
             REF="${{ github.event.inputs.subject_ref }}"
             REF="${REF:-main}"
-            # Full clone (no --depth): kommander-update clones the old
-            # release locally from this checkout's history — it needs tags.
-            git clone \
-              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
-              -b "$REF" subjects/kommander-playbook
-            git clone --depth 1 \
-              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/agent-realm/memhouse \
-              subjects/memhouse 2>/dev/null || \
-              echo "memhouse clone failed — its suites will fail honestly"
+            # WHICH subjects this arena tests is an install's choice, not
+            # the engine's: a fork inheriting hardcoded repo paths would
+            # clone someone else's subjects (or fail trying). The list
+            # lives in the repo variable GENTAR_NIGHTLY_SUBJECTS as
+            # space-separated `owner/repo[:full]` entries; `:full` means
+            # clone with history and tags (kommander-update and
+            # agent-profile-smoke both clone an old release from the
+            # checkout's own tags). Unset = subjectless, the right
+            # default for a fork that has named no subjects.
+            SUBJECTS="$GENTAR_NIGHTLY_SUBJECTS"
+            [ -n "$SUBJECTS" ] || echo "GENTAR_NIGHTLY_SUBJECTS unset — subject suites skipped"
+            for entry in $SUBJECTS; do
+              repo="${entry%%:*}"; depth="--depth 1"; branch=""
+              case "$entry" in
+                *:full) depth=""; branch="-b $REF" ;;
+              esac
+              name="${repo##*/}"
+              git clone $depth $branch \
+                "https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/$repo" \
+                "subjects/$name" 2>/dev/null || \
+                echo "$repo clone failed — its suites will fail honestly"
+            done
           else
             echo "GENTAR_SUBJECT_TOKEN absent — subject suites skipped"
           fi
@@ -284,6 +303,12 @@ jobs:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
       - name: bench key + subjects (opt-in)
+        # Through env, not `${{ }}` pasted into the script body: a
+        # value containing a quote would otherwise reach the shell
+        # parser (it happens to produce a syntax error rather than
+        # injection, but a repo variable should not get that far).
+        env:
+          GENTAR_NIGHTLY_SUBJECTS: ${{ vars.GENTAR_NIGHTLY_SUBJECTS }}
         run: |
           umask 077
           echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
@@ -292,15 +317,28 @@ jobs:
           if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
             REF="${{ github.event.inputs.subject_ref }}"
             REF="${REF:-main}"
-            # Full clone (no --depth): agent-profile-smoke pins the
-            # newest release by cloning it from this checkout's tags —
-            # same rule as the nightly job's kommander-playbook clone.
-            git clone \
-              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/ramazanpolat/kommander-playbook \
-              -b "$REF" subjects/kommander-playbook
-            git clone --depth 1 \
-              https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/agent-realm/memhouse \
-              subjects/memhouse 2>/dev/null || true
+            # WHICH subjects this arena tests is an install's choice, not
+            # the engine's: a fork inheriting hardcoded repo paths would
+            # clone someone else's subjects (or fail trying). The list
+            # lives in the repo variable GENTAR_NIGHTLY_SUBJECTS as
+            # space-separated `owner/repo[:full]` entries; `:full` means
+            # clone with history and tags (kommander-update and
+            # agent-profile-smoke both clone an old release from the
+            # checkout's own tags). Unset = subjectless, the right
+            # default for a fork that has named no subjects.
+            SUBJECTS="$GENTAR_NIGHTLY_SUBJECTS"
+            [ -n "$SUBJECTS" ] || echo "GENTAR_NIGHTLY_SUBJECTS unset — subject suites skipped"
+            for entry in $SUBJECTS; do
+              repo="${entry%%:*}"; depth="--depth 1"; branch=""
+              case "$entry" in
+                *:full) depth=""; branch="-b $REF" ;;
+              esac
+              name="${repo##*/}"
+              git clone $depth $branch \
+                "https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/$repo" \
+                "subjects/$name" 2>/dev/null || \
+                echo "$repo clone failed — its suites will fail honestly"
+            done
             git clone -q --depth 1 "$GITHUB_WORKSPACE" subjects/gentar 2>/dev/null || true
           fi
 

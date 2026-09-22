@@ -28,6 +28,28 @@ def cfg_with(**env) -> Config:
         return Config()
 
 
+def refuse_run(cfg, scenario="smoke"):
+    """coordinator.run with the bench factory booby-trapped: the guard
+    must return BEFORE anything tries to build a bench, so a refusal
+    that leaks through raises instead of quietly passing.
+
+    Safe because make_bench is called outside run()'s broad
+    `except Exception` (coordinator.py: the call, then the try), so the
+    AssertionError propagates and fails the test loudly rather than
+    being recorded as a verdict.
+
+    Returns (exit code, everything the run printed).
+    """
+    printed = []
+    with mock.patch.object(coord, "make_bench",
+                           side_effect=AssertionError(
+                               "bench created despite refusal")), \
+         mock.patch.object(coord, "Spans"), \
+         mock.patch("builtins.print", side_effect=printed.append):
+        rc = coord.run(scenario, cfg)
+    return rc, "\n".join(str(p) for p in printed)
+
+
 class NoPersonalDefaultsTest(unittest.TestCase):
     """The regression that started this: no install's own machines in
     the source. A default here would make the guard unreachable."""
@@ -120,17 +142,7 @@ class MissingBenchEnvTest(unittest.TestCase):
 class RefusalTest(unittest.TestCase):
     """The verdict: exit 2, the vars named, and no bench created."""
 
-    def run_smoke(self, cfg, scenario="smoke"):
-        """coordinator.run with the bench factory booby-trapped: the
-        guard must return before anything tries to build a bench."""
-        printed = []
-        with mock.patch.object(coord, "make_bench",
-                               side_effect=AssertionError(
-                                   "bench created despite refusal")), \
-             mock.patch.object(coord, "Spans"), \
-             mock.patch("builtins.print", side_effect=printed.append):
-            rc = coord.run(scenario, cfg)
-        return rc, "\n".join(str(p) for p in printed)
+    run_smoke = staticmethod(refuse_run)
 
     def test_unset_refuses_with_exit_2(self):
         rc, out = self.run_smoke(cfg_with(GENTAR_REPORT_DIR=""))
@@ -165,3 +177,51 @@ class RefusalTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefusalPathCoverageTest(unittest.TestCase):
+    """The refusal SURFACE, not one guard.
+
+    Three release-blocking defects shipped past a fully green board
+    (7/7 local, 6/6 CI) because no gate suite ever takes a refusal
+    path: an unknown bench tier crashed with a traceback and exit 1
+    instead of refusing, agent suites could not run at all because the
+    wrapper forwarded no credentials, and a missing key file aborted
+    the script silently. Every one is exit-2 territory, and none of it
+    was executed by anything that gates a release.
+
+    A green board that never exercises the failure modes is a board
+    that cannot see them. These cases run the real coordinator.run for
+    each refusal, with the bench factory booby-trapped so 'refused
+    before any bench exists' is asserted rather than assumed.
+    """
+
+    run_refusing = staticmethod(refuse_run)
+
+    def configured(self, **extra):
+        """A fully configured sbx install — so anything refused here is
+        refused for the reason under test, not for a missing host."""
+        env = {"GENTAR_BENCH_HOST": "bench.example.internal",
+               "GENTAR_BENCH_USER": "bench", "GENTAR_REPORT_DIR": ""}
+        env.update(extra)
+        return cfg_with(**env)
+
+    def test_unknown_tier_refuses_instead_of_crashing(self):
+        # Was: BenchHostError traceback, exit 1 — a TEST FAILURE verdict
+        # for a typo in `bench =`, and the wrong code for the contract.
+        cfg = self.configured(GENTAR_BENCH_KIND="typo-tier")
+        rc, out = self.run_refusing(cfg, "smoke")
+        self.assertEqual(rc, 2)
+        self.assertIn("typo-tier", out)
+
+    def test_unknown_tier_names_the_tiers_that_exist(self):
+        cfg = self.configured(GENTAR_BENCH_KIND="typo-tier")
+        _, out = self.run_refusing(cfg, "smoke")
+        for known in BENCH_REQUIREMENTS:
+            self.assertIn(known, out)
+
+    def test_unknown_scenario_refuses(self):
+        # The other name-level refusal: an unknown suite must not spend
+        # a bench discovering it does not exist.
+        rc, _ = self.run_refusing(self.configured(), "no-such-suite")
+        self.assertEqual(rc, 2)
