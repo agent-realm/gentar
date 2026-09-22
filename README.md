@@ -405,6 +405,16 @@ MIT — see [LICENSE](LICENSE). The repository is private today; the
 license is the terms under which it is shared, not a statement about
 who can reach it.
 
+## Scope map
+
+New to the vocabulary, or unsure which machine holds what?
+**[`docs/scope-map.md`](docs/scope-map.md)** — what contains what, every
+relation counted (`1 → 1`, `1 → N`, `N → 1`, `N → M`), and the three
+cardinalities people get backwards: a runner is not per-run, a job is not
+per-scenario, and a second runner does not give you a second bench-host.
+A rendered version with hand-drawn figures sits beside it at
+[`docs/scope-map.html`](docs/scope-map.html).
+
 ## Design tenets
 
 - **Verdicts from reality.** Files, exit codes, processes, SQL, spans,
