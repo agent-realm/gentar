@@ -71,9 +71,10 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
     # 1. Fresh bench + subject delivery, order per tier: sbx wants the
     # workspace populated BEFORE create (a tar touching the bind-mount
     # root after create breaks sbx's mount — exec fails getcwd EPERM,
-    # reproduced on VM 142 with both GNU and bsdtar streams); tart has
-    # no choice — the workspace lives inside the VM, which must boot
-    # first. push_before_create on the host states which world we're in.
+    # reproduced on a Linux bench-host with both GNU and bsdtar
+    # streams); tart has no choice — the workspace lives inside the VM,
+    # which must boot first. push_before_create states which world
+    # we're in.
     def _create() -> None:
         bench.create(run_id, agent=scenario.agent,
                      template=scenario.template)

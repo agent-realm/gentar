@@ -2,27 +2,56 @@
 # Kick this repo's arena: stage the working tree as the subject, run a
 # scenario, land the report in gentar/reports/.
 #
-#   gentar/run.sh <scenario>          # e.g. first-suite
-#   GENTAR_REF=main gentar/run.sh …   # pin the arena version
+#   gentar/run.sh <scenario>            # e.g. first-suite
+#   GENTAR_REF=v0.2.0 gentar/run.sh …   # run against another engine version
+#   GENTAR_REF=main gentar/run.sh …     # …or the engine's tip, unpinned
 #
 # First run: clones gentar into gentar/.arena and copies .env.example
-# to .env — edit .env if your bench-host differs from the default.
+# to .env. Set GENTAR_BENCH_HOST and GENTAR_BENCH_USER there — there is
+# no default bench-host, and an unset one is a refusal (exit 2), not a
+# run against somebody else's machine.
 # Reports: gentar/reports/report-<run_id>.md — on failure, feed one to
 # an agent; it states everything needed to fix.
 #
-# Genericized from the reference subject (claude-playbooks/gentar);
-# the only thing to edit below is SUBJECT if your repo's dir name is
-# not its basename.
+# Two arenas on one Docker host collide on the published ClickHouse and
+# OTLP ports. Both are env knobs the engine's compose file reads, and
+# docker compose takes them from this script's environment, so they need
+# no file edit:
+#
+#   GENTAR_CLICKHOUSE_HOST_PORT=8124 GENTAR_OTLP_HOST_PORT=14320 \
+#     gentar/run.sh first-suite
+#
+# The only thing to edit below is SUBJECT, if your repo's directory name
+# is not the subject name your scenarios declare.
 set -euo pipefail
 
-SCENARIO=${1:?usage: gentar/run.sh <scenario> [more scenarios...]}
-shift || true
+# --stage-engine clones/fetches/checks out the engine and stops there.
+# dryrun.py needs the engine's scenario parser but no bench, so without
+# this the only way to get one was a full bench run — the cheap check
+# would have required the expensive one first.
+STAGE_ONLY=0
+if [ "${1:-}" = "--stage-engine" ]; then STAGE_ONLY=1; shift; fi
+
+if [ "$STAGE_ONLY" = 0 ]; then
+  SCENARIO=${1:?usage: gentar/run.sh [--stage-engine] <scenario> [more scenarios...]}
+  shift || true
+else
+  SCENARIO=""
+fi
 HERE=$(cd "$(dirname "$0")" && pwd)          # <repo>/gentar
 REPO=$(dirname "$HERE")
 SUBJECT=$(basename "$REPO")   # dir under the subjects root — MUST match
                               # `subject = "…"` in your scenario TOMLs
 ARENA=${GENTAR_DIR:-$HERE/.arena}
-REF=${GENTAR_REF:-main}
+# Engine version. A RELEASE TAG by default, never a moving branch: the
+# engine is a separate repo on its own release cycle, so `main` means
+# every adopter's suites can change behaviour on a day nobody touched
+# this repo. That already happened once — the kit advertised a scenario
+# feature the engine's tip did not parse yet, and adopters saw a load
+# error they had not caused. Bump this deliberately: change the default,
+# run your suites, commit the bump as its own change. `main` stays
+# available for anyone tracking the engine on purpose.
+REF=${GENTAR_REF:-v0.1.0}
 
 # Refs are branch/tag/SHA only — reject anything hostile before it
 # reaches git (the CI workflow passes a dispatch input through here).
@@ -30,20 +59,36 @@ case "$REF" in
   ''|*[!A-Za-z0-9._/-]*) echo "bad GENTAR_REF: $REF" >&2; exit 2 ;;
 esac
 
-# agent-realm/gentar is private. Anonymous https works from a dev
-# machine with a credential helper; a CI runner needs explicit auth.
-# GENTAR_CLONE_SSH_KEY (path to a read-only deploy key) switches clone
-# and fetch to ssh for the arena git ops. Unset = plain https, as on
-# a laptop.
-if [ -n "${GENTAR_CLONE_SSH_KEY:-}" ]; then
+# Where the engine comes from. The default is a plain anonymous https
+# clone of the upstream repo, which is all a public engine needs.
+#
+#   GENTAR_REPO_URL      any git URL — your fork, an internal mirror, or
+#                        a local path. Use it and nothing below applies.
+#   GENTAR_CLONE_SSH_KEY path to a read-only deploy key, for the case
+#                        where the engine repo is PRIVATE: https then
+#                        fails on a CI runner (a laptop may still pass
+#                        via a credential helper, which is how the
+#                        difference hides until CI). Setting it switches
+#                        the default URL to ssh and pins the identity.
+GENTAR_REPO_URL=${GENTAR_REPO_URL:-}
+if [ -n "$GENTAR_REPO_URL" ]; then
+  CLONE_URL=$GENTAR_REPO_URL
+elif [ -n "${GENTAR_CLONE_SSH_KEY:-}" ]; then
   CLONE_URL=git@github.com:agent-realm/gentar.git
-  export GIT_SSH_COMMAND="ssh -i $GENTAR_CLONE_SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 else
   CLONE_URL=https://github.com/agent-realm/gentar
+fi
+if [ -n "${GENTAR_CLONE_SSH_KEY:-}" ]; then
+  export GIT_SSH_COMMAND="ssh -i $GENTAR_CLONE_SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 fi
 
 if [ ! -d "$ARENA" ]; then
   git clone -q "$CLONE_URL" "$ARENA"
+else
+  # A cached .arena remembers the URL it was first cloned from, so
+  # switching GENTAR_REPO_URL (to a fork, a mirror) would otherwise keep
+  # fetching the old engine and look like the switch did nothing.
+  git -C "$ARENA" remote set-url origin "$CLONE_URL"
 fi
 # Honor GENTAR_REF on EVERY run: fetch, resolve, detach. A cached
 # .arena must never pin the engine to whatever was checked out first.
@@ -52,14 +97,20 @@ fi
 # plain `git fetch origin main` writes FETCH_HEAD only and never moves
 # the local branch, so rev-parse main would answer with the stale tip.
 if ! git -C "$ARENA" fetch -q --tags origin "$REF"; then
-  echo "GENTAR_REF $REF not found in agent-realm/gentar" >&2; exit 2
+  echo "GENTAR_REF $REF not found in $CLONE_URL" >&2; exit 2
 fi
 sha=$(git -C "$ARENA" rev-parse -q --verify FETCH_HEAD^{commit}) || {
-  echo "GENTAR_REF $REF not resolvable in agent-realm/gentar" >&2; exit 2
+  echo "GENTAR_REF $REF not resolvable in $CLONE_URL" >&2; exit 2
 }
 git -C "$ARENA" checkout -q --detach "$sha"
 cd "$ARENA"
 [ -f .env ] || cp .env.example .env
+
+if [ "$STAGE_ONLY" = 1 ]; then
+  echo "engine staged: $ARENA @ $REF ($sha)" >&2
+  echo "arena env: $ARENA/.env" >&2
+  exit 0
+fi
 
 # Stage THIS checkout (working tree, uncommitted changes included) as
 # the subject. Plain copy: symlinks don't resolve through the bind.
@@ -124,6 +175,24 @@ mkdir "subjects/$SUBJECT"
 # The overlay ships with the engine, so an older GENTAR_REF may not have it;
 # guarantee 1 still holds for the containers, only the named volume survives
 # until the trap's `down -v`.
+# The bench key must EXIST before compose is asked to mount it. The
+# engine's compose file declares it as a secret with a bind source, so a
+# missing file fails at container-create with a Docker daemon error
+# ("bind source path does not exist") and exit 1 — before the
+# coordinator can issue its own exit-2 usage refusal. An adopter who has
+# no ed25519 key then sees a mount error naming neither the variable to
+# set nor the path that was tried. Check it here and refuse the same way
+# the engine would: the path only, never the key's contents.
+BENCH_KEY_PATH=${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}
+case "$BENCH_KEY_PATH" in
+  "~/"*) BENCH_KEY_PATH=$HOME/${BENCH_KEY_PATH#\~/} ;;
+esac
+if [ ! -r "$BENCH_KEY_PATH" ]; then
+  echo "bench ssh key not found at $BENCH_KEY_PATH — set GENTAR_BENCH_KEY_FILE to the key the coordinator uses to reach the bench-host" >&2
+  exit 2
+fi
+export GENTAR_BENCH_KEY_FILE="$BENCH_KEY_PATH"
+
 ARENA_FILES=(-f docker-compose.yml)
 [ -f "$ARENA/compose.rm.yml" ] && ARENA_FILES+=(-f compose.rm.yml)
 

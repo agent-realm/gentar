@@ -176,6 +176,38 @@ def run(name: str, cfg: Config | None = None) -> int:
             _write_report(report, cfg)
             return 2
 
+    # -- bench-config guard: refuse before any bench exists --------------
+    # The bench tier this run will actually use — the scenario's `bench`
+    # key, else the install default. Install-identity vars (which host,
+    # which account) have no defaults in config.py: unset means this
+    # install was never configured, which is a usage error (exit 2), not
+    # a test failure. Refusing here rather than at Config load keeps an
+    # unused tier's absence harmless — an sbx-only install never has to
+    # configure tart. Names only; a value must never reach a log line.
+    bench_kind = (scenario.bench if scenario and scenario.bench
+                  else cfg.bench_kind)
+    missing = cfg.missing_bench_env(bench_kind)
+    if missing:
+        msg = (f"bench config: {bench_kind} benches need "
+               f"{' and '.join(missing)} — unset (refusing before any "
+               f"bench exists). Copy .env.example to .env and set it.")
+        print(f"Error: {msg}")
+        spans = Spans(cfg)
+        spans.emit(ARENA_SUBJECT, "", name, "bench.config.refuse", "error",
+                   attrs={"bench_kind": bench_kind,
+                          "missing": ",".join(missing)},
+                   detail="run refused: bench tier not configured")
+        report = RunReport(
+            scenario=name,
+            run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+            subject=(scenario.subject if scenario and scenario.subject
+                     else ARENA_SUBJECT),
+            reproduce=f"docker compose run --rm coordinator run {name}",
+            error=msg)
+        report.mark("refuse", 2)
+        _write_report(report, cfg)
+        return 2
+
     subject = (scenario.subject or ARENA_SUBJECT) if scenario else ARENA_SUBJECT
     run_kind = "scripted" if (scenario and scenario.driver_command) else "oracle"
     # Bench tier: the scenario's `bench` key overrides the install default

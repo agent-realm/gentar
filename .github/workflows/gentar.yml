@@ -5,11 +5,14 @@
 #   nightly   — subject + budget-guarded suites, post-merge.
 #   dispatch  — arbitrary scenario/ref, manual or from a subject repo.
 #
-# Everything runs on the self-hosted `gentar-bench` runner (VM 142, gentar-bench-host —
-# the arena's own bench-host: Docker + sbx + this compose stack in one
-# place; the coordinator spawns benches by SSHing to itself with the
-# GENTAR_BENCH_KEY repo secret). `docker compose run` exit code IS the
-# verdict — no test-report layer in between.
+# Everything runs on a self-hosted runner labelled `gentar-bench`: a machine
+# with Docker, sbx, and ssh reach to the bench-host named by the repository
+# variables GENTAR_BENCH_HOST / GENTAR_BENCH_USER (in the usual setup the
+# runner IS that bench-host, and the coordinator spawns benches by SSHing to
+# itself with the GENTAR_BENCH_KEY repo secret). Those two variables have no
+# built-in default — unset, the coordinator refuses every run with exit 2.
+# `docker compose run` exit code IS the verdict — no test-report layer in
+# between.
 
 name: gentar
 
@@ -105,11 +108,13 @@ jobs:
         scenario: ${{ fromJSON(needs.gate-setup.outputs.scenarios) }}
     env:
       COMPOSE_PROJECT_NAME: gentar-ci
+      GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
+      GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
       SCENARIO: ${{ matrix.scenario }}
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
-      # VM 142 also hosts the claude-playbooks arena, whose otelcol
-      # publishes the default 4318 — pin ours aside (same rule as the
-      # ClickHouse 8123/8126 split).
+      # The runner may host another arena too (a subject repo's
+      # own-arena), whose otelcol publishes the default 4318 — pin ours
+      # aside (same rule as the ClickHouse 8123/8126 split).
       GENTAR_OTLP_HOST_PORT: "4319"
     steps:
       - uses: actions/checkout@v4
@@ -145,7 +150,8 @@ jobs:
           # Same key file the coordinator used — ssh BEFORE removing it.
           ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
-            -i /tmp/gentar_ci_bench_key polat@10.10.10.52 \
+            -i /tmp/gentar_ci_bench_key \
+            "${GENTAR_BENCH_USER}@${GENTAR_BENCH_HOST}" \
             'sbx ls | grep gentar- || echo "bench-host clean"' || true
           rm -f /tmp/gentar_ci_bench_key
 
@@ -155,6 +161,8 @@ jobs:
     runs-on: [self-hosted, gentar-bench]
     env:
       COMPOSE_PROJECT_NAME: gentar-nightly
+      GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
+      GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
       GENTAR_BUDGET_CAP: "50000"
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
       GENTAR_OTLP_HOST_PORT: "4319"
@@ -258,6 +266,8 @@ jobs:
     runs-on: [self-hosted, gentar-bench]
     env:
       COMPOSE_PROJECT_NAME: gentar-dispatch
+      GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
+      GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
       GENTAR_OTLP_HOST_PORT: "4319"
       # Pass-through for credential-declaring scenarios (agent-smoke);
