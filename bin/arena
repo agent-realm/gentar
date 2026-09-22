@@ -43,6 +43,25 @@ cd "$HERE"
 # still works exactly as the README and CI describe it.
 compose() { docker compose -f docker-compose.yml -f compose.rm.yml "$@"; }
 
+# docker-compose.yml mounts the bench ssh key as a compose SECRET
+# (`file: ${GENTAR_BENCH_KEY_FILE:-~/.ssh/id_ed25519}`). When that file
+# does not exist, the daemon rejects the bind at container-create time
+# ("invalid mount config ... bind source path does not exist"), exit 1 —
+# before the coordinator's own exit-2 refusal can say what is missing. An
+# adopter with no ed25519 key would see a Docker error, not ours. Ask
+# compose for the path it actually resolved (it honours .env and the
+# shell the same way the run will) and refuse with the usage/config code.
+require_bench_key() {
+  local key
+  key=$(compose config --format json 2>/dev/null \
+    | sed -n 's/.*"bench_ssh_key": *{[^}]*"file": *"\([^"]*\)".*/\1/p' | head -1)
+  [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"
+  [ -r "$key" ] && return 0
+  echo "arena: bench ssh key not found at $key — set GENTAR_BENCH_KEY_FILE" \
+       "(in .env or the shell) to the key the coordinator uses to reach the bench-host" >&2
+  exit 2
+}
+
 _torn_down=0
 teardown() {
   # Never let teardown change the verdict: it runs under a trap, and its
@@ -117,6 +136,7 @@ start_arena() {
 
 cmd_run() {
   [ $# -ge 1 ] || { echo "usage: bin/arena run <scenario> [scenario...]" >&2; exit 64; }
+  require_bench_key
   trap teardown EXIT INT TERM
   compose build coordinator
   start_arena
@@ -143,6 +163,7 @@ cmd_sql() {
 }
 
 cmd_dashboard() {
+  require_bench_key
   trap teardown EXIT INT TERM
   start_arena
   compose run --rm --no-deps dashboard
@@ -150,6 +171,7 @@ cmd_dashboard() {
 
 cmd_ls() {
   # No arena needed: `ls` reads the scenario files, nothing else.
+  require_bench_key
   trap teardown EXIT INT TERM
   compose run --rm --no-deps coordinator ls
 }

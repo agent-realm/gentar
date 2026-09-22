@@ -137,7 +137,7 @@ def _sq(s: str) -> str:
 
 
 class SbxBenchHost(BenchHost):
-    """sbx sandboxes on a Linux bench-host (VM 142 today).
+    """sbx sandboxes on a Linux bench-host (GENTAR_BENCH_HOST).
 
     sbx CLI shape (v0.39.0): `create [flags] AGENT PATH`, `exec [flags]
     SANDBOX COMMAND [ARG...]` (docker-exec semantics), `rm --force`."""
