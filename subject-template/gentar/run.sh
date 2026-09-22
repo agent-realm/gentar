@@ -30,10 +30,14 @@ set -euo pipefail
 # this the only way to get one was a full bench run — the cheap check
 # would have required the expensive one first.
 STAGE_ONLY=0
-if [ "${1:-}" = "--stage-engine" ]; then STAGE_ONLY=1; shift; fi
+REVIEW_ONLY=0
+case "${1:-}" in
+  --stage-engine) STAGE_ONLY=1; shift ;;
+  --review)       REVIEW_ONLY=1; shift ;;
+esac
 
-if [ "$STAGE_ONLY" = 0 ]; then
-  SCENARIO=${1:?usage: gentar/run.sh [--stage-engine] <scenario> [more scenarios...]}
+if [ "$STAGE_ONLY" = 0 ] && [ "$REVIEW_ONLY" = 0 ]; then
+  SCENARIO=${1:?usage: gentar/run.sh [--stage-engine|--review] <scenario> [more scenarios...]}
   shift || true
 else
   SCENARIO=""
@@ -51,7 +55,93 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.1.1}
+REF=${GENTAR_REF:-v0.2.0}
+
+# --review: has this repo outgrown its suites?
+#
+# The arena is rebuilt from scratch every run, so it cannot go stale. The
+# ADAPTATION can: a repo grows a command, a flag, an install step, and
+# the existing suites still pass because they never mentioned it. Nothing
+# fails, the board stays green, and coverage decays quietly — which is
+# the failure mode worth naming, because it is the one nobody notices.
+#
+# This reports and stops. It does not fail, it does not write, and it
+# does not decide what a suite should assert: matching a repo's real
+# behaviour to an assertion needs reading comprehension, so the report
+# is the input to that judgement, not a substitute for it. Needs no
+# engine, no Docker and no bench.
+if [ "$REVIEW_ONLY" = 1 ]; then
+  HERE=$(cd "$(dirname "$0")" && pwd)
+  REPO=$(dirname "$HERE")
+  cd "$REPO"
+
+  printf 'adaptation review — %s\n\n' "$(basename "$REPO")"
+
+  sc=$(ls "$HERE"/scenarios/*.toml 2>/dev/null || true)
+  if [ -z "$sc" ]; then
+    echo "no scenarios in gentar/scenarios — this repo is not adapted yet"
+    exit 0
+  fi
+
+  # What the suites talk about: every quoted/bare token in oracle steps
+  # and verify blocks. Crude on purpose — a name that appears anywhere in
+  # a suite counts as mentioned, so this errs toward saying "covered",
+  # and a gap it reports is unlikely to be a false alarm.
+  # Split on path separators too: a suite writes `./install.sh` or
+  # `bin/tool`, and comparing those whole against a basename never
+  # matches — the first version of this check reported install.sh as
+  # unasserted for a suite whose very first step runs it.
+  mentions=$(cat $sc | grep -vE '^[[:space:]]*#' \
+    | tr -c 'A-Za-z0-9_.-' '\n' | sort -u)
+
+  echo "suites:"
+  for f in $sc; do
+    printf '  %-28s %s asserted\n' "$(basename "$f")" \
+      "$(grep -c '^\[\[verify' "$f" 2>/dev/null || echo 0)"
+  done
+  echo
+
+  # Candidates the repo exposes: executables it ships, and the scripts a
+  # README tells a person to run. Both are things a fresh machine would
+  # encounter, which is what a scenario is for.
+  cands=$( { git ls-files 2>/dev/null | grep -E '^(bin|scripts|cmd)/' || true
+             git ls-files 2>/dev/null | grep -E '\.(sh|py)$' | grep -vE '^(gentar|test|tests)/' || true
+           } | sort -u)
+
+  gaps=0
+  for c in $cands; do
+    base=$(basename "$c"); stem=${base%.*}
+    if ! printf '%s\n' "$mentions" | grep -qxF "$base" \
+       && ! printf '%s\n' "$mentions" | grep -qxF "$stem"; then
+      if [ "$gaps" = 0 ]; then echo "the repo ships these, and no suite mentions them:"; fi
+      last=$(git log -1 --format='%ad' --date=short -- "$c" 2>/dev/null || echo '?')
+      printf '  %-40s last changed %s\n' "$c" "$last"
+      gaps=$((gaps + 1))
+    fi
+  done
+
+  echo
+  if [ "$gaps" = 0 ]; then
+    echo "no gaps found by this check. It only looks at shipped executables and"
+    echo "scripts — a behaviour change inside a file it already knows about will"
+    echo "not show up here. Read the diff since the scenarios last changed:"
+  else
+    echo "$gaps unasserted. A gap is a question, not a defect: some of these"
+    echo "should have a suite, some never will. Deciding which is the work, and"
+    echo "it needs someone who has read the repo. Start from the diff:"
+  fi
+  # The commit that last touched a SCENARIO FILE, not the gentar dir:
+  # staging the runner or a report would otherwise read as "the suites
+  # were just updated" and the suggested diff would come back empty,
+  # which is exactly the reassuring-but-wrong answer this check exists
+  # to avoid.
+  since=$(git log -1 --format='%h %ad' --date=short -- "$HERE"/scenarios/'*.toml' 2>/dev/null || true)
+  if [ -n "$since" ]; then
+    printf '  scenarios last changed at %s\n' "$since"
+    printf '  git diff %s..HEAD -- . ":(exclude)gentar"\n' "${since%% *}"
+  fi
+  exit 0
+fi
 
 # Refs are branch/tag/SHA only — reject anything hostile before it
 # reaches git (the CI workflow passes a dispatch input through here).
