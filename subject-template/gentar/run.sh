@@ -51,7 +51,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.1.0}
+REF=${GENTAR_REF:-v0.1.1}
 
 # Refs are branch/tag/SHA only — reject anything hostile before it
 # reaches git (the CI workflow passes a dispatch input through here).

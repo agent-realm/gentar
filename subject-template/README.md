@@ -25,7 +25,7 @@ workflow:
 | 2 | **Suites** | `gentar/scenarios/*.toml` — install *decisions* + reality assertions, never scripts | `first-suite.toml`, fully commented |
 | 3 | **Credentials** | `credentials = [names]` per suite — env var NAMES; entries are alternatives, a list entry is an all-of group; none = oracle suite | none (first-suite is credential-less) |
 | 4 | **Trigger** | `.github/workflows/gentar-arena.yml` (own arena) and/or a dispatch job (central arena) | own-arena workflow: PRs, push to main, tags, dispatch |
-| 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.1.0` — a release tag, bumped deliberately |
+| 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.1.1` — a release tag, bumped deliberately |
 
 The verdict contract is the engine's, not yours: exit `0` pass · `1`
 fail · `2` usage/config refusal. Assertions read reality — files,
@@ -106,7 +106,7 @@ Clones the engine into `gentar/.arena`, checks out the pinned
 `GENTAR_REF`, and seeds the arena's `.env` from its `.env.example`. No
 Docker, no bench — this is a git operation.
 
-Observe: `engine staged: …/gentar/.arena @ v0.1.0 (<sha>)` and a path to
+Observe: `engine staged: …/gentar/.arena @ v0.1.1 (<sha>)` and a path to
 the arena env file.
 
 **The seeded `.env` holds placeholders, not a working config — edit it

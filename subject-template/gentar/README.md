@@ -12,7 +12,7 @@ can hand to an agent to fix what failed.
 | suites | `scenarios/*.toml` — decisions + reality assertions | see below |
 | credentials | `credentials = [names]` per suite — entries are ALTERNATIVES, a list entry is an all-of group (`["KEY", ["TOKEN","BASE_URL"]]` = the key alone, or the token and its endpoint together). None present refuses (exit 2) before a bench exists | per suite |
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | see workflow |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.1.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.1.1` |
 
 ## Quickstart (local)
 
