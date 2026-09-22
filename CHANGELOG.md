@@ -22,6 +22,34 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.1.1 — 2026-09-23
+
+Post-release fixes. No schema or exit-code change: a suite written
+against 0.1.0 runs unchanged.
+
+### Added
+
+- **LICENSE** (MIT). 0.1.0 shipped without one — the file landed after
+  the tag was cut — so the version adopters pin carried no terms. That
+  is the reason this release exists.
+- Refusal-path coverage in the test suite. Three of the defects found
+  reviewing 0.1.0 had shipped past a fully green board because no gate
+  suite ever took a refusal path; `RefusalPathCoverageTest` now runs the
+  real coordinator for the name-level refusals with the bench factory
+  booby-trapped, so "refused before any bench exists" is asserted
+  rather than assumed (tests 54 → 57).
+
+### Changed
+
+- The nightly and dispatch jobs no longer clone subject repos by
+  hardcoded owner. The list comes from the repo variable
+  `GENTAR_NIGHTLY_SUBJECTS` (`owner/repo[:full]`, `:full` meaning clone
+  with history and tags); unset means a subjectless run, which is the
+  right default for a fork that has named no subjects.
+- That variable reaches the job through step `env` rather than `${{ }}`
+  interpolation, so its value cannot reach the shell parser.
+- The adoption kit's default engine pin moves to `v0.1.1`.
+
 ## 0.1.0 — 2026-09-22
 
 First release. The arena runs standalone: one compose file, four bench
