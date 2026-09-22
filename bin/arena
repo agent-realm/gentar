@@ -51,6 +51,51 @@ compose() { docker compose -f docker-compose.yml -f compose.rm.yml "$@"; }
 # adopter with no ed25519 key would see a Docker error, not ours. Ask
 # compose for the path it actually resolved (it honours .env and the
 # shell the same way the run will) and refuse with the usage/config code.
+# Credentials an agent suite declares must reach the COORDINATOR, or the
+# guard refuses a run the caller configured correctly: the coordinator
+# reads them from its own environment and forwards only the winning
+# group into the bench. compose passes nothing from this shell that the
+# compose file does not name, and these names are arbitrary per scenario
+# (`credentials` / `pass_env` in the schema), so they cannot be a fixed
+# list in docker-compose.yml — they are read FROM the scenarios about to
+# run and passed with -e. The kit's run.sh does the same; same awk, for
+# the same reason (a stock runner has no python).
+#
+# Values never appear here: -e NAME passes the name and lets Docker read
+# the value from the environment, so nothing lands in argv or a log.
+extract_env_names() {         # scenario files... -> one name per line
+  awk '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
+    inarr {
+      line = $0
+      while (match(line, /"[A-Za-z_][A-Za-z0-9_]*"/)) {
+        print substr(line, RSTART + 1, RLENGTH - 2)
+        line = substr(line, RSTART + RLENGTH)
+      }
+      depth += gsub(/\[/, "[") - gsub(/\]/, "]")
+      if (depth <= 0) inarr = 0
+    }
+  ' "$@"
+}
+
+# Sets FORWARD to the -e flags for the names the given scenarios declare
+# that are actually set in this shell. Unset stays unset inside, rather
+# than arriving empty-but-present.
+forward_flags() {             # scenario names... -> FORWARD=(-e A -e B)
+  local files=() s names
+  for s in "$@"; do
+    [ -f "coordinator/scenarios/$s.toml" ] && files+=("coordinator/scenarios/$s.toml")
+  done
+  FORWARD=()
+  [ ${#files[@]} -eq 0 ] && return 0
+  names=$(extract_env_names "${files[@]}" | sort -u)
+  for s in $names; do
+    [ -n "${!s:-}" ] && FORWARD+=(-e "$s")
+  done
+  return 0
+}
+
 require_bench_key() {
   local key
   # `config --format json` PRETTY-PRINTS: "bench_ssh_key" and its "file"
@@ -58,8 +103,10 @@ require_bench_key() {
   # fallback to the shell variable passes while the run mounts a different,
   # missing file named only in .env. Range-match from the key to its
   # closing brace instead — line-oriented, no JSON parser needed.
-  key=$(compose config --format json 2>/dev/null \
-    | sed -n '/"bench_ssh_key"/,/}/{ s/.*"file": *"\([^"]*\)".*/\1/p; }' | head -1)
+  key=$({ compose config --format json 2>/dev/null || true; } \
+    | sed -n '/"bench_ssh_key"/,/}/{ s/.*"file": *"\(\([^"\\]\|\\.\)*\)".*/\1/p; }' | head -1)
+  # JSON-escaped: a path may legitimately contain a quote or backslash.
+  key=$(printf '%s' "$key" | sed 's/\\"/"/g; s/\\\\/\\/g')
   [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"
   case "$key" in "~/"*) key="$HOME/${key#\~/}" ;; esac
   [ -r "$key" ] && return 0
@@ -148,8 +195,9 @@ cmd_run() {
   start_arena
   local status=0 rc
   for s in "$@"; do
+    forward_flags "$s"
     set +e
-    compose run --rm --no-deps coordinator run "$s"
+    compose run --rm --no-deps ${FORWARD[@]+"${FORWARD[@]}"} coordinator run "$s"
     rc=$?
     set -e
     # Worst verdict wins: a refusal (2) outranks a failure (1).

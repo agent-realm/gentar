@@ -95,10 +95,20 @@ class MissingBenchEnvTest(unittest.TestCase):
         cfg = cfg_with(GENTAR_DAYTONA_API_KEY="k")
         self.assertEqual(cfg.missing_bench_env("daytona"), [])
 
-    def test_unknown_kind_defers_to_make_bench(self):
-        # make_bench rejects it by name — a clearer message than a list
-        # of vars for a tier that doesn't exist.
-        self.assertEqual(cfg_with().missing_bench_env("nope"), [])
+    def test_unknown_kind_is_refused_here_not_by_make_bench(self):
+        # Deferring to make_bench was wrong: reaching it means the
+        # refusal path was skipped, so a typo in a scenario's `bench =`
+        # surfaced as a BenchHostError traceback with exit 1 — a TEST
+        # FAILURE verdict for a misconfigured run, and the wrong exit
+        # code for the contract (config errors are exit 2, before any
+        # bench exists).
+        missing = cfg_with().missing_bench_env("nope")
+        self.assertEqual(len(missing), 1)
+        self.assertIn("nope", missing[0])
+        # The message names the tiers that DO exist, so the typo is
+        # obvious without reading the source.
+        for known in ("sbx", "tart", "osb", "daytona"):
+            self.assertIn(known, missing[0])
 
     def test_every_tier_make_bench_knows_has_a_policy(self):
         # A fifth tier added without an entry here would silently get

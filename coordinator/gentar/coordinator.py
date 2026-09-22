@@ -188,9 +188,15 @@ def run(name: str, cfg: Config | None = None) -> int:
                   else cfg.bench_kind)
     missing = cfg.missing_bench_env(bench_kind)
     if missing:
-        msg = (f"bench config: {bench_kind} benches need "
-               f"{' and '.join(missing)} — unset (refusing before any "
-               f"bench exists). Copy .env.example to .env and set it.")
+        # Two shapes: an unknown tier names what it needs in prose, a
+        # known-but-unconfigured one names env vars that are unset.
+        if len(missing) == 1 and missing[0].startswith("a known bench"):
+            msg = (f"bench config: {missing[0]} — refusing before any "
+                   f"bench exists.")
+        else:
+            msg = (f"bench config: {bench_kind} benches need "
+                   f"{' and '.join(missing)} — unset (refusing before any "
+                   f"bench exists). Copy .env.example to .env and set it.")
         print(f"Error: {msg}")
         spans = Spans(cfg)
         spans.emit(ARENA_SUBJECT, "", name, "bench.config.refuse", "error",

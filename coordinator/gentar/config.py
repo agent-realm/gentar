@@ -153,8 +153,17 @@ class Config:
 
         Checked per RUN, not at load: a scenario picks its tier, and an
         install that only ever uses sbx must not have to configure tart
-        for its config to load. An unknown kind needs nothing here —
-        make_bench rejects it by name, which is the clearer message."""
+        for its config to load.
+
+        An UNKNOWN kind is a config error too, and belongs here rather
+        than in make_bench: reaching make_bench means the refusal path
+        was skipped, and a typo in a scenario's `bench =` then surfaces
+        as a BenchHostError traceback with exit 1 — a TEST FAILURE, which
+        is the wrong verdict for a misconfigured run and the wrong exit
+        code for the contract."""
         kind = kind or self.bench_kind
-        return [var for var, attr in BENCH_REQUIREMENTS.get(kind, ())
+        if kind not in BENCH_REQUIREMENTS:
+            known = ", ".join(sorted(BENCH_REQUIREMENTS))
+            return [f"a known bench tier (got {kind!r}; known: {known})"]
+        return [var for var, attr in BENCH_REQUIREMENTS[kind]
                 if not getattr(self, attr, "").strip()]

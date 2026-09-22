@@ -204,7 +204,7 @@ require_bench_key() {
   # error. Take the first "file" line AFTER the bench_ssh_key key
   # instead, which is line-oriented and needs no JSON parser (this must
   # work on a stock runner with no python dependency).
-  key=$(arena config --format json 2>/dev/null \
+  key=$({ arena config --format json 2>/dev/null || true; } \
     | sed -n '/"bench_ssh_key"/,/}/{ s/.*"file": *"\([^"]*\)".*/\1/p; }' \
     | head -1)
   [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"
