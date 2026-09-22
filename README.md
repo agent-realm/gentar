@@ -10,6 +10,11 @@ typing at a terminal — and decides pass or fail from what is actually on
 that machine afterwards: files, exit codes, processes, SQL rows, spans.
 Never from what the software or the agent claims.
 
+**Adapting gentar into a repo?** gentar is not installed into a repo — the
+repo becomes a *subject* and the engine stays external and pinned. Agents:
+read [`AGENTS.md`](AGENTS.md) first. Humans:
+[`subject-template/README.md`](subject-template/README.md).
+
 Three things it does, and the rest of this page in that order:
 
 | Pillar | What it means |
