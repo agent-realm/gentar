@@ -242,11 +242,41 @@ flow; the token persists).
 ```bash
 cp .env.example .env          # point at your bench-host + SSH key
 export GENTAR_BENCH_KEY_FILE="$HOME/.ssh/id_ed25519"
-docker compose run --rm coordinator run smoke   # exit code = verdict
+bin/arena run smoke           # exit code = verdict
 ls out/   # report-<run_id>.md per run — failure reports are agent-feedable
-docker compose exec clickhouse clickhouse-client \
-  --user gentar --password gentar \
-  -q "SELECT span_name, status FROM gentar.spans ORDER BY ts"
+bin/arena sql "SELECT span_name, status FROM gentar.spans ORDER BY ts"
+```
+
+**Run through `bin/arena`, not bare compose.** The CI contract is
+`docker compose run --rm coordinator run smoke` and that still works —
+but `--rm` removes only the coordinator. `clickhouse` and `otelcol` start
+via `depends_on` as ordinary `up` containers (`AutoRemove=false`) and
+survive, and `clickhouse` owns a named volume, so every distinct compose
+project strands two containers and a volume. CI tears the stack down in
+an `if: always()` step; `bin/arena` gives two independent guarantees:
+
+- **Every container is `--rm`.** The compose spec has no per-service
+  auto-remove key and `compose up` has no `--rm`, so the wrapper starts
+  every service as a one-off `compose run -d --rm` — the only way to get
+  daemon-level `AutoRemove`. A stopped arena container is then removed by
+  the Docker daemon itself, whatever stopped it: ctrl-c, `SIGKILL`, OOM,
+  or the script dying before its trap can run. `compose.rm.yml` turns
+  `clickhouse`'s named volume anonymous so `--rm` reclaims that too.
+- **A trap tears the project down anyway**, on a pass, a failing verdict,
+  a refusal and ctrl-c alike — covering the network, and anything a
+  future edit starts the ordinary way.
+
+Keep a stack up to poke at ClickHouse with `GENTAR_KEEP_ARENA=1`, then
+`bin/arena down`. The arena's ClickHouse data does not survive a
+teardown — it never did: every teardown path already runs `down -v`.
+
+```bash
+bin/arena run smoke smoke-fail   # several suites, worst verdict wins
+bin/arena ls                     # list scenarios
+bin/arena dashboard              # render dashboard/out/dashboard.html
+bin/arena down                   # tear this project's arena down
+bin/arena gc                     # list arenas stranded by older runs
+bin/arena gc --yes               # …and remove them (never touches a running one)
 ```
 
 Defaults in `.env.example` point at the current bench-host — the VM on
