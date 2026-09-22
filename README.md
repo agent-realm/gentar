@@ -122,8 +122,14 @@ List them live: `docker compose run --rm coordinator ls`.
 
 ## Integrating your repo (becoming a subject)
 
+**Start from the kit:** [`subject-template/`](subject-template/) — a
+copyable `gentar/` dir (scenario template, `run.sh`, `dryrun.py`,
+own-arena workflow) plus the seven-step adoption checklist. Copy it,
+fill in the declarations, done.
+
 Full contract: [docs/subject-integration.md](docs/subject-integration.md).
-The short version — three moves, two of them in your repo:
+The short version — pick a mode (or both). **Central arena** is three
+moves, two of them in your repo:
 
 1. **State your scenarios as decisions, not steps.** A TOML per suite:
    what to install, what reality to assert. Either carry them in your
@@ -140,9 +146,14 @@ The short version — three moves, two of them in your repo:
    dashboard. No sandbox images, no baked checkouts — subjects mount,
    arenas run.
 
-Kommander-playbook is the reference subject: its suites run
+Kommander-playbook is the reference central-dispatch subject: its suites run
 `claude-playbooks-install`, `kommander-install`/`-update`/`-task-lock`,
-and `docs-honesty-kommander` from the same trigger.
+and `docs-honesty-kommander` from the same trigger. **Own arena**
+instead (or as well) is what the template wires: your repo carries the
+`gentar/` dir, runs the compose stack itself on a self-hosted runner,
+and reports land in your own `gentar/reports/` —
+`claude-playbooks` is the reference for that mode (the template is
+genericized from it).
 
 ## Status
 

@@ -13,6 +13,11 @@ Two modes, pick either or both:
   its own CI. Scenarios live in your repo; any trigger conditions you
   want; the arena is a `git clone` away.
 
+Both modes start from the same kit: [`subject-template/`](../subject-template/)
+in this repo — a copyable `gentar/` dir with every file, every field
+commented, and the seven-step checklist. Adoption is copy-and-fill,
+not archaeology.
+
 ## What a subject contributes
 
 1. **Scenario configs** — the subject states install *decisions* and
@@ -133,6 +138,15 @@ conditions, reports on disk):
    bind; the scenarios dir needs the explicit `-e`/`-v` pair because
    the coordinator reads it at runtime, inside the container.)
    Exit code is the verdict, same contract.
+
+   **That invocation leaks, and must be wrapped.** `--rm` removes only
+   the coordinator: `clickhouse` and `otelcol` come up via `depends_on`
+   as ordinary `up` containers, and `clickhouse` owns a named volume, so
+   every project strands two containers and a volume per run. Tear the
+   project down after it — CI in an `if: always()` step — or copy
+   `subject-template/gentar/run.sh`, which starts every service as a
+   one-off `compose run -d --rm` (daemon-level `AutoRemove`, so a
+   `SIGKILL`ed run still cleans up) and traps teardown on top.
 3. Every run writes `out/report-<run_id>.md` — steps with output
    tails, assertions with actuals, verdict, reproduce command. On
    failure, feed that file to an agent (or a human): it states
@@ -146,4 +160,5 @@ self-hosted runner inside the network (any machine with Docker; the
 pilot's Mac qualifies).
 
 `claude-playbooks` is the reference own-arena subject (see its
-`gentar/` dir).
+`gentar/` dir); [`subject-template/`](../subject-template/) is that
+shape genericized into a copyable kit.
