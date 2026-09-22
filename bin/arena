@@ -53,9 +53,15 @@ compose() { docker compose -f docker-compose.yml -f compose.rm.yml "$@"; }
 # shell the same way the run will) and refuse with the usage/config code.
 require_bench_key() {
   local key
+  # `config --format json` PRETTY-PRINTS: "bench_ssh_key" and its "file"
+  # land on different lines, so a single-line match finds nothing and the
+  # fallback to the shell variable passes while the run mounts a different,
+  # missing file named only in .env. Range-match from the key to its
+  # closing brace instead — line-oriented, no JSON parser needed.
   key=$(compose config --format json 2>/dev/null \
-    | sed -n 's/.*"bench_ssh_key": *{[^}]*"file": *"\([^"]*\)".*/\1/p' | head -1)
+    | sed -n '/"bench_ssh_key"/,/}/{ s/.*"file": *"\([^"]*\)".*/\1/p; }' | head -1)
   [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"
+  case "$key" in "~/"*) key="$HOME/${key#\~/}" ;; esac
   [ -r "$key" ] && return 0
   echo "arena: bench ssh key not found at $key — set GENTAR_BENCH_KEY_FILE" \
        "(in .env or the shell) to the key the coordinator uses to reach the bench-host" >&2
