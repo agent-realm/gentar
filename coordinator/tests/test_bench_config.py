@@ -1,0 +1,157 @@
+"""Install-identity guard: the engine must REFUSE, not fall back.
+
+gentar ships no bench-host of its own. Before this guard the config
+carried the author's own VM as a default, so an adopter with no `.env`
+silently SSHed to a stranger's machine. The rule is now: a value that
+can only be the install's has no default, and a run that selects a tier
+missing one is refused (exit 2) BEFORE any bench is created — the same
+class of refusal as the credential and budget guards.
+
+These tests own both halves: which vars each tier requires
+(Config.missing_bench_env) and that the refusal is an exit-2 verdict
+naming the vars (coordinator.run), with no bench constructed.
+"""
+
+import os
+import unittest
+from unittest import mock
+
+from gentar import coordinator as coord
+from gentar.config import BENCH_REQUIREMENTS, Config
+
+
+def cfg_with(**env) -> Config:
+    """A Config built from exactly `env` — nothing inherited from the
+    ambient environment, so a configured dev box can't mask a missing
+    default."""
+    with mock.patch.dict(os.environ, env, clear=True):
+        return Config()
+
+
+class NoPersonalDefaultsTest(unittest.TestCase):
+    """The regression that started this: no install's own machines in
+    the source. A default here would make the guard unreachable."""
+
+    def test_bench_host_and_user_have_no_default(self):
+        cfg = cfg_with()
+        self.assertEqual(cfg.bench_host, "")
+        self.assertEqual(cfg.bench_user, "")
+
+    def test_tart_host_and_user_have_no_default(self):
+        cfg = cfg_with()
+        self.assertEqual(cfg.tart_host, "")
+        self.assertEqual(cfg.tart_user, "")
+
+    def test_generic_defaults_are_kept(self):
+        # Genericness is fine — only personal is not. These carry no
+        # install identity, so removing them would be churn.
+        cfg = cfg_with()
+        self.assertEqual(cfg.bench_key, "~/.ssh/id_ed25519")
+        self.assertEqual(cfg.bench_kind, "sbx")
+        self.assertEqual(cfg.osb_server, "http://127.0.0.1:8080")
+
+
+class MissingBenchEnvTest(unittest.TestCase):
+    def test_sbx_unconfigured_names_both_vars_in_order(self):
+        self.assertEqual(cfg_with().missing_bench_env("sbx"),
+                         ["GENTAR_BENCH_HOST", "GENTAR_BENCH_USER"])
+
+    def test_sbx_half_configured_names_only_the_missing_one(self):
+        cfg = cfg_with(GENTAR_BENCH_HOST="bench.example.internal")
+        self.assertEqual(cfg.missing_bench_env("sbx"), ["GENTAR_BENCH_USER"])
+
+    def test_sbx_configured_is_clean(self):
+        cfg = cfg_with(GENTAR_BENCH_HOST="bench.example.internal",
+                       GENTAR_BENCH_USER="bench")
+        self.assertEqual(cfg.missing_bench_env("sbx"), [])
+
+    def test_whitespace_only_counts_as_missing(self):
+        # An env var set to blanks is a misconfiguration, not a value;
+        # ssh would take "  @host" and fail obscurely later.
+        cfg = cfg_with(GENTAR_BENCH_HOST="   ", GENTAR_BENCH_USER="bench")
+        self.assertEqual(cfg.missing_bench_env("sbx"), ["GENTAR_BENCH_HOST"])
+
+    def test_empty_kind_falls_back_to_install_default(self):
+        self.assertEqual(cfg_with().missing_bench_env(),
+                         ["GENTAR_BENCH_HOST", "GENTAR_BENCH_USER"])
+
+    def test_tart_required_only_for_tart(self):
+        cfg = cfg_with(GENTAR_BENCH_HOST="bench.example.internal",
+                       GENTAR_BENCH_USER="bench")
+        # The whole point of checking per-run: an sbx-only install is
+        # not made to configure a tier it never selects.
+        self.assertEqual(cfg.missing_bench_env("sbx"), [])
+        self.assertEqual(cfg.missing_bench_env("tart"),
+                         ["GENTAR_TART_HOST", "GENTAR_TART_USER"])
+
+    def test_osb_needs_nothing_from_this_guard(self):
+        # Its server address defaults to localhost: generic, and wrong
+        # for nobody in particular.
+        self.assertEqual(cfg_with().missing_bench_env("osb"), [])
+
+    def test_daytona_needs_its_api_key(self):
+        self.assertEqual(cfg_with().missing_bench_env("daytona"),
+                         ["GENTAR_DAYTONA_API_KEY"])
+        cfg = cfg_with(GENTAR_DAYTONA_API_KEY="k")
+        self.assertEqual(cfg.missing_bench_env("daytona"), [])
+
+    def test_unknown_kind_defers_to_make_bench(self):
+        # make_bench rejects it by name — a clearer message than a list
+        # of vars for a tier that doesn't exist.
+        self.assertEqual(cfg_with().missing_bench_env("nope"), [])
+
+    def test_every_tier_make_bench_knows_has_a_policy(self):
+        # A fifth tier added without an entry here would silently get
+        # the old fall-back behaviour back.
+        self.assertEqual(set(BENCH_REQUIREMENTS),
+                         {"sbx", "tart", "osb", "daytona"})
+
+
+class RefusalTest(unittest.TestCase):
+    """The verdict: exit 2, the vars named, and no bench created."""
+
+    def run_smoke(self, cfg, scenario="smoke"):
+        """coordinator.run with the bench factory booby-trapped: the
+        guard must return before anything tries to build a bench."""
+        printed = []
+        with mock.patch.object(coord, "make_bench",
+                               side_effect=AssertionError(
+                                   "bench created despite refusal")), \
+             mock.patch.object(coord, "Spans"), \
+             mock.patch("builtins.print", side_effect=printed.append):
+            rc = coord.run(scenario, cfg)
+        return rc, "\n".join(str(p) for p in printed)
+
+    def test_unset_refuses_with_exit_2(self):
+        rc, out = self.run_smoke(cfg_with(GENTAR_REPORT_DIR=""))
+        self.assertEqual(rc, 2)
+
+    def test_refusal_names_both_missing_vars(self):
+        _, out = self.run_smoke(cfg_with(GENTAR_REPORT_DIR=""))
+        self.assertIn("GENTAR_BENCH_HOST", out)
+        self.assertIn("GENTAR_BENCH_USER", out)
+
+    def test_refusal_points_at_the_template(self):
+        _, out = self.run_smoke(cfg_with(GENTAR_REPORT_DIR=""))
+        self.assertIn(".env.example", out)
+
+    def test_refusal_names_only_what_is_missing(self):
+        cfg = cfg_with(GENTAR_BENCH_HOST="bench.example.internal",
+                       GENTAR_REPORT_DIR="")
+        _, out = self.run_smoke(cfg)
+        self.assertIn("GENTAR_BENCH_USER", out)
+        self.assertNotIn("GENTAR_BENCH_HOST", out)
+
+    def test_configured_reaches_the_bench_factory(self):
+        # The other half of "refuse, not fall back": once configured,
+        # the guard is transparent. make_bench raising IS the proof the
+        # run got past the guard.
+        cfg = cfg_with(GENTAR_BENCH_HOST="bench.example.internal",
+                       GENTAR_BENCH_USER="bench", GENTAR_REPORT_DIR="")
+        with self.assertRaises(AssertionError) as caught:
+            self.run_smoke(cfg)
+        self.assertIn("bench created despite refusal", str(caught.exception))
+
+
+if __name__ == "__main__":
+    unittest.main()
