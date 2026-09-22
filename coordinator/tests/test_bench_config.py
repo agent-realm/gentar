@@ -28,6 +28,28 @@ def cfg_with(**env) -> Config:
         return Config()
 
 
+def refuse_run(cfg, scenario="smoke"):
+    """coordinator.run with the bench factory booby-trapped: the guard
+    must return BEFORE anything tries to build a bench, so a refusal
+    that leaks through raises instead of quietly passing.
+
+    Safe because make_bench is called outside run()'s broad
+    `except Exception` (coordinator.py: the call, then the try), so the
+    AssertionError propagates and fails the test loudly rather than
+    being recorded as a verdict.
+
+    Returns (exit code, everything the run printed).
+    """
+    printed = []
+    with mock.patch.object(coord, "make_bench",
+                           side_effect=AssertionError(
+                               "bench created despite refusal")), \
+         mock.patch.object(coord, "Spans"), \
+         mock.patch("builtins.print", side_effect=printed.append):
+        rc = coord.run(scenario, cfg)
+    return rc, "\n".join(str(p) for p in printed)
+
+
 class NoPersonalDefaultsTest(unittest.TestCase):
     """The regression that started this: no install's own machines in
     the source. A default here would make the guard unreachable."""
@@ -120,17 +142,7 @@ class MissingBenchEnvTest(unittest.TestCase):
 class RefusalTest(unittest.TestCase):
     """The verdict: exit 2, the vars named, and no bench created."""
 
-    def run_smoke(self, cfg, scenario="smoke"):
-        """coordinator.run with the bench factory booby-trapped: the
-        guard must return before anything tries to build a bench."""
-        printed = []
-        with mock.patch.object(coord, "make_bench",
-                               side_effect=AssertionError(
-                                   "bench created despite refusal")), \
-             mock.patch.object(coord, "Spans"), \
-             mock.patch("builtins.print", side_effect=printed.append):
-            rc = coord.run(scenario, cfg)
-        return rc, "\n".join(str(p) for p in printed)
+    run_smoke = staticmethod(refuse_run)
 
     def test_unset_refuses_with_exit_2(self):
         rc, out = self.run_smoke(cfg_with(GENTAR_REPORT_DIR=""))
@@ -184,15 +196,7 @@ class RefusalPathCoverageTest(unittest.TestCase):
     before any bench exists' is asserted rather than assumed.
     """
 
-    def run_refusing(self, cfg, scenario):
-        printed = []
-        with mock.patch.object(coord, "make_bench",
-                               side_effect=AssertionError(
-                                   "bench created despite refusal")), \
-             mock.patch.object(coord, "Spans"), \
-             mock.patch("builtins.print", side_effect=printed.append):
-            rc = coord.run(scenario, cfg)
-        return rc, "\n".join(str(p) for p in printed)
+    run_refusing = staticmethod(refuse_run)
 
     def configured(self, **extra):
         """A fully configured sbx install — so anything refused here is
