@@ -88,6 +88,16 @@ services:
       GENTAR_CLICKHOUSE_PASSWORD: ${GENTAR_CH_PASSWORD:-gentar}
       GENTAR_BENCH_KEY: /run/secrets/bench_ssh_key
       GENTAR_SUBJECTS_ROOT: /subjects
+      # The vars the bench-config guard can REQUIRE must be reachable from
+      # the caller's shell, not only from .env: CI has no .env and passes
+      # them as job env, and compose forwards nothing from the shell unless
+      # it is named here. Interpolation order is shell, then .env, then
+      # empty — and empty is what the guard refuses (exit 2). The engine
+      # ships no default for any of them.
+      GENTAR_BENCH_HOST: ${GENTAR_BENCH_HOST:-}
+      GENTAR_BENCH_USER: ${GENTAR_BENCH_USER:-}
+      GENTAR_TART_HOST: ${GENTAR_TART_HOST:-}
+      GENTAR_TART_USER: ${GENTAR_TART_USER:-}
     volumes:
       # Subject checkouts, mounted read-only — never baked into images.
       - ${GENTAR_SUBJECTS_DIR:-./subjects}:/subjects:ro
