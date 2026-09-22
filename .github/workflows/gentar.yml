@@ -61,6 +61,22 @@ jobs:
     outputs:
       scenarios: ${{ steps.pick.outputs.scenarios }}
     steps:
+      - uses: actions/checkout@v4
+
+      # Release proof, first gate: a `v*` tag must name the VERSION file
+      # at the commit it points at. Fails here, before the matrix —
+      # a disagreeing tag spends no bench.
+      - name: version matches tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          WANT="v$(cat VERSION)"
+          [ "$TAG" = "$WANT" ] || {
+            echo "release tag $TAG != $WANT (VERSION file) — refusing" >&2
+            exit 1
+          }
+          echo "release tag $TAG matches VERSION"
+
       - id: pick
         run: |
           ALL='["smoke","bench-template-verify","otlp-selfreport","budget-sim","scripted-onboarding","scripted-danger"]'
