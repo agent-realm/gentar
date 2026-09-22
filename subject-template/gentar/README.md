@@ -12,7 +12,7 @@ can hand to an agent to fix what failed.
 | suites | `scenarios/*.toml` — decisions + reality assertions | see below |
 | credentials | `credentials = [names]` per suite — entries are ALTERNATIVES, a list entry is an all-of group (`["KEY", ["TOKEN","BASE_URL"]]` = the key alone, or the token and its endpoint together). None present refuses (exit 2) before a bench exists | per suite |
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | see workflow |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.1.1` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.2.0` |
 
 ## Quickstart (local)
 
@@ -92,6 +92,25 @@ together.
 - **The engine changed** — nothing happens until someone bumps
   `GENTAR_REF` in `run.sh`. That is a deliberate change: bump, run every
   suite, commit the bump on its own with the outcome in the message.
+- **The repo grew behaviour nothing asserts** — the case with no
+  failure. Existing suites still pass, the board stays green, and
+  coverage decays quietly. Nothing catches this by running; someone has
+  to look.
+
+```bash
+gentar/run.sh --review     # no engine, no Docker, no bench
+```
+
+It lists what the repo ships that no suite mentions, and the diff since
+the scenarios last changed. It **reports and stops** — never fails,
+never writes. A gap is a question, not a defect: some of those should
+have a suite and some never will, and deciding which needs someone who
+has read the repo. Worth running when a feature lands, or periodically.
+
+Its blind spot, stated so you do not trust it too far: it compares
+shipped executables and scripts against names the suites mention, so a
+**behaviour change inside a file a suite already names** does not show
+up. The diff is there for that.
 
 ## The fix loop
 

@@ -22,6 +22,41 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.2.0 — 2026-09-23
+
+Adaptation is a process, and this release adds the part that was missing:
+a way to notice when a repo has outgrown its suites.
+
+### Added
+
+- **`gentar/run.sh --review`** in the adoption kit. Lists what the repo
+  ships that no suite mentions, and the diff since the scenarios last
+  changed. Needs no engine, no Docker and no bench; it reports and
+  stops, never failing and never writing.
+
+  The case it exists for has no failure of its own: a repo grows a
+  command or an install step, the existing suites still pass because
+  they never mentioned it, and the board stays green while coverage
+  decays. Running the suites cannot catch that — someone has to look.
+
+  It deliberately stops short of deciding. A gap is a question, not a
+  defect: some deserve a suite and some never will, and telling them
+  apart needs someone who has read the repo. `AGENTS.md` carries the
+  agent's half of that job, including the check's blind spot — it
+  compares names, so a behaviour change inside a file a suite already
+  mentions does not show up.
+
+### Changed
+
+- `AGENTS.md` gains a "Reviewing an adaptation" section, which also
+  names the distinction the word "refresh" obscures: **the arena cannot
+  go stale** — it is rebuilt every run, every container is `--rm`, and
+  benches are disposable. Only the adaptation drifts.
+- The kit's `GENTAR_REF` default moves to `v0.2.0`.
+
+No schema or exit-code change: a suite written against 0.1.x runs
+unchanged.
+
 ## 0.1.1 — 2026-09-23
 
 Post-release fixes. No schema or exit-code change: a suite written

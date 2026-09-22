@@ -121,3 +121,27 @@ means its scenarios change in the same PR, because a scenario asserts
 reality and stale reality fails honestly. A change to the *engine* is a
 deliberate `GENTAR_REF` bump: bump it, run the suites, commit the bump on
 its own. `subject-template/gentar/README.md` has the full rule.
+
+## Reviewing an adaptation
+
+If the repo is already a subject and you are asked to check, refresh or
+re-adapt it, that is this — not a re-copy of the kit, and not anything to do
+with the arena. **The arena cannot go stale**: it is rebuilt from scratch on
+every run, every container is `--rm`, and benches are disposable. What goes
+stale is the *adaptation* — the suites versus what the repo now does.
+
+Start with `gentar/run.sh --review`. It needs no engine, no Docker and no
+bench, and it prints what the repo ships that no suite mentions, plus the
+diff since the scenarios last changed.
+
+Then do the part it deliberately does not: **read that diff and decide.** A
+gap is a question, not a defect — a new internal helper may deserve nothing,
+while a new install step or user-facing command probably deserves a suite.
+Propose specific assertions, in the same shape as decision 4, and confirm
+them with the pilot before writing.
+
+Two honesty rules carry over. The check's blind spot is real: it compares
+names, so a behaviour change *inside* a file some suite already mentions
+will not appear — say so rather than implying the review was exhaustive.
+And adding a suite is not the same as running one: until it has exited 0,
+report it as written, not working.
