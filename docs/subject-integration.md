@@ -267,7 +267,12 @@ conditions, reports on disk):
    everything needed to act.
 
 The one shared resource is the **bench-host** (any Linux machine with
-`sbx`, reached over SSH; `GENTAR_BENCH_*` in `.env`). The runner needs
+`sbx`, reached over SSH; `GENTAR_BENCH_*` in `.env`). gentar ships no
+bench-host and no default identifying one: `.env.example` carries
+placeholders, and a tier whose install-identity vars are unset is
+refused (exit 2) before any bench exists, naming the vars it needs.
+Only the selected tier's vars are required, so an sbx-only install
+never configures tart. The runner needs
 Docker + network reachability to it — GitHub-hosted `ubuntu-latest`
 can't reach an internal bench-host, so own-arena CI runs on a
 self-hosted runner inside the network (any machine with Docker; the

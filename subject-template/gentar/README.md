@@ -28,10 +28,13 @@ ls gentar/reports/             # report-<run_id>.md per run
 ```
 
 `--stage-engine` also seeds `gentar/.arena/.env` from the engine's
-`.env.example`. Set `GENTAR_BENCH_HOST` and `GENTAR_BENCH_USER` there,
-and export `GENTAR_BENCH_KEY_FILE` to the key that reaches it. There is
-no default bench-host: unset, the coordinator refuses (exit 2) rather
-than running against a machine you did not name.
+`.env.example`, whose values are **placeholders**. Set
+`GENTAR_BENCH_HOST` and `GENTAR_BENCH_USER` there to your own machine,
+and `GENTAR_BENCH_KEY_FILE` (there or in the shell) to the key that
+reaches it. gentar ships no bench-host: left unset the coordinator
+refuses with exit 2 before any bench exists, and left as the shipped
+placeholder the run fails at ssh with `Could not resolve hostname
+bench.example.internal`.
 
 Exit code is the verdict: `0` pass · `1` fail · `2` usage/config
 refusal.

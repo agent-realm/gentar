@@ -109,17 +109,33 @@ Docker, no bench — this is a git operation.
 Observe: `engine staged: …/gentar/.arena @ v0.1.0 (<sha>)` and a path to
 the arena env file.
 
-Then name your bench-host in that env. There is **no default** — unset,
-the coordinator refuses (exit 2) rather than running against a machine
-you did not name:
+**The seeded `.env` holds placeholders, not a working config — edit it
+before the next step.** gentar ships no bench-host of its own, so
+`GENTAR_BENCH_HOST` arrives as `bench.example.internal` and
+`GENTAR_BENCH_USER` as `bench`:
 
 ```bash
 $EDITOR gentar/.arena/.env     # GENTAR_BENCH_HOST, GENTAR_BENCH_USER
 export GENTAR_BENCH_KEY_FILE="$HOME/.ssh/id_ed25519"   # the key that reaches it
 ```
 
+Observe: `grep -E '^GENTAR_BENCH_(HOST|USER)' gentar/.arena/.env` names
+YOUR machine and account, with no `example` left in either.
+
+The two failure modes if you skip this, so you can tell them apart:
+
+- **Left unset** (empty value) — the coordinator refuses before any
+  bench exists: `bench config: sbx benches need GENTAR_BENCH_HOST and
+  GENTAR_BENCH_USER — unset`, exit 2.
+- **Left as the placeholder** — it is a non-empty value, so nothing
+  refuses it; the run reaches ssh and dies with `Could not resolve
+  hostname bench.example.internal`, exit 1. A name gentar cannot check
+  is a name you must get right.
+
 `GENTAR_BENCH_KEY_FILE` is a path on the machine running the arena; the
-key is mounted into the coordinator, never copied into a bench.
+key is mounted into the coordinator, never copied into a bench. Set it
+in the shell or in that same `.env` — `run.sh` checks whichever compose
+resolves, and refuses with exit 2 naming the path if it is unreadable.
 
 ### 4. Dry-run the template suite
 
