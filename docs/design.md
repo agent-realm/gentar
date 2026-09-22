@@ -62,8 +62,9 @@ bench) joins to assertions in one SQL query.
 
 ### Telemetry
 
-The spans schema, subject-leading sort key, 18 provenance fields, and OTel
-pipeline port verbatim from agent-gauntlet.
+The spans schema, subject-leading sort key, provenance fields, and OTel
+pipeline port verbatim from agent-gauntlet. (`run_attrs()` emits 14 of
+them today; the count is the implementation's, not a design commitment.)
 
 ## Test taxonomy (10 dimensions)
 
