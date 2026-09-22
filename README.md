@@ -231,12 +231,25 @@ bin/arena sql "SELECT span_name, status FROM gentar.spans ORDER BY ts"
 **Run through `bin/arena`, not bare compose.** The CI contract is
 `docker compose run --rm coordinator run smoke` and that still works —
 but `--rm` removes only the coordinator. `clickhouse` and `otelcol` start
-via `depends_on` and survive, and `clickhouse` owns a named volume, so
-every distinct compose project strands two containers and a volume. CI
-tears the stack down in an `if: always()` step; `bin/arena` does the same
-from a trap, so it fires on a pass, a failing verdict, a refusal, and
-ctrl-c alike. Keep a stack up to poke at ClickHouse with
-`GENTAR_KEEP_ARENA=1`, then `bin/arena down`.
+via `depends_on` as ordinary `up` containers (`AutoRemove=false`) and
+survive, and `clickhouse` owns a named volume, so every distinct compose
+project strands two containers and a volume. CI tears the stack down in
+an `if: always()` step; `bin/arena` gives two independent guarantees:
+
+- **Every container is `--rm`.** The compose spec has no per-service
+  auto-remove key and `compose up` has no `--rm`, so the wrapper starts
+  every service as a one-off `compose run -d --rm` — the only way to get
+  daemon-level `AutoRemove`. A stopped arena container is then removed by
+  the Docker daemon itself, whatever stopped it: ctrl-c, `SIGKILL`, OOM,
+  or the script dying before its trap can run. `compose.rm.yml` turns
+  `clickhouse`'s named volume anonymous so `--rm` reclaims that too.
+- **A trap tears the project down anyway**, on a pass, a failing verdict,
+  a refusal and ctrl-c alike — covering the network, and anything a
+  future edit starts the ordinary way.
+
+Keep a stack up to poke at ClickHouse with `GENTAR_KEEP_ARENA=1`, then
+`bin/arena down`. The arena's ClickHouse data does not survive a
+teardown — it never did: every teardown path already runs `down -v`.
 
 ```bash
 bin/arena run smoke smoke-fail   # several suites, worst verdict wins

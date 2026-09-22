@@ -2,14 +2,25 @@
 # gentar arena runner — the local entry point, and the one that cannot leak.
 #
 # `docker compose run --rm coordinator run <scenario>` removes only the
-# coordinator. clickhouse and otelcol are started by depends_on and survive,
-# and clickhouse owns a named volume — so every distinct compose project
-# strands two containers plus a volume, forever. CI compensates with an
-# `if: always()` teardown step; nothing local did, and a machine accumulated
-# 13 stranded stacks before anyone noticed.
+# coordinator. clickhouse and otelcol are started by depends_on as ordinary
+# `up` containers (AutoRemove=false) and survive, and clickhouse owns a named
+# volume — so every distinct compose project strands two containers plus a
+# volume, forever. CI compensates with an `if: always()` teardown step;
+# nothing local did, and a machine accumulated 13 stranded stacks.
 #
-# This wrapper owns the whole stack's lifetime: the teardown runs from a trap,
-# so it fires on success, on a failing verdict, on a refusal, and on ctrl-c.
+# Two independent guarantees here, belt and braces:
+#
+#   1. Every container is --rm. The compose spec has no per-service
+#      auto-remove key and `compose up` has no `--rm`, so this wrapper starts
+#      EVERY service as a one-off `compose run -d --rm` — the only way to get
+#      daemon-level AutoRemove. A stopped arena container is removed by the
+#      Docker daemon itself, whatever killed it: ctrl-c, SIGKILL, OOM, a
+#      daemon restart, or this script dying before its trap runs.
+#      compose.rm.yml turns clickhouse's named volume anonymous so --rm
+#      reclaims that too.
+#   2. The trap tears the project down anyway — networks, and any container a
+#      future edit forgets to route through here.
+#
 # The scenario's exit code is still the verdict — that contract is unchanged.
 #
 #   bin/arena run <scenario> [scenario...]   build, run, tear down
@@ -27,9 +38,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE"
 
-compose() { docker compose "$@"; }
-
-project() { compose ls --format json >/dev/null 2>&1 || true; compose config --format json 2>/dev/null | sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' | head -1; }
+# Local runs layer compose.rm.yml. The documented compose contract in
+# docker-compose.yml is untouched — `docker compose run --rm coordinator …`
+# still works exactly as the README and CI describe it.
+compose() { docker compose -f docker-compose.yml -f compose.rm.yml "$@"; }
 
 _torn_down=0
 teardown() {
@@ -44,18 +56,74 @@ teardown() {
     return "$rc"
   fi
   echo "arena: tearing down" >&2
-  compose down -v --remove-orphans >/dev/null 2>&1 || true
+  down_all
   return "$rc"
+}
+
+# `compose down` does NOT stop `run`-created containers (they are one-offs,
+# not services), so stop them by label first — stopping is what triggers the
+# daemon's AutoRemove — then let `down -v` clear the network and anything a
+# future edit starts the ordinary way.
+down_all() {
+  local proj cids
+  proj=$(compose config --format json 2>/dev/null \
+    | sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' | head -1)
+  if [ -n "$proj" ]; then
+    cids=$(docker ps -q --filter "label=com.docker.compose.project=$proj" 2>/dev/null || true)
+    [ -n "$cids" ] && docker stop $cids >/dev/null 2>&1 || true
+  fi
+  compose down -v --remove-orphans >/dev/null 2>&1 || true
+}
+
+# Start one service as an auto-removing one-off. --no-deps because this
+# script owns dependency order; letting depends_on do it would start plain
+# `up` containers, which are exactly what leaks.
+#
+# Idempotent: a service already up (GENTAR_KEEP_ARENA from an earlier run) is
+# reused. Starting a second copy would fail anyway — --service-ports binds the
+# same host port twice.
+start_rm() {
+  [ -n "$(svc_container "$1")" ] && return 0
+  compose run -d --rm --use-aliases --service-ports --no-deps "$1" >/dev/null
+}
+
+svc_container() {
+  compose config --format json 2>/dev/null \
+    | sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' | head -1 \
+    | xargs -I{} docker ps -q --filter "label=com.docker.compose.project={}" \
+        --filter "label=com.docker.compose.service=$1" 2>/dev/null | head -1
+}
+
+wait_healthy() {
+  local cid=$1 name=$2 i h
+  for i in $(seq 1 90); do
+    h=$(docker inspect "$cid" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || echo gone)
+    case "$h" in
+      healthy|none) return 0 ;;
+      gone) echo "arena: $name died before becoming healthy" >&2; return 1 ;;
+    esac
+    sleep 1
+  done
+  echo "arena: $name never became healthy (90s)" >&2
+  return 1
+}
+
+# clickhouse healthy, then otelcol — the same order depends_on declares.
+start_arena() {
+  start_rm clickhouse
+  wait_healthy "$(svc_container clickhouse)" clickhouse
+  start_rm otelcol
 }
 
 cmd_run() {
   [ $# -ge 1 ] || { echo "usage: bin/arena run <scenario> [scenario...]" >&2; exit 64; }
   trap teardown EXIT INT TERM
   compose build coordinator
+  start_arena
   local status=0 rc
   for s in "$@"; do
     set +e
-    compose run --rm coordinator run "$s"
+    compose run --rm --no-deps coordinator run "$s"
     rc=$?
     set -e
     # Worst verdict wins: a refusal (2) outranks a failure (1).
@@ -66,14 +134,27 @@ cmd_run() {
 
 cmd_sql() {
   [ $# -ge 1 ] || { echo 'usage: bin/arena sql "<query>"' >&2; exit 64; }
-  compose exec -T clickhouse clickhouse-client \
+  local cid
+  cid=$(svc_container clickhouse)
+  [ -n "$cid" ] || { echo "arena: no clickhouse up — run with GENTAR_KEEP_ARENA=1 first" >&2; exit 69; }
+  docker exec -i "$cid" clickhouse-client \
     --user "${GENTAR_CH_USER:-gentar}" --password "${GENTAR_CH_PASSWORD:-gentar}" \
     -q "$1"
 }
 
-cmd_dashboard() { trap teardown EXIT INT TERM; compose run --rm dashboard; }
-cmd_ls()        { trap teardown EXIT INT TERM; compose run --rm coordinator ls; }
-cmd_down()      { compose down -v --remove-orphans; }
+cmd_dashboard() {
+  trap teardown EXIT INT TERM
+  start_arena
+  compose run --rm --no-deps dashboard
+}
+
+cmd_ls() {
+  # No arena needed: `ls` reads the scenario files, nothing else.
+  trap teardown EXIT INT TERM
+  compose run --rm --no-deps coordinator ls
+}
+
+cmd_down() { down_all; }
 
 # --- gc: the recovery tool for arenas stranded before this wrapper existed ---
 #
@@ -164,6 +245,6 @@ case "${1:-}" in
   down)      shift; cmd_down ;;
   gc)        shift; cmd_gc "${1:-}" ;;
   ""|-h|--help|help)
-    sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+    sed -n '2,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
   *) echo "arena: unknown command '$1' (try: run sql dashboard ls down gc)" >&2; exit 64 ;;
 esac

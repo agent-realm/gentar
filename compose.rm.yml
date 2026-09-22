@@ -1,0 +1,30 @@
+# Local-run overlay: make every arena container auto-removing.
+#
+# The compose spec has NO per-service auto-remove key (`auto_remove`,
+# `autoremove`, `rm` are all rejected by the schema), and `compose up` has no
+# `--rm`. The only way to get daemon-level AutoRemove on a service container
+# is to start it as a one-off: `compose run -d --rm <service>`. bin/arena does
+# exactly that, and layers this file so the last piece of state a `--rm`
+# container could still strand — clickhouse's NAMED volume — becomes an
+# anonymous one, which `--rm` reclaims with the container.
+#
+# Consequence, and why it costs nothing: the arena's ClickHouse data no longer
+# survives a teardown. It never did — every teardown path (`bin/arena down`,
+# CI's `if: always()` step) already runs `down -v`, which deletes the named
+# volume. `GENTAR_KEEP_ARENA=1` keeps the stack UP, so `bin/arena sql` still
+# reads a live, still-mounted volume.
+#
+# NOT layered by `docker compose up` / `docker compose run` — the documented
+# compose contract in docker-compose.yml is unchanged.
+services:
+  clickhouse:
+    volumes: !override
+      - /var/lib/clickhouse
+  osb-server:
+    volumes: !override
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /data
+
+volumes:
+  clickhouse: !reset null
+  osb-data: !reset null
