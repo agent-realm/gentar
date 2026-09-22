@@ -4,9 +4,21 @@
 #
 # CI contract (phase 6): `docker compose run --rm coordinator gentar run <scenario>`
 # — exit code is the verdict.
+#
+# That command removes ONLY the coordinator. clickhouse and otelcol start via
+# depends_on and survive it, and clickhouse owns a named volume — so every
+# distinct compose project strands two containers plus a volume unless the
+# caller tears the stack down. CI does that in an `if: always()` step; locally,
+# use `bin/arena run <scenario>`, which tears down from a trap on every exit
+# path. Every service carries `dev.gentar.arena=1` so a stranded stack can be
+# identified and collected later (`bin/arena gc`).
 
 services:
   clickhouse:
+    labels:
+      # Marks this container as part of a gentar arena, so `bin/arena gc`
+      # can find stacks stranded by a run that skipped teardown.
+      dev.gentar.arena: "1"
     image: clickhouse/clickhouse-server:25.3
     environment:
       CLICKHOUSE_DB: gentar
@@ -29,6 +41,10 @@ services:
       - "127.0.0.1:${GENTAR_CLICKHOUSE_HOST_PORT:-8123}:8123"
 
   otelcol:
+    labels:
+      # Marks this container as part of a gentar arena, so `bin/arena gc`
+      # can find stacks stranded by a run that skipped teardown.
+      dev.gentar.arena: "1"
     # OTLP receiver for agent self-report (phase 5): benches POST their
     # spans here; the collector exports them into ClickHouse where one
     # SQL joins them with harness spans on gentar.run_id. Published on
@@ -53,6 +69,10 @@ services:
       - "${GENTAR_OTLP_HOST_PORT:-4318}:4318"
 
   coordinator:
+    labels:
+      # Marks this container as part of a gentar arena, so `bin/arena gc`
+      # can find stacks stranded by a run that skipped teardown.
+      dev.gentar.arena: "1"
     build: ./coordinator
     depends_on:
       clickhouse:
@@ -81,6 +101,10 @@ services:
         mode: 0444
 
   dashboard:
+    labels:
+      # Marks this container as part of a gentar arena, so `bin/arena gc`
+      # can find stacks stranded by a run that skipped teardown.
+      dev.gentar.arena: "1"
     # Stateless generator (phase 5): renders spans into ONE self-contained
     # HTML file. Not a server — `docker compose run --rm dashboard` writes
     # dashboard/out/dashboard.html on the host.
@@ -105,6 +129,10 @@ services:
   # osb run --rm coordinator gentar run smoke-osb` with
   # GENTAR_OSB_SERVER=http://osb-server:8080.
   osb-server:
+    labels:
+      # Marks this container as part of a gentar arena, so `bin/arena gc`
+      # can find stacks stranded by a run that skipped teardown.
+      dev.gentar.arena: "1"
     image: opensandbox/server:latest
     profiles: ["osb"]
     environment:
@@ -129,4 +157,8 @@ secrets:
 
 volumes:
   clickhouse:
+    labels:
+      dev.gentar.arena: "1"
   osb-data:
+    labels:
+      dev.gentar.arena: "1"

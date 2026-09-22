@@ -223,11 +223,28 @@ flow; the token persists).
 ```bash
 cp .env.example .env          # point at your bench-host + SSH key
 export GENTAR_BENCH_KEY_FILE="$HOME/.ssh/id_ed25519"
-docker compose run --rm coordinator run smoke   # exit code = verdict
+bin/arena run smoke           # exit code = verdict
 ls out/   # report-<run_id>.md per run — failure reports are agent-feedable
-docker compose exec clickhouse clickhouse-client \
-  --user gentar --password gentar \
-  -q "SELECT span_name, status FROM gentar.spans ORDER BY ts"
+bin/arena sql "SELECT span_name, status FROM gentar.spans ORDER BY ts"
+```
+
+**Run through `bin/arena`, not bare compose.** The CI contract is
+`docker compose run --rm coordinator run smoke` and that still works —
+but `--rm` removes only the coordinator. `clickhouse` and `otelcol` start
+via `depends_on` and survive, and `clickhouse` owns a named volume, so
+every distinct compose project strands two containers and a volume. CI
+tears the stack down in an `if: always()` step; `bin/arena` does the same
+from a trap, so it fires on a pass, a failing verdict, a refusal, and
+ctrl-c alike. Keep a stack up to poke at ClickHouse with
+`GENTAR_KEEP_ARENA=1`, then `bin/arena down`.
+
+```bash
+bin/arena run smoke smoke-fail   # several suites, worst verdict wins
+bin/arena ls                     # list scenarios
+bin/arena dashboard              # render dashboard/out/dashboard.html
+bin/arena down                   # tear this project's arena down
+bin/arena gc                     # list arenas stranded by older runs
+bin/arena gc --yes               # …and remove them (never touches a running one)
 ```
 
 Defaults in `.env.example` point at the current bench-host — the VM on
