@@ -175,28 +175,46 @@ mkdir "subjects/$SUBJECT"
 # The overlay ships with the engine, so an older GENTAR_REF may not have it;
 # guarantee 1 still holds for the containers, only the named volume survives
 # until the trap's `down -v`.
-# The bench key must EXIST before compose is asked to mount it. The
-# engine's compose file declares it as a secret with a bind source, so a
-# missing file fails at container-create with a Docker daemon error
-# ("bind source path does not exist") and exit 1 — before the
-# coordinator can issue its own exit-2 usage refusal. An adopter who has
-# no ed25519 key then sees a mount error naming neither the variable to
-# set nor the path that was tried. Check it here and refuse the same way
-# the engine would: the path only, never the key's contents.
-BENCH_KEY_PATH=${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}
-case "$BENCH_KEY_PATH" in
-  "~/"*) BENCH_KEY_PATH=$HOME/${BENCH_KEY_PATH#\~/} ;;
-esac
-if [ ! -r "$BENCH_KEY_PATH" ]; then
-  echo "bench ssh key not found at $BENCH_KEY_PATH — set GENTAR_BENCH_KEY_FILE to the key the coordinator uses to reach the bench-host" >&2
-  exit 2
-fi
-export GENTAR_BENCH_KEY_FILE="$BENCH_KEY_PATH"
-
 ARENA_FILES=(-f docker-compose.yml)
 [ -f "$ARENA/compose.rm.yml" ] && ARENA_FILES+=(-f compose.rm.yml)
 
 arena() { docker compose "${ARENA_FILES[@]}" -p "arena-$SUBJECT" "$@"; }
+
+# The bench key must EXIST before compose is asked to mount it. The
+# engine's compose file declares it as a SECRET with a bind source
+# (`file: ${GENTAR_BENCH_KEY_FILE:-~/.ssh/id_ed25519}`), so a missing
+# file is rejected by the daemon at container-create ("bind source path
+# does not exist") with exit 1 — before the coordinator's own exit-2
+# refusal can say what is missing. An adopter with no ed25519 key would
+# see a Docker mount error naming neither the variable to set nor the
+# path tried.
+#
+# Ask compose for the path it actually RESOLVED rather than re-deriving
+# it here: compose honours the arena's .env as well as this shell, and a
+# check reading only the shell would pass while the run mounts a
+# different, missing file. Same shape as the engine's own bin/arena, so
+# the two say the same thing. The path is printed, never the contents.
+require_bench_key() {
+  local key
+  # `compose config --format json` PRETTY-PRINTS, so "bench_ssh_key" and
+  # its "file" land on different lines and a single-line sed match finds
+  # nothing — then falls back to the shell var and passes while the run
+  # mounts a different, missing file. Verified: a bad path set only in
+  # the arena's .env slipped straight through to the daemon's mount
+  # error. Take the first "file" line AFTER the bench_ssh_key key
+  # instead, which is line-oriented and needs no JSON parser (this must
+  # work on a stock runner with no python dependency).
+  key=$(arena config --format json 2>/dev/null \
+    | sed -n '/"bench_ssh_key"/,/}/{ s/.*"file": *"\([^"]*\)".*/\1/p; }' \
+    | head -1)
+  [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"
+  case "$key" in "~/"*) key="$HOME/${key#\~/}" ;; esac
+  [ -r "$key" ] && return 0
+  echo "bench ssh key not found at $key — set GENTAR_BENCH_KEY_FILE" \
+       "(in gentar/.arena/.env or the shell) to the key the coordinator" \
+       "uses to reach the bench-host" >&2
+  exit 2
+}
 
 # `compose down` does not stop `run`-created containers (they are one-offs,
 # not services), and stopping is what triggers AutoRemove -- so stop by
@@ -254,6 +272,8 @@ arena_wait_healthy() {
   echo "$name never became healthy (90s)" >&2
   return 1
 }
+
+require_bench_key
 
 echo "building the coordinator image from $sha..." >&2
 arena build coordinator
