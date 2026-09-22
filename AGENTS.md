@@ -88,7 +88,10 @@ does on a fresh machine is the entire point.
 
 - No Docker, or no bench-host → stop. The adaptation cannot be finished.
 - The engine repo is unreachable (it is private; a deploy key may be needed)
-  → stop and ask how to authenticate.
+  → stop and ask how to authenticate. If a local checkout of the engine is
+  already on the machine, `GENTAR_REPO_URL` can point at it — say that you
+  did so, because a local path pins to whatever that checkout happens to be
+  rather than to a release tag.
 - You cannot tell what the repo installs or how → ask, rather than writing a
   suite that asserts nothing real.
 - The pilot has not chosen a trigger mode → ask. Both are first-class and
@@ -103,9 +106,13 @@ does on a fresh machine is the entire point.
 - **Never claim a suite passed without running it.** The engine exists
   because self-reported success is not evidence — do not reintroduce that at
   the adoption layer.
-- **Never report the adaptation as done while `first-suite.toml` still
-  asserts the template's `probe.txt`.** Say plainly that the scaffold is in
-  place and the real assertions are not written yet.
+- **Never report the adaptation as "done" without a green run you saw.**
+  Write real assertions and the scaffold is *written*, not *working*: an
+  assertion nobody executed is a guess with better formatting. Until a run
+  has exited 0, say **scaffolded** and name what is left — a bench-host, the
+  pilot's confirmation, a first run. If the suite still asserts the
+  template's `probe.txt`, say that too: it tests nothing while looking
+  green.
 
 ## When the repo's code changes
 
