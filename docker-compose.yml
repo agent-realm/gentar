@@ -4,9 +4,21 @@
 #
 # CI contract (phase 6): `docker compose run --rm coordinator gentar run <scenario>`
 # — exit code is the verdict.
+#
+# That command removes ONLY the coordinator. clickhouse and otelcol start via
+# depends_on and survive it, and clickhouse owns a named volume — so every
+# distinct compose project strands two containers plus a volume unless the
+# caller tears the stack down. CI does that in an `if: always()` step; locally,
+# use `bin/arena run <scenario>`, which tears down from a trap on every exit
+# path. Every service carries `dev.gentar.arena=1` so a stranded stack can be
+# identified and collected later (`bin/arena gc`).
 
 services:
   clickhouse:
+    labels:
+      # Marks this container as part of a gentar arena, so `bin/arena gc`
+      # can find stacks stranded by a run that skipped teardown.
+      dev.gentar.arena: "1"
     image: clickhouse/clickhouse-server:25.3
     environment:
       CLICKHOUSE_DB: gentar
@@ -29,6 +41,10 @@ services:
       - "127.0.0.1:${GENTAR_CLICKHOUSE_HOST_PORT:-8123}:8123"
 
   otelcol:
+    labels:
+      # Marks this container as part of a gentar arena, so `bin/arena gc`
+      # can find stacks stranded by a run that skipped teardown.
+      dev.gentar.arena: "1"
     # OTLP receiver for agent self-report (phase 5): benches POST their
     # spans here; the collector exports them into ClickHouse where one
     # SQL joins them with harness spans on gentar.run_id. Published on
@@ -53,6 +69,10 @@ services:
       - "${GENTAR_OTLP_HOST_PORT:-4318}:4318"
 
   coordinator:
+    labels:
+      # Marks this container as part of a gentar arena, so `bin/arena gc`
+      # can find stacks stranded by a run that skipped teardown.
+      dev.gentar.arena: "1"
     build: ./coordinator
     depends_on:
       clickhouse:
@@ -68,6 +88,32 @@ services:
       GENTAR_CLICKHOUSE_PASSWORD: ${GENTAR_CH_PASSWORD:-gentar}
       GENTAR_BENCH_KEY: /run/secrets/bench_ssh_key
       GENTAR_SUBJECTS_ROOT: /subjects
+      # The vars the bench-config guard can REQUIRE must be reachable from
+      # the caller's shell, not only from .env: CI has no .env and passes
+      # them as job env, and compose forwards nothing from the shell unless
+      # it is named here. Interpolation order is shell, then .env, then
+      # empty — and empty is what the guard refuses (exit 2). The engine
+      # ships no default for any of them.
+      # Vars the bench-config guard can REQUIRE, plus the run knobs a
+      # caller sets per invocation. Compose forwards nothing from the
+      # caller's shell unless it is named here, and CI has no .env — so
+      # an unforwarded required var reads as unset inside the container
+      # and the guard refuses a run the caller configured correctly.
+      #
+      # ONLY vars whose absence means "empty" belong here. `${VAR:-}`
+      # sets the name to an EMPTY STRING, which is present as far as
+      # os.environ.get is concerned, so a var with a non-empty default in
+      # config.py (GENTAR_BENCH_KIND="sbx", GENTAR_OSB_SERVER=…) would
+      # lose that default for every caller. Those stay .env-only.
+      GENTAR_BENCH_HOST: ${GENTAR_BENCH_HOST:-}
+      GENTAR_BENCH_USER: ${GENTAR_BENCH_USER:-}
+      GENTAR_BENCH_JUMP: ${GENTAR_BENCH_JUMP:-}
+      GENTAR_TART_HOST: ${GENTAR_TART_HOST:-}
+      GENTAR_TART_USER: ${GENTAR_TART_USER:-}
+      GENTAR_DAYTONA_API_KEY: ${GENTAR_DAYTONA_API_KEY:-}
+      GENTAR_OSB_API_KEY: ${GENTAR_OSB_API_KEY:-}
+      GENTAR_BUDGET_CAP: ${GENTAR_BUDGET_CAP:-}
+      GENTAR_QUARANTINE: ${GENTAR_QUARANTINE:-}
     volumes:
       # Subject checkouts, mounted read-only — never baked into images.
       - ${GENTAR_SUBJECTS_DIR:-./subjects}:/subjects:ro
@@ -81,6 +127,10 @@ services:
         mode: 0444
 
   dashboard:
+    labels:
+      # Marks this container as part of a gentar arena, so `bin/arena gc`
+      # can find stacks stranded by a run that skipped teardown.
+      dev.gentar.arena: "1"
     # Stateless generator (phase 5): renders spans into ONE self-contained
     # HTML file. Not a server — `docker compose run --rm dashboard` writes
     # dashboard/out/dashboard.html on the host.
@@ -105,6 +155,10 @@ services:
   # osb run --rm coordinator gentar run smoke-osb` with
   # GENTAR_OSB_SERVER=http://osb-server:8080.
   osb-server:
+    labels:
+      # Marks this container as part of a gentar arena, so `bin/arena gc`
+      # can find stacks stranded by a run that skipped teardown.
+      dev.gentar.arena: "1"
     image: opensandbox/server:latest
     profiles: ["osb"]
     environment:
@@ -129,4 +183,8 @@ secrets:
 
 volumes:
   clickhouse:
+    labels:
+      dev.gentar.arena: "1"
   osb-data:
+    labels:
+      dev.gentar.arena: "1"

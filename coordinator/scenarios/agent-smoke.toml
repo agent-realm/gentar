@@ -3,9 +3,12 @@
 # from reality (the file), never from the agent's word.
 #
 # Credentials are tier-1 (env vars on a throwaway bench) and
-# provider-agnostic: the scenario declares the auth env var NAMES,
-# the coordinator refuses (exit 2) before any bench exists when NONE
-# is present, and exports whichever are set into the bench. Two
+# provider-agnostic: the scenario declares the auth env var NAMES as
+# ALTERNATIVES, and each endpoint-shaped alternative is a GROUP
+# (all-or-nothing — a token without its endpoint must refuse, not
+# start a misconfigured bench; PR #26 review). The coordinator refuses
+# (exit 2) before any bench exists when no group is fully present,
+# and exports the satisfied group's members into the bench. Two
 # provider shapes cover everything Anthropic-protocol:
 #   ANTHROPIC_API_KEY                                  — first-party
 #   ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL          — any
@@ -18,7 +21,7 @@
 [scenario]
 name = "agent-smoke"
 template = "gentar-bench-v1"
-credentials = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]
+credentials = ["ANTHROPIC_API_KEY", ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]
 # Optional cheaper-model pin: forwarded when set, no guard (unset =
 # endpoint default). Slot var, NOT ANTHROPIC_MODEL — claude-code's model
 # catalog hard-rejects unknown IDs like glm-5.3-flash on the main-model

@@ -11,7 +11,7 @@ from gentar.benchhost import BenchHost
 from gentar.config import Config
 from gentar.report import AssertRecord, RunReport, StepRecord
 from gentar.spans import Spans
-from gentar.toml_scenario import TomlScenario
+from gentar.toml_scenario import TomlScenario, satisfied_group
 
 
 def _step(bench: BenchHost, subject: str, run_id: str, scenario_name: str,
@@ -36,12 +36,20 @@ def _step(bench: BenchHost, subject: str, run_id: str, scenario_name: str,
 
 
 def cred_env(scenario: TomlScenario) -> dict[str, str]:
-    """Declared credentials present in the coordinator's environment —
-    the tier-1 transport (env vars on a throwaway bench). The guard in
-    coordinator.run refused already when any was missing, so presence
-    here is expected; the `if` keeps direct library use safe."""
-    return {c: os.environ[c] for c in scenario.credentials
-            if os.environ.get(c)}
+    """The ONE winning alternative group, forwarded whole — the tier-1
+    transport (env vars on a throwaway bench).
+
+    Not every declared name that happens to be set: a second, partially
+    configured alternative would then ride along and reconfigure the
+    winner. Concretely, `ANTHROPIC_API_KEY` satisfies the guard while a
+    stray `ANTHROPIC_BASE_URL` (its token absent, so its own group never
+    won) redirects that key at another endpoint — the exact mixed
+    provider the all-of grouping exists to prevent (PR #26 review round
+    3). The guard in coordinator.run refused already when no group was
+    complete; if a caller reaches here anyway, forward nothing rather
+    than a half provider."""
+    group = satisfied_group(scenario.credential_groups(), os.environ.get)
+    return {c: os.environ[c] for c in (group or [])}
 
 
 def run_env(scenario: TomlScenario) -> dict[str, str]:
@@ -63,9 +71,10 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
     # 1. Fresh bench + subject delivery, order per tier: sbx wants the
     # workspace populated BEFORE create (a tar touching the bind-mount
     # root after create breaks sbx's mount — exec fails getcwd EPERM,
-    # reproduced on VM 142 with both GNU and bsdtar streams); tart has
-    # no choice — the workspace lives inside the VM, which must boot
-    # first. push_before_create on the host states which world we're in.
+    # reproduced on a Linux bench-host with both GNU and bsdtar
+    # streams); tart has no choice — the workspace lives inside the VM,
+    # which must boot first. push_before_create states which world
+    # we're in.
     def _create() -> None:
         bench.create(run_id, agent=scenario.agent,
                      template=scenario.template)

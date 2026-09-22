@@ -1,0 +1,143 @@
+# Interactive real-agent suite: a REAL claude-code driven through its
+# full first-run TUI at a bench pty — the simulated pilot. Same
+# verdict-from-reality rule as headless agent-smoke (the file, never
+# the agent's word), plus what only the interactive path proves: the
+# onboarding dialogs are navigated as a human would.
+#
+# Turn script mapped live on the bench (probes 2026-09-20):
+#   theme picker -> "Detected a custom API key" (decline; TWO gates:
+#   confirm footer + security notes) -> trust-folder -> Bypass
+#   Permissions warning (the --dangerously-skip-permissions gate)
+#   -> main input box -> task -> reply marker -> paced exit.
+#
+# Two TUI mechanics this script encodes (both proven live):
+#   - submit: `answer` types the task, but its trailing \r arrives in
+#     the same write and the TUI paste-guards it — the Enter must be a
+#     SEPARATE key event, hence the `key enter` turn after each answer
+#     into the input box.
+#   - exit: claude-code quits on two C-c inside its ~1s window (1.5s
+#     spacing never exits, 0.4s does) — the final `key` turn is a paced
+#     ctrl-c pair; EOF (not a quiet screen) is what wait_done needs.
+#
+# Credentials are pinned to the token+endpoint shape (no
+# ANTHROPIC_API_KEY alternative): every bench carries sbx's inert
+# ANTHROPIC_API_KEY=proxy-managed placeholder, which claude-code asks
+# about ("Do you want to use this API key?") — the script answers No
+# and the scenario's own token+base URL drive the run. Accepting the
+# API-key alternative would fork that answer on which provider is set;
+# pinning keeps the turns deterministic. agent-smoke keeps the broader
+# alternatives for the headless path.
+[scenario]
+name = "agent-pty-smoke"
+# Plain shell bench (proven live, probes 1–4): the claude-code CLI is
+# baked into the gentar-bench-v1 template, so no agent kit is needed —
+# the `claude` sbx agent pulls a kit from an OCI registry, which this
+# bench-host's egress rejects (403, "failed to apply kit"). The shell
+# bench still carries the inert ANTHROPIC_API_KEY=proxy-managed
+# placeholder, so the script's "decline the detected key" turn stays
+# real.
+agent = "shell"
+template = "gentar-bench-v1"
+# The pair is a GROUP (all-or-nothing): a token without its endpoint
+# is half a provider — the guard refuses (exit 2) unless BOTH are set,
+# never starts a misconfigured credentialed bench (PR #26 review).
+credentials = [["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]
+# Optional cheaper-model pin, same slot var as agent-smoke (proven
+# live on the z.ai plan): forwarded when set, no guard.
+pass_env = ["ANTHROPIC_DEFAULT_SONNET_MODEL"]
+
+[driver]
+# Bypass-permissions keeps the run deterministic (no approval pickers;
+# manual mode asks per tool). `timeout` bounds the whole session: turn
+# failure leaves it to kill the TUI, wait_done then sees EOF and the
+# verdict comes from the file — an honest bounded failure.
+# Startup update/telemetry disabled (bench egress hangs on them).
+command = 'cd "$WORKSPACE_DIR" && DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 600 claude --dangerously-skip-permissions'
+
+# --- onboarding (first run in a fresh bench) ------------------------
+[[driver.turns]]
+type = "pick"
+label = "Dark mode"          # cursor starts on it; Enter accepts
+
+[[driver.turns]]
+type = "pick"
+label = "No"                 # decline sbx's inert proxy-managed key;
+                             # scenario creds drive the run
+
+# Declining the key forks a confirm gate, then an INTERMITTENT
+# security-notes page (probe 5: present on some fresh benches, absent
+# on others — same template). Each Enter is anchored to its own screen
+# (`after`): a blind paced pair RACES the render and can pre-accept
+# the trust dialog's default. The notes Enter is `optional` — fired
+# when the page shows, skipped when it doesn't. All Enters must be
+# real \r events: an empty sendline (\n) is ignored by the TUI.
+[[driver.turns]]
+type = "key"
+after = "Enter to confirm"   # the decline-confirm footer
+key = "enter"
+
+[[driver.turns]]
+type = "key"
+after = "Security notes"     # intermittent page — dismiss when present
+key = "enter"
+optional = true
+timeout = 10
+
+[[driver.turns]]
+type = "pick"
+label = "Yes, I trust"       # trust the workspace folder
+
+[[driver.turns]]
+type = "pick"
+label = "Yes, I accept"      # --dangerously-skip-permissions gates the
+                             # session behind a Bypass Permissions warning
+                             # (cursor starts on "1. No, exit")
+
+[[driver.turns]]
+type = "key"
+key = "enter"                # confirm footer if present; a no-op on the
+                             # empty main input box otherwise (empty
+                             # submits are ignored)
+
+# --- the task -------------------------------------------------------
+[[driver.turns]]
+type = "answer"
+prompt = "for agents"        # main-screen idle marker, stable across
+                             # modes ("⏵⏵ bypass permissions on · ← for
+                             # agents"; manual mode shows "? for
+                             # shortcuts" INSTEAD — not present here)
+# The reply marker is DERIVED (file name uppercased + -DONE), not
+# quoted: a quoted marker self-matches — the typed task sits in the
+# input-box echo on screen, and the expect would fire on the echo and
+# ctrl-c the agent mid-run (proven live, probe 5).
+send = "Create a file named hello.txt in the current working directory with exactly this content: gentar-agent-pty, then reply with the file name in uppercase, followed by a hyphen and the word DONE"
+
+[[driver.turns]]
+type = "key"
+key = "enter"                # separate write: submits the paste-guarded box
+
+[[driver.turns]]
+type = "expect"
+pattern = "TXT-DONE"         # HELLO.TXT-DONE — the reply only; the
+                             # typed task never contains it contiguously
+timeout = 300
+
+# --- exit -----------------------------------------------------------
+[[driver.turns]]
+type = "key"
+keys = ["ctrl-c", "ctrl-c"]  # two C-c inside the ~1s exit window
+delay = 0.4
+
+[budget]
+tokens = 20000
+
+# EXACT content, byte for byte — the task says "exactly this content",
+# so grep -F is too forgiving (an agent that wraps the text in prose or
+# markdown must fail) and `test "$(cat f)" = …` is too forgiving in the
+# other direction: command substitution strips ALL trailing newlines, so
+# the text plus three blank lines passed too (PR #26 review round 3).
+# cmp compares bytes; the two accepted representations are spelled out —
+# the bare text, or the text with the one ordinary trailing newline a
+# line-oriented writer adds.
+[[verify.commands]]
+command = '''f="$WORKSPACE_DIR/hello.txt"; test -f "$f" && { printf 'gentar-agent-pty' | cmp -s - "$f" || printf 'gentar-agent-pty\n' | cmp -s - "$f"; }'''
