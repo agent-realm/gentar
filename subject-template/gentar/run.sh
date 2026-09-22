@@ -100,6 +100,30 @@ mkdir "subjects/$SUBJECT"
 # GENTAR_REF was honoured perfectly the whole time; the code that ran was not
 # the code that was fetched. gentar's own gate builds before every run for
 # this reason.
+# Tear the arena down on EVERY exit path, before anything can start it.
+#
+# `docker compose run --rm` removes only the coordinator: clickhouse and
+# otelcol come up via depends_on and survive, and clickhouse owns a named
+# volume. Without this trap each project strands two containers and a volume
+# per run -- invisible until a laptop is full of them. The trap fires on a
+# pass, a failing verdict, a refusal, and ctrl-c alike, and never changes the
+# verdict: teardown failure is swallowed, the scenario's exit code is not.
+_torn_down=0
+teardown_arena() {
+  local rc=$?
+  # INT/TERM fire the trap and EXIT fires it again -- tear down once.
+  [ "$_torn_down" = "1" ] && return "$rc"
+  _torn_down=1
+  if [ "${GENTAR_KEEP_ARENA:-0}" = "1" ]; then
+    echo "arena kept up (GENTAR_KEEP_ARENA=1) -- tear down with:" >&2
+    echo "  docker compose -p arena-$SUBJECT down -v --remove-orphans" >&2
+    return "$rc"
+  fi
+  docker compose -p "arena-$SUBJECT" down -v --remove-orphans >/dev/null 2>&1 || true
+  return "$rc"
+}
+trap teardown_arena EXIT INT TERM
+
 echo "building the coordinator image from $sha..." >&2
 docker compose -p "arena-$SUBJECT" build coordinator
 

@@ -33,6 +33,13 @@ First run clones gentar into `gentar/.arena` and seeds `.env` from
 Exit code is the verdict: `0` pass · `1` fail · `2` usage/config
 refusal.
 
+The runner tears its arena down on every exit path — pass, fail, refusal
+and ctrl-c — so a run leaves no containers or volumes behind. (Plain
+`docker compose run --rm` would not: `--rm` removes only the coordinator,
+while `clickhouse` and `otelcol` come up via `depends_on` and `clickhouse`
+owns a named volume.) To keep a stack up and inspect ClickHouse, set
+`GENTAR_KEEP_ARENA=1`; you then own the teardown, which the runner prints.
+
 ## The fix loop
 
 A failing run writes `gentar/reports/report-<run_id>.md` stating: what
