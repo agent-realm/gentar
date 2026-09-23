@@ -19,3 +19,4 @@ __pycache__/
 
 # Run reports (out/ bind) — per-run artifacts, never committed
 out/
+.publish/

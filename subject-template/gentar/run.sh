@@ -827,6 +827,14 @@ for f in ${SCENARIO_FILES[@]+"${SCENARIO_FILES[@]}"}; do
   REDACT_NAMES="$REDACT_NAMES $(credential_groups "$f" | tr '\n' ' ')"
 done
 redact() { GENTAR_REDACT_NAMES="$REDACT_NAMES" "$ARENA/bin/redact" "$@"; }
+# Files are prepared and redacted HERE, outside gentar/reports/, and only
+# then moved in: a CI cancel between writing and redacting must not leave
+# an unredacted file where the always-run upload step would publish it.
+STAGE="$ARENA/.publish"      # not under out/, which the report loop scans
+mkdir -p "$STAGE"
+publish() {             # $1 = staged file, $2 = destination in reports/
+  if redact "$1"; then mv -f "$1" "$2"; else rm -f "$1"; return 1; fi
+}
 
 # One self-contained dashboard.html per run.sh invocation, rendered from
 # this run's ClickHouse before teardown takes it (the spans die with the
@@ -845,10 +853,10 @@ render_dashboard() {
     echo "dashboard: not rendered (the verdict is unaffected)" >&2
     return 0
   fi
-  if cp "$out" "$HERE/reports/dashboard.html" && redact "$HERE/reports/dashboard.html"; then
+  if cp "$out" "$STAGE/dashboard.html" \
+     && publish "$STAGE/dashboard.html" "$HERE/reports/dashboard.html"; then
     echo "dashboard: gentar/reports/dashboard.html"
   else
-    rm -f "$HERE/reports/dashboard.html"
     echo "dashboard: NOT published — it could not be redacted" >&2
   fi
 }
@@ -874,14 +882,13 @@ for s in "$SCENARIO" "$@"; do
   # engine's default assumes the central arena's invocation).
   found=0
   while IFS= read -r f; do
-    dest="$HERE/reports/$(basename "$f")"
+    staged="$STAGE/$(basename "$f")"
     sed "s|^Reproduce: \`.*\`|Reproduce: \`gentar/run.sh $s\`|" "$f" \
-      > "$dest" && found=1
+      > "$staged" && found=1
     # gentar/reports/ is what CI publishes. A report that cannot be
     # redacted does not go there — the original stays in the arena's out/
     # for the fix loop, and the run's verdict is unchanged (agy review).
-    if ! redact "$dest"; then
-      rm -f "$dest"
+    if ! publish "$staged" "$HERE/reports/$(basename "$f")"; then
       echo "report: $(basename "$f") NOT published — it could not be redacted; the original is $ARENA/out/$(basename "$f")" >&2
     fi
   done < <(find out -name 'report-*.md' -newer "$MARKER" 2>/dev/null)
