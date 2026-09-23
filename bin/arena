@@ -63,8 +63,27 @@ compose() { docker compose -f docker-compose.yml -f compose.rm.yml "$@"; }
 #
 # Values never appear here: -e NAME passes the name and lets Docker read
 # the value from the environment, so nothing lands in argv or a log.
-extract_env_names() {         # scenario files... -> one name per line
+# The [scenario] table only — the one place the engine reads `subject`,
+# `credentials` and `pass_env`. Reading keys anywhere in the file let a
+# `subject` or `credentials` under another table (a review found both)
+# masquerade as the scenario's. A header is a WHOLE line holding only
+# `[name]` / `[[name]]`, so `[ -f x ]` inside a step never counts.
+scenario_table() {
   awk '
+    # Inside a multi-line string (a step written as triple-quoted text), a
+    # line reading `[scenario]` is TEXT, not a header — without this, it
+    # re-entered the table and its `subject` was read.
+    function toggles(line, delim,   n) { n = gsub(delim, "", line); return n % 2 }
+    !inml && /^[[:space:]]*\[\[?[A-Za-z_][A-Za-z0-9_.-]*\]\]?[[:space:]]*(#.*)?$/ {
+      h = $0; gsub(/[][[:space:]]|#.*/, "", h); insc = (h == "scenario"); next
+    }
+    { if (insc) print
+      if (toggles($0, "\047\047\047")) inml = !inml
+      if (toggles($0, "\"\"\"")) inml = !inml }' "$1"
+}
+
+extract_env_names() {         # scenario files... -> one name per line
+  for _f in "$@"; do scenario_table "$_f"; done | awk '
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
     inarr {
@@ -78,7 +97,7 @@ extract_env_names() {         # scenario files... -> one name per line
       depth += gsub(/\[/, "[") - gsub(/\]/, "]")
       if (depth <= 0) inarr = 0
     }
-  ' "$@"
+  '
 }
 
 # Sets FORWARD to the -e flags for the names the given scenarios declare
@@ -111,6 +130,23 @@ require_bench_key() {
   key=$(printf '%s' "$key" | sed 's/\\"/"/g; s/\\\\/\\/g')
   [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"
   case "$key" in "~/"*) key="$HOME/${key#\~/}" ;; esac
+  # Never repeat a value that is not plainly a path. Setting
+  # GENTAR_BENCH_KEY_FILE to the key's CONTENTS instead of its path is an
+  # easy mistake (in CI, pointing it at the secret instead of the staged
+  # file), and the "not found at <value>" line below then printed the whole
+  # private key — to a terminal, or to a CI log where masking a multi-line
+  # secret is not something to rely on. Found in review; true since 0.1.0.
+  case "$key" in
+    *"
+"*|*BEGIN*|*PRIVATE*|*KEY-----*)
+      echo "arena: GENTAR_BENCH_KEY_FILE holds what looks like KEY MATERIAL, not a path —" \
+           "it must be the PATH to the key file (value not shown)" >&2
+      exit 2 ;;
+  esac
+  if [ "${#key}" -gt 1024 ]; then
+    echo "arena: GENTAR_BENCH_KEY_FILE is ${#key} characters — not a path (value not shown)" >&2
+    exit 2
+  fi
   # Readable AND non-blank. CI stages the key with printf '%s\n', so an
   # UNSET secret becomes a one-byte file holding only the newline — which
   # passes -r and -s alike and then fails every suite at ssh, reading as a

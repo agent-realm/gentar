@@ -184,23 +184,61 @@ def sealed_path(home: str, hidden: set) -> str:
     reachable. Dropping the whole directory fails in ways a fresh bench
     cannot.
     """
+    # Two ways a hidden binary stayed reachable, both found in review:
+    #   - CASE. macOS filesystems are case-insensitive by default: a real
+    #     `Widget` on disk is what `widget` resolves to, but a plain `n in
+    #     hidden` test said "not hidden" and symlinked it into the shim.
+    #     Names are compared casefolded.
+    #   - ALIASES. `cpb` ships as a symlink to `claude-playbook`. Hiding the
+    #     name `claude-playbook` left `cpb` pointing straight at the pilot's
+    #     real install — the adopter's exact shape. Anything that resolves to
+    #     the SAME FILE (device + inode, after following links — which also
+    #     catches hardlinks) as a hidden binary is hidden too.
+    hidden_cf = {h.casefold() for h in hidden}
+    dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep)
+            if d and d != f"{home}/.local/bin"]
+
+    def listing(d):
+        try:
+            return os.listdir(d)
+        except OSError:
+            return []
+
+    def ident(path):
+        try:
+            st = os.stat(path)            # follows symlinks: the real file
+            return (st.st_dev, st.st_ino)
+        except OSError:
+            return None
+
+    targets = set()                        # the real files behind hidden names
+    for d in dirs:
+        for n in listing(d):
+            if n.casefold() in hidden_cf:
+                t = ident(os.path.join(d, n))
+                if t:
+                    targets.add(t)
+
+    def is_hidden(d, n):
+        return n.casefold() in hidden_cf or (
+            bool(targets) and ident(os.path.join(d, n)) in targets)
+
     shims = Path(home, ".dryrun-path-shims")
     out = [f"{home}/.local/bin"]
-    for i, d in enumerate(os.environ.get("PATH", "").split(os.pathsep)):
-        if not d or d == f"{home}/.local/bin":
-            continue
-        if not any(os.path.lexists(os.path.join(d, n)) for n in hidden):
+    for i, d in enumerate(dirs):
+        names = listing(d)
+        if not any(is_hidden(d, n) for n in names):
             out.append(d)
             continue
         shim = shims / str(i)
-        shim.mkdir(parents=True, exist_ok=True)
-        try:
-            names = os.listdir(d)
-        except OSError:
-            names = []
+        # Rebuilt from empty, never topped up: an entry left from an earlier
+        # sealing would survive a skip, and a stale link to a hidden binary
+        # is exactly the leak this function exists to close.
+        shutil.rmtree(shim, ignore_errors=True)
+        shim.mkdir(parents=True)
         for n in names:
             src = os.path.join(d, n)
-            if n in hidden or os.path.isdir(src) or not os.access(src, os.X_OK):
+            if is_hidden(d, n) or os.path.isdir(src) or not os.access(src, os.X_OK):
                 continue
             os.symlink(src, shim / n)
         out.append(str(shim))

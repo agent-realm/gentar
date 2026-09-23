@@ -66,6 +66,42 @@ class DroppedCredentialsTest(unittest.TestCase):
         self.assertIn("ANTHROPIC_BASE_URL dropped", md)
 
 
+class CredentialNamesAreEnvNamesTest(unittest.TestCase):
+    """A credential name must be an environment variable name.
+
+    Anything else can never be set, so the suite can never be satisfied;
+    and the kit's awk reader of `credentials` relies on names containing
+    no `#`, `]` or quote (a review of the kit found it mis-reads such
+    names). Refusing them at load makes that assumption an invariant."""
+
+    def load(self, cred):
+        from gentar.toml_scenario import TomlScenario
+        toml = ('[scenario]\nname = "c"\nagent = "shell"\n'
+                f'credentials = {cred}\n'
+                '[oracle]\nsteps = ["true"]\n'
+                '[[verify.commands]]\ncommand = "true"\n').encode()
+        with tempfile.NamedTemporaryFile(suffix=".toml", delete=False) as f:
+            f.write(toml)
+        try:
+            return TomlScenario(Path(f.name))
+        finally:
+            os.unlink(f.name)
+
+    def test_real_env_names_load(self):
+        s = self.load('["ANTHROPIC_API_KEY", ["_TOKEN", "URL_2"]]')
+        self.assertEqual(s.credential_groups(), [["ANTHROPIC_API_KEY"], ["_TOKEN", "URL_2"]])
+
+    def test_names_that_can_never_be_set_are_refused(self):
+        from gentar.toml_scenario import ScenarioError
+        # Pinned to the REASON: an earlier version of this fixture lacked
+        # [oracle].steps, so every case raised for THAT and the test passed
+        # without ever reaching the name check.
+        for bad in ('["my#key"]', '["a]b"]', '["A B"]', '["9LIVES"]', '["x-y"]', '[""]'):
+            with self.subTest(bad=bad), \
+                    self.assertRaisesRegex(ScenarioError, r"credentials\[0\]"):
+                self.load(bad)
+
+
 class ParsingNeedsNoPexpectTest(unittest.TestCase):
     """Validating a `key` driver turn must not import pexpect.
 

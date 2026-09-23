@@ -68,6 +68,16 @@ except ModuleNotFoundError:             # 3.9/3.10: stock macOS, old distros
     # image is python:3.12-slim and always takes the import above.
     import tomli as tomllib             # type: ignore[no-redef]
 from pathlib import Path
+import re
+
+# A credential or pass_env entry is an ENVIRONMENT VARIABLE NAME. Anything
+# else can never be set by a shell, so the suite could never be satisfied —
+# and the kit's shell-side readers (run.sh --sweep, credential forwarding)
+# rely on it: with names confined to this alphabet, no `#`, `]` or quote
+# can appear inside one, which is what lets a line-oriented awk parse the
+# array exactly as TOML does. Refusing here makes that an invariant, not a
+# hope.
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
 class ScenarioError(ValueError):
@@ -144,7 +154,7 @@ class TomlScenario:
         for i, entry in enumerate(self.credentials):
             names = entry if isinstance(entry, list) else [entry]
             if (not names
-                    or any(not isinstance(n, str) or not n.strip() for n in names)
+                    or any(not isinstance(n, str) or not _ENV_NAME.match(n) for n in names)
                     or any(isinstance(n, list) for n in names)):
                 raise ScenarioError(
                     f"{path}: scenario.credentials[{i}] must be an env "
@@ -155,9 +165,10 @@ class TomlScenario:
         # a legitimate "use the default", not a usage error.
         self.pass_env = list(sc.get("pass_env", []))
         for i, c in enumerate(self.pass_env):
-            if not isinstance(c, str) or not c.strip():
+            if not isinstance(c, str) or not _ENV_NAME.match(c):
                 raise ScenarioError(
-                    f"{path}: scenario.pass_env[{i}] must be an env var name")
+                    f"{path}: scenario.pass_env[{i}] must be an env var name "
+                    f"([A-Za-z_][A-Za-z0-9_]*), got {c!r}")
 
         self.steps = list((doc.get("oracle") or {}).get("steps", []))
         verify = doc.get("verify") or {}

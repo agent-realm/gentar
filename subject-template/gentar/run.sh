@@ -54,6 +54,25 @@ fi
 HERE=$(cd "$(dirname "$0")" && pwd)          # <repo>/gentar
 REPO=$(dirname "$HERE")
 
+# The [scenario] table only — the one place the engine reads `subject`,
+# `credentials` and `pass_env`. Reading keys anywhere in the file let a
+# `subject` or `credentials` under another table (a review found both)
+# masquerade as the scenario's. A header is a WHOLE line holding only
+# `[name]` / `[[name]]`, so `[ -f x ]` inside a step never counts.
+scenario_table() {
+  awk '
+    # Inside a multi-line string (a step written as triple-quoted text), a
+    # line reading `[scenario]` is TEXT, not a header — without this, it
+    # re-entered the table and its `subject` was read.
+    function toggles(line, delim,   n) { n = gsub(delim, "", line); return n % 2 }
+    !inml && /^[[:space:]]*\[\[?[A-Za-z_][A-Za-z0-9_.-]*\]\]?[[:space:]]*(#.*)?$/ {
+      h = $0; gsub(/[][[:space:]]|#.*/, "", h); insc = (h == "scenario"); next
+    }
+    { if (insc) print
+      if (toggles($0, "\047\047\047")) inml = !inml
+      if (toggles($0, "\"\"\"")) inml = !inml }' "$1"
+}
+
 # The subject name is read FROM THE SCENARIOS, which must declare it
 # anyway. It used to be $(basename "$REPO") — which is wrong in a git
 # worktree, whose directory is named after the BRANCH: a checkout at
@@ -68,8 +87,10 @@ if [ -n "${GENTAR_SUBJECT:-}" ]; then
 else
   # Either TOML string style: "basic" or 'literal'. Missing the second
   # made a single-quoted subject read as NO subject.
-  declared=$(sed -n "s/^[[:space:]]*subject[[:space:]]*=[[:space:]]*[\"']\([^\"']*\)[\"'].*/\1/p" \
-    "$HERE"/scenarios/*.toml 2>/dev/null | sort -u)
+  declared=$(for f in "$HERE"/scenarios/*.toml; do
+      [ -f "$f" ] && scenario_table "$f" \
+        | sed -n "s/^[[:space:]]*subject[[:space:]]*=[[:space:]]*[\"']\([^\"']*\)[\"'].*/\1/p"
+    done | sort -u)
   nscen=$(ls "$HERE"/scenarios/*.toml 2>/dev/null | wc -l | tr -d ' ')
   case "$(printf '%s\n' "$declared" | grep -c .)" in
     0) if [ "$nscen" -gt 0 ]; then
@@ -116,7 +137,7 @@ fi
 # Both TOML string styles ("basic", 'literal'). awk, not python: this runs
 # on a stock CI runner.
 credential_groups() {
-  awk '
+  scenario_table "$1" | awk '
     /^[[:space:]]*#/ { next }
     !inarr && /^[[:space:]]*credentials[[:space:]]*=/ { inarr = 1; buf = ""; sub(/^[^=]*=/, "") }
     inarr {
@@ -138,12 +159,12 @@ credential_groups() {
         if (ch == "[") { depth++; if (depth == 2) grp = ""; continue }
         if (ch == "]") { if (depth == 2 && grp != "") print grp; depth--; continue }
       }
-    }' "$1"
+    }'
 }
 
 # 0 when the suite declares no credentials or one group is fully set.
 credentials_present() {
-  grep -q '^[[:space:]]*credentials[[:space:]]*=' "$1" || return 0
+  scenario_table "$1" | grep -q '^[[:space:]]*credentials[[:space:]]*=' || return 0
   local g n full
   while IFS= read -r g; do
     [ -n "$g" ] || continue
@@ -449,6 +470,23 @@ require_bench_key() {
     | head -1)
   [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"
   case "$key" in "~/"*) key="$HOME/${key#\~/}" ;; esac
+  # Never repeat a value that is not plainly a path. Setting
+  # GENTAR_BENCH_KEY_FILE to the key's CONTENTS instead of its path is an
+  # easy mistake (in CI, pointing it at the secret instead of the staged
+  # file), and the "not found at <value>" line below then printed the whole
+  # private key — to a terminal, or to a CI log where masking a multi-line
+  # secret is not something to rely on. Found in review; true since 0.1.0.
+  case "$key" in
+    *"
+"*|*BEGIN*|*PRIVATE*|*KEY-----*)
+      echo "GENTAR_BENCH_KEY_FILE holds what looks like KEY MATERIAL, not a path —" \
+           "it must be the PATH to the key file (value not shown)" >&2
+      exit 2 ;;
+  esac
+  if [ "${#key}" -gt 1024 ]; then
+    echo "GENTAR_BENCH_KEY_FILE is ${#key} characters — not a path (value not shown)" >&2
+    exit 2
+  fi
   # Readable AND non-blank. CI stages the key with printf '%s\n', so an
   # UNSET secret becomes a one-byte file holding only the newline — which
   # passes -r and -s alike and then fails every suite at ssh, reading as a
@@ -566,7 +604,7 @@ arena_start otelcol
 # GENTAR_BUDGET_CAP is the one fixed addition: it configures the budget
 # guard itself, so no scenario declares it.
 extract_env_names() {         # files... -> one env var name per line
-  awk '
+  for _f in "$@"; do scenario_table "$_f"; done | awk '
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
     inarr {
@@ -580,7 +618,7 @@ extract_env_names() {         # files... -> one env var name per line
       depth += gsub(/\[/, "[") - gsub(/\]/, "]")
       if (depth <= 0) inarr = 0
     }
-  ' "$@"
+  '
 }
 # ${FORWARD[@]+"..."} rather than "${FORWARD[@]}": under `set -u`, bash 3.2
 # (still the system bash on macOS) treats an EMPTY array expansion as an
