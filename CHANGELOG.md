@@ -63,7 +63,9 @@ the kit, which is why this is a minor bump.
 - **The kit workflow** is built around a `plan` job on ubuntu-latest; the
   `checks` job is GitHub-hosted too, and only the `bench` job is
   self-hosted. It runs only when the plan asks and never for a fork's PR
-  (checked from GitHub's context, not from the PR's files). Host ports and
+  (checked from GitHub's context, not from the PR's files). It triggers on
+  pushes to every branch, since only the planner knows which one is the
+  default (main, master, trunk…); anything else plans to nothing. Host ports and
   the budget cap come from repository variables, so the file needs no
   edits. So does the engine ref: `vars.GENTAR_REF` overrides `run.sh`'s pin
   on every event, which is how an adopter proves an untagged engine in CI
@@ -75,7 +77,10 @@ the kit, which is why this is a minor bump.
   queues, so phase 2 and keyword runs were silently dropped behind ordinary
   main pushes (claude-playbooks, observed). `run.sh` now takes a host lock
   per `arena-<subject>` — flock, or a mkdir lock with stale-holder
-  detection on macOS — and a later run waits, saying for whom. The
+  detection on macOS — and a later run waits, saying for whom. Locks live
+  in a shared, non-sticky `gentar-locks/` directory, so any runner user
+  can clear a dead run's lock; one it cannot remove is named with the
+  command to remove it, never hung on. The
   workflow's group is per-ref, for dedup only. `--down` never tears down an
   arena another live run holds.
 - The workflow's bench-key guard treats a whitespace-only secret as blank,

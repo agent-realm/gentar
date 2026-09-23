@@ -161,6 +161,7 @@ class PlanTest(unittest.TestCase):
             (dict(GITHUB_EVENT_NAME="pull_request", PR_HEAD_REPO="x/r",
                   GITHUB_REF="refs/pull/1/merge"), "none", []),
             (dict(GITHUB_EVENT_NAME="push", GITHUB_REF="refs/heads/main"), "phase2", []),
+            (dict(GITHUB_EVENT_NAME="push", GITHUB_REF="refs/heads/feature"), "none", []),
             (dict(GITHUB_EVENT_NAME="push", GITHUB_REF="refs/tags/v1.0.0"), "phase2", []),
             (dict(GITHUB_EVENT_NAME="push", GITHUB_REF="refs/tags/arena-auth"),
              "targeted", ["auth"]),
@@ -271,6 +272,13 @@ class WorkflowInvariantTest(unittest.TestCase):
         jobs = self.jobs()
         for j in ("plan", "checks"):
             self.assertIn("runs-on: ubuntu-latest", jobs[j])
+
+    def test_pushes_to_any_branch_reach_the_planner(self):
+        # the default branch is the repo's (main, master, trunk); only the
+        # planner knows it, so the trigger must not hard-code `main`
+        text = WORKFLOW.read_text()
+        self.assertIn("branches: ['**']", text)
+        self.assertNotIn("branches: [main]", text)
 
     def test_the_concurrency_group_is_per_ref(self):
         # a repository-wide group evicts pending runs (claude-playbooks)

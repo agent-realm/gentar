@@ -22,7 +22,11 @@ name: arena
 on:
   pull_request:
   push:
-    branches: [main]
+    # Every branch, not `main`: the DEFAULT branch is the repository's
+    # (main, master, trunk…) and only the planner knows it, from the event.
+    # A push to any other branch costs one short GitHub-hosted plan job
+    # that answers "nothing".
+    branches: ['**']
     tags: ['v*', 'arena', 'arena-*']
   workflow_dispatch:
     inputs:

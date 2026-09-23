@@ -45,6 +45,9 @@ class ArenaLockTest(unittest.TestCase):
         (self.bindir / "docker").chmod(0o755)
         self.lockdir = self.tmp / "locks"
         self.lockdir.mkdir()
+        self.root = self.lockdir / "gentar-locks"      # run.sh's shared lock root
+        self.root.mkdir(mode=0o777)
+        os.chmod(self.root, 0o777)
         self.log = self.tmp / "docker.log"
         self.log.touch()
         self.holder = None
@@ -69,7 +72,7 @@ class ArenaLockTest(unittest.TestCase):
 
     def hold_live(self):
         """Another run holding the lock, the way run.sh would."""
-        base = self.lockdir / "gentar-arena-lockrepo.lock"
+        base = self.root / "gentar-arena-lockrepo.lock"
         if self.flock:
             base.touch()
             self.holder = subprocess.Popen([self.flock, str(base), "sleep", "60"])
@@ -77,7 +80,7 @@ class ArenaLockTest(unittest.TestCase):
                 if subprocess.run([self.flock, "-n", str(base), "true"]).returncode:
                     break
                 __import__("time").sleep(0.1)
-            (self.lockdir / "gentar-arena-lockrepo.lock.holder").write_text(
+            (self.root / "gentar-arena-lockrepo.lock.holder").write_text(
                 f"pid {self.holder.pid} on host since now\n")
             return base
         self.holder = subprocess.Popen(["sleep", "60"])
@@ -90,10 +93,10 @@ class ArenaLockTest(unittest.TestCase):
         """A lock whose holder is gone."""
         dead = subprocess.Popen(["true"])
         dead.wait()
-        base = self.lockdir / "gentar-arena-lockrepo.lock"
+        base = self.root / "gentar-arena-lockrepo.lock"
         if self.flock:                 # flock dies with its holder; a note may remain
             base.touch()
-            (self.lockdir / "gentar-arena-lockrepo.lock.holder").write_text(
+            (self.root / "gentar-arena-lockrepo.lock.holder").write_text(
                 f"pid {dead.pid} on host since then\n")
             return None
         d = Path(str(base) + ".d")
@@ -126,7 +129,32 @@ class ArenaLockTest(unittest.TestCase):
         r = self.down()
         self.assertIn("torn down", r.stdout)
         self.assertTrue(self.stopped())
-        self.assertFalse((self.lockdir / "gentar-arena-lockrepo.lock.d").exists())
+        self.assertFalse((self.root / "gentar-arena-lockrepo.lock.d").exists())
+
+    def test_the_lock_root_is_shared_and_not_sticky(self):
+        # a fresh host: run.sh makes the root itself, world-writable and
+        # without the sticky bit, so any runner user can clear a dead
+        # run's lock (in sticky /tmp only the lock's owner could)
+        os.rmdir(self.root)
+        self.down()
+        mode = self.root.stat().st_mode & 0o7777
+        self.assertEqual(mode & 0o777, 0o777, oct(mode))
+        self.assertFalse(mode & 0o1000, "lock root is sticky")
+
+    @unittest.skipIf(shutil.which("flock", path="/usr/bin:/bin:/usr/sbin:/sbin"),
+                     "the mkdir lock is the macOS fallback")
+    def test_an_unremovable_stale_lock_is_named_not_hung_on(self):
+        d = self.hold_stale()
+        os.chmod(d, 0o555)                   # holder file cannot be deleted
+        try:
+            r = self.down()
+        finally:
+            os.chmod(d, 0o755)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("cannot be removed", r.stderr)
+        self.assertIn("rm -rf", r.stderr)
+        self.assertIn("not torn down", r.stdout)
+        self.assertFalse(self.stopped())
 
 
 if __name__ == "__main__":
