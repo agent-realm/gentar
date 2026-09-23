@@ -98,13 +98,25 @@ from gentar.toml_scenario import TomlScenario
 # already did the equivalent locally). Example: ("docker build",).
 SKIP_STEP_SUBSTR = ()
 
+# Executables that must NEVER be found on your real PATH while a suite
+# runs — names your suites CREATE themselves (a launcher, an alias
+# binary). Anything prepare() installs into the scratch ~/.local/bin is
+# hidden automatically; list only what it does not. Example: ("cpb",).
+HIDE_FROM_PATH = ()
+
 
 def prepare(env: dict) -> None:
-    """Build/stage whatever the suites need; runs once per sweep.
+    """Build/stage whatever ONE suite needs, in that suite's fresh home.
 
-    The default subject needs nothing. If your scenarios assume a built
-    binary or generated fixtures, do it here (REPO is the checkout;
-    env["HOME"] is the scratch pilot home the steps will run under).
+    Runs once PER SUITE, not once per sweep: every suite gets its own
+    scratch home and workspace, as every scenario gets its own bench. If
+    your scenarios assume a built binary or generated fixtures, do it
+    here (REPO is the checkout; env["HOME"] is this suite's scratch home;
+    env["WORKSPACE_DIR"] its staged checkout). Put the subject's own
+    binaries in env["HOME"] + "/.local/bin": whatever lands there is
+    hidden from the real PATH for the suite (see sealed_path). Expensive
+    builds should cache outside HOME and copy in — `go build` and most
+    compilers already cache on their own.
     """
     return None
 
@@ -146,6 +158,53 @@ def stage_subject(workspace: str) -> None:
     shutil.copytree(REPO, workspace, dirs_exist_ok=True, symlinks=True,
                     ignore=skip)
 
+
+
+def sealed_path(home: str, hidden: set) -> str:
+    """The scratch bin, then the host PATH with `hidden` made unreachable.
+
+    The host PATH stays so steps find git, go and the rest of userland. But
+    the subject's own executables must not be found there: once a suite
+    removes the scratch copy — an uninstall suite does exactly that — a
+    later call must fail as "not found", not fall through to the pilot's
+    REAL install and run it against the scratch HOME. That happened to the
+    first real adopter (claude-playbooks): the dry-run reached the pilot's
+    installed CLI, which created launchers next to itself in the real
+    ~/.local/bin. A local check that can modify the machine it runs on is
+    worse than no check.
+
+    `hidden` is everything prepare() put in the scratch bin — subject-
+    provided by definition, including the stub `claude`, so a suite that
+    deletes the stub cannot reach the pilot's real, authenticated agent —
+    plus HIDE_FROM_PATH.
+
+    Hiding is per executable, not per directory. A directory holding a
+    hidden name is replaced by a shim directory of symlinks to everything
+    ELSE in it, so a tool that shares ~/.local/bin with the CLI stays
+    reachable. Dropping the whole directory fails in ways a fresh bench
+    cannot.
+    """
+    shims = Path(home, ".dryrun-path-shims")
+    out = [f"{home}/.local/bin"]
+    for i, d in enumerate(os.environ.get("PATH", "").split(os.pathsep)):
+        if not d or d == f"{home}/.local/bin":
+            continue
+        if not any(os.path.lexists(os.path.join(d, n)) for n in hidden):
+            out.append(d)
+            continue
+        shim = shims / str(i)
+        shim.mkdir(parents=True, exist_ok=True)
+        try:
+            names = os.listdir(d)
+        except OSError:
+            names = []
+        for n in names:
+            src = os.path.join(d, n)
+            if n in hidden or os.path.isdir(src) or not os.access(src, os.X_OK):
+                continue
+            os.symlink(src, shim / n)
+        out.append(str(shim))
+    return os.pathsep.join(out)
 
 def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
     sc = TomlScenario(path)
@@ -287,16 +346,35 @@ def drive(sc, env, cwd, log, unreplayed) -> int:
 
 def main() -> int:
     paths = [Path(a) for a in sys.argv[1:]] or sorted((REPO / "gentar/scenarios").glob("*.toml"))
-    home = scratch_home()
-    # Workspace UNDER home, as on a bench — never equal to it, or a
-    # checkout file can satisfy a `~/...` assertion for free.
-    workspace = os.path.join(home, "gentar-workspaces/dryrun")
-    os.makedirs(workspace, exist_ok=True)
-    stage_subject(workspace)
-    env = dict(os.environ, HOME=home, WORKSPACE_DIR=workspace,
-               PATH=f"{home}/.local/bin:" + os.environ["PATH"])
-    prepare(env)
-    return 1 if sum(run_one(p, env, home, workspace) for p in paths) else 0
+    # A FRESH home, workspace and prepare() per suite, as the engine gives
+    # each scenario a fresh bench. Sharing one across the sweep let a suite's
+    # state leak into the next (claude-playbooks: an uninstall suite removed
+    # the binary and every later suite ran without it — then past it, see
+    # sealed_path). A suite that passes here only because an earlier one
+    # left something behind is a harness lie.
+    fails = 0
+    for p in paths:
+        home = scratch_home()
+        # Workspace UNDER home, as on a bench — never equal to it, or a
+        # checkout file can satisfy a `~/...` assertion for free.
+        workspace = os.path.join(home, "gentar-workspaces/dryrun")
+        os.makedirs(workspace, exist_ok=True)
+        stage_subject(workspace)
+        bindir = f"{home}/.local/bin"
+        # prepare() runs with the ordinary PATH: it is your trusted build
+        # step and needs your toolchain. The SUITE then runs sealed.
+        env = dict(os.environ, HOME=home, WORKSPACE_DIR=workspace,
+                   PATH=f"{bindir}:" + os.environ["PATH"])
+        prepare(env)
+        hidden = set(os.listdir(bindir)) | set(HIDE_FROM_PATH)
+        env["PATH"] = sealed_path(home, hidden)
+        failed = run_one(p, env, home, workspace)
+        fails += failed
+        if failed:
+            print(f"  scratch home kept for inspection: {home}")
+        else:
+            shutil.rmtree(home, ignore_errors=True)
+    return 1 if fails else 0
 
 
 if __name__ == "__main__":
