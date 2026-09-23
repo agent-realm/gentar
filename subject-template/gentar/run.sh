@@ -54,8 +54,13 @@ case "${1:-}" in
 esac
 
 if [ "$STAGE_ONLY$REVIEW_ONLY$DOWN_ONLY$SWEEP$CHECK_ONLY" = 00000 ]; then
-  SCENARIO=${1:?usage: gentar/run.sh [--stage-engine|--review|--sweep|--down|--check|--plan] <scenario> [more scenarios...]}
-  shift || true
+  # A usage error is a refusal: exit 2. (`${1:?…}` exits 1 or 127.)
+  if [ $# -lt 1 ]; then
+    echo "usage: gentar/run.sh [--stage-engine|--review|--sweep|--down|--check|--plan] <scenario> [more scenarios...]" >&2
+    exit 2
+  fi
+  SCENARIO=$1
+  shift
 else
   SCENARIO=""
 fi

@@ -162,6 +162,13 @@ class ReleaseGateTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertIn("NOT refusing", r.stdout)
 
+    def test_no_repository_is_a_refusal_exit_2(self):
+        env = {"PATH": f"{self.bindir}:{os.environ['PATH']}", "FIX": str(self.fix),
+               "HOME": os.environ.get("HOME", "/tmp")}
+        r = subprocess.run([str(self.tmp / "gentar" / "release-gate.sh"), SHA],
+                           env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2, r.stderr)
+
     def test_a_short_or_bad_sha_is_a_usage_error(self):
         for sha in ("abc123", "", "z" * 40, SHA + ";id"):
             with self.subTest(sha=sha):

@@ -45,6 +45,13 @@ class CheckExitTest(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("unknown key", r.stderr)
 
+    def test_no_scenario_is_a_usage_refusal_exit_2(self):
+        # `${1:?usage}` exits 1 (or 127), not the contract's 2 (agy review)
+        r = subprocess.run(["/bin/bash", "gentar/run.sh"], cwd=self.repo,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("usage:", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

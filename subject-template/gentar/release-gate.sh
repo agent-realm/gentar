@@ -30,7 +30,8 @@ case "$SHA" in
   ''|*[!0-9a-f]*) echo "usage: gentar/release-gate.sh <full commit sha>" >&2; exit 2 ;;
 esac
 [ "${#SHA}" = 40 ] || { echo "release-gate: need the full 40-character sha" >&2; exit 2; }
-REPO=${GITHUB_REPOSITORY:?release-gate: GITHUB_REPOSITORY is not set}
+REPO=${GITHUB_REPOSITORY:-}
+[ -n "$REPO" ] || { echo "release-gate: GITHUB_REPOSITORY is not set" >&2; exit 2; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 WF=gentar-arena.yml
 JOB="arena / phase2"

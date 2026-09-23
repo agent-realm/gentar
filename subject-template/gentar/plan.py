@@ -47,7 +47,8 @@ if sys.version_info < (3, 11):
     try:
         import tomli as tomllib
     except ModuleNotFoundError:
-        sys.exit("plan.py needs python 3.11+, or tomli (pip install tomli)")
+        print("plan.py needs python 3.11+, or tomli (pip install tomli)", file=sys.stderr)
+        sys.exit(2)                           # a refusal, not a failed check
 else:
     import tomllib
 

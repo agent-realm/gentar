@@ -52,7 +52,10 @@ the kit, which is why this is a minor bump.
   pinned engine's copy — the workflow and release gate may be absent, for a
   central-dispatch subject or one that never releases), dry-run every suite.
   Exit 0 clean · 1 a check failed · 2 a refusal (bad policy, an untrusted
-  host), a refusal winning. A fork's PR, which gets no
+  host), a refusal winning. Usage and configuration errors across the kit
+  now exit 2 as the contract says: `run.sh` with no scenario (it exited 1
+  or 127), `release-gate.sh` without `GITHUB_REPOSITORY`, and `dryrun.py` /
+  `plan.py` without an engine or a TOML parser (they exited 1). A fork's PR, which gets no
   secrets and so cannot stage a private engine, is a named skip.
 - `gentar/release-gate.sh` — names what it found when it refuses: a failed
   phase 2, a cancelled one, or a run GitHub cancelled before any job
