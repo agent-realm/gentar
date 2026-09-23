@@ -43,6 +43,20 @@ class RedactTest(unittest.TestCase):
         self.assertIn("«redacted:GENTAR_BENCH_HOST»", out)
         self.assertIn("«redacted:ANTHROPIC_AUTH_TOKEN»", out)
 
+    def test_every_encoding_of_a_value_is_redacted(self):
+        # the dashboard embeds data as JSON; a value with a backslash, a
+        # quote, a newline or non-ASCII text appears escaped (agy review)
+        import html as _html, json as _json
+        v = 'k\\ey"with\nodd\u00e9-chars'
+        text = "\n".join([v, _json.dumps(v)[1:-1], _json.dumps(v, ensure_ascii=False)[1:-1],
+                          _html.escape(v), _html.escape(_json.dumps(v)[1:-1])])
+        r, out = self.run_redact(text, GENTAR_REDACT_NAMES="TOKEN", TOKEN=v)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for form in (v, _json.dumps(v)[1:-1], _json.dumps(v, ensure_ascii=False)[1:-1],
+                     _html.escape(v)):
+            self.assertNotIn(form, out)
+        self.assertEqual(out.count("«redacted:TOKEN»"), 5, out)
+
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",
                                  GENTAR_REDACT_NAMES="SHORT LONG",

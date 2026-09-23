@@ -21,6 +21,7 @@ Longest values first, so a value containing another is replaced whole.
 Exit 0 done · 1 a file could not be rewritten · 2 usage. The caller decides
 what an unredactable file means (the kit does not publish its dashboard).
 """
+import html
 import json
 import os
 import subprocess
@@ -70,7 +71,21 @@ def main(argv):
         for v in (os.environ.get(n, ""), resolved.get(n, "")):
             if len(v) >= 4:
                 values.add((v, n))
-    pairs = sorted(values, key=lambda p: -len(p[0]))
+    # Every form a value can take in a published file, not only the raw
+    # one: the dashboard embeds data as JSON (a backslash, quote, control
+    # character or non-ASCII byte comes out escaped) and HTML may escape
+    # it again — a raw-only replace missed those (agy review).
+    forms = set()
+    for v, n in values:
+        for f in (v,
+                  json.dumps(v)[1:-1],
+                  json.dumps(v, ensure_ascii=False)[1:-1],
+                  html.escape(v),
+                  html.escape(v, quote=False),
+                  html.escape(json.dumps(v)[1:-1])):
+            if len(f) >= 4:
+                forms.add((f, n))
+    pairs = sorted(forms, key=lambda p: -len(p[0]))
     rc = 0
     for f in files:
         try:
