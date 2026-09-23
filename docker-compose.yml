@@ -114,6 +114,10 @@ services:
       GENTAR_OSB_API_KEY: ${GENTAR_OSB_API_KEY:-}
       GENTAR_BUDGET_CAP: ${GENTAR_BUDGET_CAP:-}
       GENTAR_QUARANTINE: ${GENTAR_QUARANTINE:-}
+      # The one exception to the rule above: config.py treats an empty
+      # GENTAR_NAME_PREFIX as its default ("gentar"), so forwarding it
+      # empty is safe. CI sets it per job; bin/bench-reap removes by it.
+      GENTAR_NAME_PREFIX: ${GENTAR_NAME_PREFIX:-}
     volumes:
       # Subject checkouts, mounted read-only — never baked into images.
       - ${GENTAR_SUBJECTS_DIR:-./subjects}:/subjects:ro

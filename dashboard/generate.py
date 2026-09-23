@@ -18,7 +18,13 @@ import time
 import urllib.error
 import urllib.request
 
-DEFAULT_OUT = "/out/dashboard.html"
+# /out is the compose service's mount. Run on a host (a kept arena, the
+# kit's printed command) there is no /out and a non-root user cannot make
+# one, so fall back to dashboard/out/ beside this script (gitignored).
+DEFAULT_OUT = ("/out/dashboard.html"
+               if os.path.isdir("/out") and os.access("/out", os.W_OK)
+               else os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "out", "dashboard.html"))
 
 # Status palette (dataviz skill, references/palette.md -- fixed, never
 # themed). pass=good, fail/error=critical-ish, running=warning, skip=neutral.
@@ -33,7 +39,12 @@ STATUS_DARK_TEXT = {"pass": "#ffffff", "running": "#141400", "fail": "#ffffff", 
 
 
 def resolve_ch():
-    url = os.environ.get("GENTAR_CLICKHOUSE_URL", "http://localhost:8123")
+    # An explicit URL wins. Otherwise follow the arena's host binding: an
+    # adopter that moved it aside (GENTAR_CLICKHOUSE_HOST_PORT=8126, as the
+    # kit workflow suggests) would else read 8123 -- and on a host where
+    # another arena holds 8123, render THAT arena's runs. (claude-playbooks.)
+    port = os.environ.get("GENTAR_CLICKHOUSE_HOST_PORT") or "8123"
+    url = os.environ.get("GENTAR_CLICKHOUSE_URL") or f"http://localhost:{port}"
     user = os.environ.get("GENTAR_CLICKHOUSE_USER", "gentar")
     pw = os.environ.get("GENTAR_CLICKHOUSE_PASSWORD", "gentar")
     db = os.environ.get("GENTAR_CLICKHOUSE_DB", "gentar")
@@ -49,6 +60,16 @@ def ch_query(url, user, pw, sql):
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        # ClickHouse answers an unknown table with HTTP 404 (code 60). A
+        # dashboard started with the arena races the coordinator's schema
+        # creation; that is a wait, not a failure.
+        detail = e.read().decode("utf-8", "replace")
+        if e.code == 404 and ("UNKNOWN_TABLE" in detail or "Code: 60" in detail):
+            print("generate.py: waiting for the arena to create its tables", file=sys.stderr)
+        else:
+            print(f"generate.py: WARNING: query failed: {e}: {detail[:200]}", file=sys.stderr)
+        return []
     except urllib.error.URLError as e:
         print(f"generate.py: WARNING: query failed: {e}", file=sys.stderr)
         return []

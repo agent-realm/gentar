@@ -108,6 +108,14 @@ jobs:
         scenario: ${{ fromJSON(needs.gate-setup.outputs.scenarios) }}
     env:
       COMPOSE_PROJECT_NAME: gentar-ci
+      # Names every sandbox this JOB creates, so teardown can remove the
+      # ones a cancelled job stranded and nothing else on the shared
+      # bench-host (bin/bench-reap). Unique per repository (GitHub
+      # promises run ids unique only WITHIN one), per run, per attempt
+      # (attempt N reaps only its own; each attempt runs its own
+      # teardown), and per job: matrix jobs share a run id and attempt.
+      # Compact on purpose: sbx caps a name at 64 and the run id takes 23.
+      GENTAR_NAME_PREFIX: g${{ github.repository_id }}-${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
       GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
       GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
       SCENARIO: ${{ matrix.scenario }}
@@ -145,14 +153,11 @@ jobs:
         if: always()
         run: |
           docker compose down -v --remove-orphans || true
-          # Anything a crashed run left on the bench-host (informational;
-          # the coordinator already rms its own sandbox best-effort).
-          # Same key file the coordinator used — ssh BEFORE removing it.
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-            -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
-            -i /tmp/gentar_ci_bench_key \
-            "${GENTAR_BENCH_USER}@${GENTAR_BENCH_HOST}" \
-            'sbx ls | grep gentar- || echo "bench-host clean"' || true
+          # Sandboxes THIS job left on the bench-host (a cancelled job
+          # never reaches the coordinator's own rm). Matched by the job's
+          # GENTAR_NAME_PREFIX, so other arenas' live benches are safe.
+          # Same key file the coordinator used — reap BEFORE removing it.
+          bin/bench-reap || true
           rm -f /tmp/gentar_ci_bench_key
 
   nightly:
@@ -161,6 +166,14 @@ jobs:
     runs-on: [self-hosted, gentar-bench]
     env:
       COMPOSE_PROJECT_NAME: gentar-nightly
+      # Names every sandbox this JOB creates, so teardown can remove the
+      # ones a cancelled job stranded and nothing else on the shared
+      # bench-host (bin/bench-reap). Unique per repository (GitHub
+      # promises run ids unique only WITHIN one), per run, per attempt
+      # (attempt N reaps only its own; each attempt runs its own
+      # teardown), and per job: matrix jobs share a run id and attempt.
+      # Compact on purpose: sbx caps a name at 64 and the run id takes 23.
+      GENTAR_NAME_PREFIX: g${{ github.repository_id }}-${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
       GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
       GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
       GENTAR_BUDGET_CAP: "50000"
@@ -277,6 +290,11 @@ jobs:
         if: always()
         run: |
           docker compose down -v --remove-orphans || true
+          # Sandboxes THIS job left on the bench-host (a cancelled job
+          # never reaches the coordinator's own rm). Matched by the job's
+          # GENTAR_NAME_PREFIX, so other arenas' live benches are safe.
+          # Same key file the coordinator used — reap BEFORE removing it.
+          bin/bench-reap || true
           rm -f /tmp/gentar_ci_bench_key
 
   dispatch:
@@ -285,6 +303,14 @@ jobs:
     runs-on: [self-hosted, gentar-bench]
     env:
       COMPOSE_PROJECT_NAME: gentar-dispatch
+      # Names every sandbox this JOB creates, so teardown can remove the
+      # ones a cancelled job stranded and nothing else on the shared
+      # bench-host (bin/bench-reap). Unique per repository (GitHub
+      # promises run ids unique only WITHIN one), per run, per attempt
+      # (attempt N reaps only its own; each attempt runs its own
+      # teardown), and per job: matrix jobs share a run id and attempt.
+      # Compact on purpose: sbx caps a name at 64 and the run id takes 23.
+      GENTAR_NAME_PREFIX: g${{ github.repository_id }}-${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
       GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
       GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key
@@ -354,4 +380,9 @@ jobs:
         if: always()
         run: |
           docker compose down -v --remove-orphans || true
+          # Sandboxes THIS job left on the bench-host (a cancelled job
+          # never reaches the coordinator's own rm). Matched by the job's
+          # GENTAR_NAME_PREFIX, so other arenas' live benches are safe.
+          # Same key file the coordinator used — reap BEFORE removing it.
+          bin/bench-reap || true
           rm -f /tmp/gentar_ci_bench_key

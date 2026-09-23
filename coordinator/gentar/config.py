@@ -11,7 +11,13 @@ tier, checked against the tier a run actually selects, so a tier
 nobody uses never has to be configured."""
 
 import os
+import re
 
+
+_PREFIX_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
+# sbx name limit (64) minus what spans.new_run_id appends:
+# "-YYYYmmdd-HHMMSS-xxxxxx" = 23 characters.
+PREFIX_MAX = 64 - 23
 
 def _opt(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
@@ -105,7 +111,11 @@ class Config:
         self.clickhouse_db = _opt("GENTAR_CLICKHOUSE_DB", "gentar")
 
         # Sandbox name prefix; run id is appended by the coordinator.
-        self.name_prefix = _opt("GENTAR_NAME_PREFIX", "gentar")
+        # Empty reads as the default: compose forwards it as
+        # ${GENTAR_NAME_PREFIX:-}, which is an empty string when unset.
+        # CI sets a per-job prefix so bin/bench-reap can remove exactly
+        # the sandboxes a cancelled job stranded.
+        self.name_prefix = _opt("GENTAR_NAME_PREFIX") or "gentar"
 
         # Subjects root: mounted read-only into the coordinator container
         # (compose volume). A scenario's `subject` names a dir under it.
@@ -165,5 +175,28 @@ class Config:
         if kind not in BENCH_REQUIREMENTS:
             known = ", ".join(sorted(BENCH_REQUIREMENTS))
             return [f"a known bench tier (got {kind!r}; known: {known})"]
+        # sbx tier only: there the prefix starts every sandbox NAME. The
+        # other tiers carry the run id as metadata or a quoted path and
+        # have their own naming (daytona prepends its own), so sbx's rules
+        # must not refuse a prefix they have always accepted.
+        #
+        # sbx accepts letters, digits, hyphens and periods; CI builds the
+        # prefix from the GitHub job id, which may hold `_`, and sbx would
+        # then reject every create. Refused here rather than mapped: `a_b`
+        # and `a-b` mapping to one prefix would let two jobs reap each
+        # other's benches. Periods are refused too, so bin/bench-reap's
+        # rule is the same one.
+        if kind == "sbx" and not _PREFIX_RE.fullmatch(self.name_prefix):
+            return [f"a GENTAR_NAME_PREFIX of letters, digits and hyphens, "
+                    f"starting with a letter or digit (got "
+                    f"{self.name_prefix!r}; in CI it embeds the job id — "
+                    f"rename a job id holding `_`)"]
+        # sbx refuses a name over 64 characters (measured on sbx 0.39; its
+        # help does not say), and the run id appends 23. Refused here, or
+        # every create fails with "failed to run sandbox container".
+        if kind == "sbx" and len(self.name_prefix) > PREFIX_MAX:
+            return [f"a GENTAR_NAME_PREFIX of at most {PREFIX_MAX} characters "
+                    f"(got {len(self.name_prefix)}: {self.name_prefix!r}; in "
+                    f"CI it embeds the job id — shorten it)"]
         return [var for var, attr in BENCH_REQUIREMENTS[kind]
                 if not getattr(self, attr, "").strip()]

@@ -368,6 +368,12 @@ Two things worth checking against any bench-host:
   container is the reset" is a contract about the *next* run getting a fresh bench, not
   a guarantee that the previous one was reaped.
 
+  **Bench side fixed in 0.3.1.** CI now names each job's sandboxes with a
+  per-job `GENTAR_NAME_PREFIX` (`g<repository_id>-<run_id>-a<attempt>-<job><index>`),
+  and teardown runs `bin/bench-reap`, which removes the sandboxes and workspaces whose
+  WHOLE name matches that prefix plus the coordinator's run-id shape — never another
+  run's. Still uncovered: a runner that dies outright never runs its teardown step.
+
   **Confirmed, and fixed in 0.1.0.** The arena side of exactly this gap put the pilot's
   machine under: `compose run --rm` removed only the coordinator, while `clickhouse` and
   `otelcol` came up via `depends_on` as ordinary containers and survived, stranding two

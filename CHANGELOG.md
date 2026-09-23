@@ -22,6 +22,78 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.3.1 — 2026-09-23
+
+Fixes only, from the first adopter's re-adaptation to 0.3.0
+(claude-playbooks) and one gap of the engine's own. No change to the
+scenario schema or the exit-code contract; an adopter re-copies the kit.
+
+### Fixed
+
+- **A cancelled CI job left its bench sandbox on the shared bench-host.**
+  The coordinator removes its sandbox when a scenario ends; a job
+  cancelled mid-bench never gets there, and teardown only *reported*
+  strays. CI now gives every job its own `GENTAR_NAME_PREFIX`
+  (`g<repository_id>-<run_id>-a<attempt>-<job><index>`: GitHub promises
+  run ids unique only within a repository) and teardown runs the new
+  `bin/bench-reap`, which removes exactly the sandboxes and workspaces
+  whose whole name is that prefix plus the coordinator's run-id shape —
+  including a workspace whose sandbox was never created, since sbx pushes
+  before it creates. `…-123-…` never matches `…-1234-…`; attempt 2 never
+  reaps attempt 1; the unscoped default prefix is refused. It takes the
+  bench settings from `docker compose config` — what compose resolved
+  for the coordinator, `.env` interpolation, comments and relative paths
+  included — and falls back to the shell only without compose. In the kit,
+  `gentar/run.sh --down` reaps when the prefix is set and does not touch
+  the bench-host when it is not (every local run). Proven by SIGKILLing a
+  live coordinator mid-bench and reaping the stranded sandbox, with a
+  same-shaped decoy left untouched.
+- **`GENTAR_NAME_PREFIX` never reached the coordinator.** The compose file
+  did not forward it, so the knob in `.env.example` did nothing. It is
+  forwarded now, and an empty value reads as the default. On the sbx
+  tier (the only one whose sandbox NAME starts with it), a prefix sbx
+  cannot use in a name (CI embeds the GitHub job id, which may hold `_`)
+  is refused with exit 2 before any bench exists, rather than failing
+  every create; it is not mapped, since `a_b` and `a-b` would then share
+  a prefix and reap each other's benches. (claude-playbooks.) So is one
+  over 41 characters: sbx rejects a name over 64 (measured; its help does
+  not say) and the run id appends 23.
+- **`bin/arena`'s bench-key check did nothing on macOS.** It read the
+  key path compose resolved with a BRE using `\|`, which BSD sed does not
+  support, so it matched nothing and fell back to the shell variable: a
+  bad path set only in `.env` reached Docker's mount error instead of the
+  exit-2 refusal that names it. Now `sed -E`.
+- **The dashboard read the wrong ClickHouse** when an adopter had moved
+  the port: it defaulted to 8123 and ignored `GENTAR_CLICKHOUSE_HOST_PORT`
+  — on a host where another arena holds 8123, it rendered *that* arena.
+  It now follows the host port unless `GENTAR_CLICKHOUSE_URL` is given.
+- **The dashboard could not run on a host.** Its default output was
+  `/out/dashboard.html`, the compose container's mount; run on a host
+  there is no `/out`, and a non-root user cannot create one. Outside the
+  container it now writes `dashboard/out/dashboard.html` — the same
+  place the container's mount lands — and the kit's printed command
+  passes `--out gentar/reports/dashboard.html`.
+- **The dashboard logged an HTTP 404 on start.** That is ClickHouse's
+  unknown-table answer while the arena is still creating its schema; it
+  now says it is waiting.
+
+### Kit
+
+- `GENTAR_KEEP_ARENA=1` prints `gentar/run.sh --down` instead of two raw
+  docker commands, and the dashboard command to watch the run — with the
+  ClickHouse port compose actually published, so a port moved only in the
+  arena's `.env` is not printed as 8123.
+- The kit README documents the dashboard (it was undiscoverable from an
+  adopter's repo), and no longer says the subject name lives in `run.sh`.
+- The workflow's cost comment no longer calls its concurrency group
+  per-ref; it is one per repository.
+- `HIDE_FROM_PATH` covers the second reason to hide a name: a host tool
+  the subject CALLS that a bench does not have.
+- Documented: a tag push runs the tagged commit's workflow even before it
+  is on the default branch, which is how an adoption PR gets a CI arena
+  before merge.
+- `GENTAR_REF` pins `v0.3.1`.
+
 ## 0.3.0 — 2026-09-23
 
 The first real adoption. claude-playbooks adapted gentar v0.2.0 into a

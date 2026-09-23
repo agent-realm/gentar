@@ -25,7 +25,7 @@ workflow:
 | 2 | **Suites** | `gentar/scenarios/*.toml` — install *decisions* + reality assertions, never scripts | `first-suite.toml`, fully commented |
 | 3 | **Credentials** | `credentials = [names]` per suite — env var NAMES; entries are alternatives, a list entry is an all-of group; none = oracle suite | none (first-suite is credential-less) |
 | 4 | **Trigger** | `.github/workflows/gentar-arena.yml` (own arena) and/or a dispatch job (central arena) | own-arena workflow: PRs, push to main, tags, dispatch |
-| 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.3.0` — a release tag, bumped deliberately |
+| 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.3.1` — a release tag, bumped deliberately |
 | 6 | **PR scope** *(optional)* | `gentar: <suites>` in a PR body narrows that run; `GENTAR_FLOOR` repo var names suites that run anyway | unset — every PR runs everything runnable |
 
 The verdict contract is the engine's, not yours: exit `0` pass · `1`
@@ -107,7 +107,7 @@ Clones the engine into `gentar/.arena`, checks out the pinned
 `GENTAR_REF`, and seeds the arena's `.env` from its `.env.example`. No
 Docker, no bench — this is a git operation.
 
-Observe: `engine staged: …/gentar/.arena @ v0.3.0 (<sha>)` and a path to
+Observe: `engine staged: …/gentar/.arena @ v0.3.1 (<sha>)` and a path to
 the arena env file.
 
 **The seeded `.env` holds placeholders, not a working config — edit it
@@ -262,6 +262,12 @@ checkout. The exact job and both token scopes are in
 
 Observe either way: open a pull request touching anything, and the
 arena runs against its head commit.
+
+**Without a PR trigger** (a public repo), prove the adoption PR before it
+merges by pushing the `arena` keyword tag at its head commit. A tag push
+runs the workflow file of the *tagged* commit, even when that file is not
+on the default branch yet — which is how the first real adoption got a CI
+arena before merge.
 
 ### 8. Pin the engine
 

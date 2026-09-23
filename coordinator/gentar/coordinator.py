@@ -209,7 +209,7 @@ def run(name: str, cfg: Config | None = None) -> int:
     if missing:
         # Two shapes: an unknown tier names what it needs in prose, a
         # known-but-unconfigured one names env vars that are unset.
-        if len(missing) == 1 and missing[0].startswith("a known bench"):
+        if len(missing) == 1 and missing[0].startswith("a "):
             msg = (f"bench config: {missing[0]} — refusing before any "
                    f"bench exists.")
         else:

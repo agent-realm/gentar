@@ -175,6 +175,21 @@ class RefusalTest(unittest.TestCase):
         self.assertIn("bench created despite refusal", str(caught.exception))
 
 
+
+class NamePrefixTest(unittest.TestCase):
+    """docker-compose.yml forwards GENTAR_NAME_PREFIX as ${VAR:-}, which is
+    an EMPTY STRING when the caller set nothing. Empty must read as the
+    default, or every local run would name its sandboxes `-<stamp>`."""
+
+    def test_unset_and_empty_both_read_as_the_default(self):
+        self.assertEqual(cfg_with().name_prefix, "gentar")
+        self.assertEqual(cfg_with(GENTAR_NAME_PREFIX="").name_prefix, "gentar")
+
+    def test_a_ci_prefix_is_used_verbatim(self):
+        cfg = cfg_with(GENTAR_NAME_PREFIX="gentar-gh123-a1-gate0")
+        self.assertEqual(cfg.name_prefix, "gentar-gh123-a1-gate0")
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -219,6 +234,46 @@ class RefusalPathCoverageTest(unittest.TestCase):
         _, out = self.run_refusing(cfg, "smoke")
         for known in BENCH_REQUIREMENTS:
             self.assertIn(known, out)
+
+    def test_a_prefix_sbx_cannot_use_refuses_before_any_bench(self):
+        # CI embeds the GitHub job id, which may hold `_`; sbx names may
+        # not, so every create would fail. Refused (exit 2), not mapped:
+        # `a_b` and `a-b` sharing one prefix would reap each other.
+        for bad in ("gentar-gh1-a1-smoke_test0", "gentar.gh1", "-gentar"):
+            with self.subTest(prefix=bad):
+                rc, out = self.run_refusing(
+                    self.configured(GENTAR_NAME_PREFIX=bad), "smoke")
+                self.assertEqual(rc, 2)
+                self.assertIn(bad, out)
+                self.assertIn("job id", out)
+
+    def test_sbx_naming_rules_do_not_refuse_other_tiers(self):
+        # osb carries the run id as metadata and a quoted path; sbx's
+        # name rules must not break a prefix it has always accepted
+        for bad in ("team_build", "p" * 42):
+            with self.subTest(prefix=bad):
+                cfg = self.configured(GENTAR_NAME_PREFIX=bad)
+                self.assertEqual(cfg.missing_bench_env("osb"), [])
+                self.assertNotEqual(cfg.missing_bench_env("sbx"), [])
+
+    def test_a_ci_shaped_prefix_is_not_refused(self):
+        # g<repository_id>-<run_id>-a<attempt>-<job><index>, real magnitudes
+        cfg = self.configured(GENTAR_NAME_PREFIX="g1043567890-35854630458-a1-arena0")
+        self.assertEqual(cfg.missing_bench_env(), [])
+
+    def test_a_prefix_too_long_for_an_sbx_name_refuses(self):
+        # sbx rejects names over 64 (measured); the run id appends 23
+        self.assertEqual(self.configured(GENTAR_NAME_PREFIX="p" * 41)
+                         .missing_bench_env(), [])
+        rc, out = self.run_refusing(
+            self.configured(GENTAR_NAME_PREFIX="p" * 42), "smoke")
+        self.assertEqual(rc, 2)
+        self.assertIn("at most 41", out)
+
+    def test_the_prefix_bound_is_the_sbx_limit_minus_the_run_id(self):
+        from gentar.config import PREFIX_MAX
+        from gentar.spans import new_run_id
+        self.assertEqual(PREFIX_MAX + len(new_run_id("")), 64)
 
     def test_unknown_scenario_refuses(self):
         # The other name-level refusal: an unknown suite must not spend
