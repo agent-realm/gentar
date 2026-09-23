@@ -22,9 +22,10 @@ a pass.
 
 The adaptations live in gentar/hooks.py (yours; this file is the kit's):
 
-  prepare(env)      called once per suite; build your CLI or stage
-                    fixtures here (env["HOME"] is the scratch home,
-                    env["WORKSPACE_DIR"] the staged checkout)
+  prepare(env)      called per suite — for the suites with a step matching
+                    SKIP_STEP_SUBSTR, or every suite when that is empty;
+                    build your CLI or stage fixtures here (env["HOME"] is
+                    the scratch home, env["WORKSPACE_DIR"] the checkout)
   SKIP_STEP_SUBSTR  substrings of [oracle].steps that prepare() already
                     covered locally (e.g. "docker build"), skipped verbatim
   HIDE_FROM_PATH    executables that must never be found on the real PATH

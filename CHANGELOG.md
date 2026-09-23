@@ -54,7 +54,9 @@ the kit, which is why this is a minor bump.
   secrets and so cannot stage a private engine, is a named skip.
 - `gentar/release-gate.sh` — names what it found when it refuses: a failed
   phase 2, a cancelled one, or a run GitHub cancelled before any job
-  started. Optional `[phase2] max_age_days`.
+  started. Optional `[phase2] max_age_days`, compared in seconds (a pass
+  7 days 23 hours old is refused by a 7-day limit). With
+  `release_gate = false` it always passes, even when the API cannot answer.
 - `gentar/hooks.py` — the dry-run hooks (`prepare()`, `HIDE_FROM_PATH`,
   `SKIP_STEP_SUBSTR`) move out of `dryrun.py`, so every kit file can stay
   byte-identical to the kit.

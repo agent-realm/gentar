@@ -98,7 +98,9 @@ does on a fresh machine is the entire point.
    `[[verify.*]]` assertions.
 7. **Dry-run**: `gentar/dryrun.py` — replays steps and assertions locally in
    about a second, no bench. Expect `ALL PASS`. Each suite gets its own fresh
-   scratch home, and `prepare()` runs once per suite: put the subject's
+   scratch home, and `prepare()` runs per suite — only for the suites with a
+   step it stands in for (a `SKIP_STEP_SUBSTR` match; every suite when none
+   is declared): put the subject's
    binaries in that home's `~/.local/bin`, and dryrun hides those names on
    the real `PATH` so a suite can never fall through to the pilot's own
    installed copy. Names a suite creates itself go in `HIDE_FROM_PATH`. Both

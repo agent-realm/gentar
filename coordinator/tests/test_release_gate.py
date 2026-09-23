@@ -136,6 +136,26 @@ class ReleaseGateTest(unittest.TestCase):
         self.jobs(17, [("arena / phase2", "success", 3)])
         self.assertEqual(self.gate().returncode, 0)
 
+    def test_max_age_is_not_rounded_down(self):
+        # 7 days and 23 hours is older than 7 days
+        self.policy("[phase2]\nmax_age_days = 7\n")
+        self.runs([(18, "success", "push", "arena")])
+        self.jobs(18, [("arena / phase2", "success", 7 + 23 / 24)])
+        self.assertEqual(self.gate().returncode, 1)
+        self.jobs(18, [("arena / phase2", "success", 6.9)])
+        self.assertEqual(self.gate().returncode, 0)
+
+    def test_gate_off_passes_even_when_the_api_cannot_answer(self):
+        self.policy("[phase2]\nrelease_gate = false\n")
+        (self.fix / "runs.json").unlink()      # the fake gh now fails
+        r = self.gate()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("NOT refusing", r.stdout)
+
+    def test_gate_on_refuses_when_the_api_cannot_answer(self):
+        (self.fix / "runs.json").unlink()
+        self.assertEqual(self.gate().returncode, 1)
+
     def test_gate_off_reports_but_does_not_refuse(self):
         self.policy("[phase2]\nrelease_gate = false\n")
         r = self.gate()

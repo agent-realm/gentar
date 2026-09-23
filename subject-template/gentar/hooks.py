@@ -26,10 +26,15 @@ HIDE_FROM_PATH = ()
 
 
 def prepare(env: dict) -> None:
-    """Build/stage whatever ONE suite needs, in that suite's fresh home.
+    """Build/stage what a suite needs, in that suite's fresh home.
 
-    Runs once PER SUITE, not once per sweep: every suite gets its own
-    scratch home and workspace, as every scenario gets its own bench. If
+    Runs PER SUITE, not once per sweep: every suite gets its own scratch
+    home and workspace, as every scenario gets its own bench. And only for
+    the suites it stands in for: with SKIP_STEP_SUBSTR set, prepare() runs
+    for a suite that has a step matching it, and for no other — so a build
+    cannot shadow what an unrelated suite installs. With SKIP_STEP_SUBSTR
+    empty it runs for every suite. Fixtures EVERY suite needs therefore
+    belong in the suites' own steps, or leave SKIP_STEP_SUBSTR empty. If
     your scenarios assume a built binary or generated fixtures, do it
     here (REPO is the checkout; env["HOME"] is this suite's scratch home;
     env["WORKSPACE_DIR"] its staged checkout). Put the subject's own
