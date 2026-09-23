@@ -26,7 +26,7 @@ class RedactTest(unittest.TestCase):
     def run_redact(self, text, **env):
         f = Path(tempfile.mkdtemp()) / "report.md"
         f.write_text(text)
-        e = {"PATH": os.environ["PATH"], **env}
+        e = {"PATH": os.environ["PATH"], "GENTAR_ENGINE_DIR": tempfile.mkdtemp(), **env}
         r = subprocess.run([sys.executable, str(REDACT), str(f)], env=e,
                            capture_output=True, text=True)
         return r, f.read_text()
@@ -53,6 +53,23 @@ class RedactTest(unittest.TestCase):
         _, out = self.run_redact("user u on host", GENTAR_REDACT_NAMES="A B",
                                  A="u")
         self.assertEqual(out, "user u on host")
+
+    def test_a_value_only_compose_resolved_is_redacted_too(self):
+        # the bench-host set only in the arena's .env reaches the run via
+        # compose, never this process's environment (agy review)
+        import json, stat
+        bindir = Path(tempfile.mkdtemp())
+        doc = {"services": {"coordinator": {"environment": {
+            "GENTAR_BENCH_HOST": "bench.internal.example"}}}}
+        (bindir / "docker").write_text("#!/bin/sh\ncat <<'J'\n" + json.dumps(doc) + "\nJ\n")
+        (bindir / "docker").chmod(0o755)
+        r, out = self.run_redact(
+            "ssh: Could not resolve hostname bench.internal.example",
+            GENTAR_REDACT_NAMES="GENTAR_BENCH_HOST",
+            PATH=f"{bindir}:{os.environ['PATH']}")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("bench.internal.example", out)
+        self.assertIn("«redacted:GENTAR_BENCH_HOST»", out)
 
     def test_no_files_is_a_usage_error(self):
         r = subprocess.run([sys.executable, str(REDACT)], capture_output=True)
@@ -81,6 +98,18 @@ class DashboardHidesTranscriptsTest(unittest.TestCase):
         self.assertNotIn("SECRET SCREEN CONTENT", html)
         self.assertIn("agent transcript, 37 chars", html)
         self.assertIn("echo hi", html)          # command output stays, as in the report
+
+
+    def test_the_grid_hides_a_transcript_that_was_the_last_step(self):
+        spec = importlib.util.spec_from_file_location("gen", GENERATE)
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+        grid = [{"subject": "s", "run_id": "r", "scenario": "a", "status": "fail",
+                 "current_step": "driver.transcript", "last_duration_ms": 1,
+                 "last_detail": "SECRET SCREEN CONTENT", "run_started": "", "last_event": ""}]
+        html = gen.render([], gen.public_grid(grid), [], [], "gentar", False)
+        self.assertNotIn("SECRET SCREEN CONTENT", html)
+        self.assertIn("agent transcript, 21 chars", html)
 
 
 if __name__ == "__main__":

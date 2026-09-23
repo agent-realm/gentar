@@ -875,9 +875,13 @@ for s in "$SCENARIO" "$@"; do
     dest="$HERE/reports/$(basename "$f")"
     sed "s|^Reproduce: \`.*\`|Reproduce: \`gentar/run.sh $s\`|" "$f" \
       > "$dest" && found=1
-    # Best effort: an unredacted report is still the fix loop's input, so
-    # a failure here is said, not turned into a missing report.
-    redact "$dest" || echo "report: $dest could not be redacted" >&2
+    # gentar/reports/ is what CI publishes. A report that cannot be
+    # redacted does not go there — the original stays in the arena's out/
+    # for the fix loop, and the run's verdict is unchanged (agy review).
+    if ! redact "$dest"; then
+      rm -f "$dest"
+      echo "report: $(basename "$f") NOT published — it could not be redacted; the original is $ARENA/out/$(basename "$f")" >&2
+    fi
   done < <(find out -name 'report-*.md' -newer "$MARKER" 2>/dev/null)
   rm -f "$MARKER"
   if [ "$found" -ne 1 ]; then

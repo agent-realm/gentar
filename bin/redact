@@ -11,12 +11,38 @@ published, the value of every named variable present in the environment is
 replaced by «redacted:NAME». Values shorter than 4 characters are left
 alone (they would match everywhere and hide nothing).
 
+Values come from the environment AND from what `docker compose config`
+resolved for the coordinator: a bench-host configured only in the arena's
+.env reaches the run through compose without ever being in this process's
+environment, and would otherwise go out unredacted (agy review). The engine
+checkout is this script's parent directory (GENTAR_ENGINE_DIR overrides).
+
 Longest values first, so a value containing another is replaced whole.
 Exit 0 done · 1 a file could not be rewritten · 2 usage. The caller decides
 what an unredactable file means (the kit does not publish its dashboard).
 """
+import json
 import os
+import subprocess
 import sys
+from pathlib import Path
+
+
+def compose_env() -> dict:
+    """The coordinator's environment as compose resolved it, or {}."""
+    engine = os.environ.get("GENTAR_ENGINE_DIR") or str(Path(__file__).resolve().parent.parent)
+    try:
+        out = subprocess.run(
+            ["docker", "compose", "--project-directory", engine,
+             "-f", os.path.join(engine, "docker-compose.yml"),
+             "config", "--format", "json"],
+            capture_output=True, text=True, timeout=60)
+        if out.returncode != 0:
+            return {}
+        env = json.loads(out.stdout)["services"]["coordinator"].get("environment") or {}
+        return {k: v for k, v in env.items() if isinstance(v, str)}
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        return {}
 
 
 def main(argv):
@@ -25,9 +51,13 @@ def main(argv):
         print("usage: GENTAR_REDACT_NAMES='A B' bin/redact FILE...", file=sys.stderr)
         return 2
     names = os.environ.get("GENTAR_REDACT_NAMES", "").split()
-    pairs = sorted(((os.environ[n], n) for n in names
-                    if len(os.environ.get(n, "")) >= 4),
-                   key=lambda p: -len(p[0]))
+    resolved = compose_env()
+    values = set()
+    for n in names:
+        for v in (os.environ.get(n, ""), resolved.get(n, "")):
+            if len(v) >= 4:
+                values.add((v, n))
+    pairs = sorted(values, key=lambda p: -len(p[0]))
     rc = 0
     for f in files:
         try:

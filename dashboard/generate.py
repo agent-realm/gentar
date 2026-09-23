@@ -146,15 +146,21 @@ def fetch(url, user, pw, db, n_runs):
 PRIVATE_DETAIL_STEPS = {"driver.transcript"}
 
 
+def _hidden(detail):
+    return f"(agent transcript, {len(detail or '')} chars — in the run report, not here)"
+
+
 def public_events(events):
     """Events fit to publish: transcript details replaced by their length."""
-    out = []
-    for e in events:
-        if e.get("step") in PRIVATE_DETAIL_STEPS:
-            n = len(e.get("detail") or "")
-            e = {**e, "detail": f"(agent transcript, {n} chars — in the run report, not here)"}
-        out.append(e)
-    return out
+    return [{**e, "detail": _hidden(e.get("detail"))}
+            if e.get("step") in PRIVATE_DETAIL_STEPS else e for e in events]
+
+
+def public_grid(grid):
+    """The per-scenario grid shows its latest step's detail; when that step
+    is a transcript, the same rule applies (agy review)."""
+    return [{**r, "last_detail": _hidden(r.get("last_detail"))}
+            if r.get("current_step") in PRIVATE_DETAIL_STEPS else r for r in grid]
 
 
 def badge(status: str) -> str:
@@ -343,7 +349,7 @@ def main(argv):
 
     def once():
         runs, grid, events, agent = fetch(url, user, pw, db, args.runs)
-        html_body = render(runs, grid, public_events(events), agent, db, args.watch)
+        html_body = render(runs, public_grid(grid), public_events(events), agent, db, args.watch)
         write_html(args.out, html_body, args.watch)
         print(f"dashboard: {args.out}  ({len(runs)} runs, {len(grid)} scenario rows, {len(events)} events, {len(agent)} runs with agent spans)")
 
