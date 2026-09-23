@@ -79,7 +79,10 @@ does on a fresh machine is the entire point.
 6. **Write the real suite** (decision 4), replacing `[oracle].steps` and the
    `[[verify.*]]` assertions.
 7. **Dry-run**: `gentar/dryrun.py` — replays steps and assertions locally in
-   about a second, no bench. Expect `ALL PASS`.
+   about a second, no bench. Expect `ALL PASS`. It needs python 3.11+, or
+   3.9/3.10 with `tomli`; if it says so, that is a missing parser on the
+   host and not a problem with the suite — the arena runs 3.12 in a
+   container regardless.
 8. **Run for real**: `gentar/run.sh <suite>`. Exit code is the verdict; a
    report lands in `gentar/reports/`.
 9. **Wire CI** (decision 2) and commit.

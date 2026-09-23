@@ -63,14 +63,34 @@ if not ENGINE.exists():
              "GENTAR_ENGINE=/path/to/gentar/coordinator gentar/dryrun.py")
 sys.path.insert(0, str(ENGINE))
 
-# tomllib is 3.11+. Stock macOS ships 3.9, so rather than fail on the default
-# interpreter, re-exec under the first newer one on PATH.
+# tomllib is 3.11+, and stock macOS still ships 3.9 — so the cheap check an
+# adopter is told to run FIRST is the one most likely to fail on a machine
+# nobody prepared. Three ways out, in order of least surprise:
+#
+#   1. re-exec under a newer interpreter if one is already on PATH;
+#   2. otherwise use tomli, which IS tomllib under its pre-stdlib name —
+#      the same parser, so a scenario cannot mean one thing here and
+#      another in the arena;
+#   3. otherwise say exactly what to install, rather than "needs 3.11+".
+#
+# The arena itself never reaches any of this: the coordinator image is
+# python:3.12-slim. This is purely about the host-side replay.
 if sys.version_info < (3, 11):
     for candidate in ("python3.14", "python3.13", "python3.12", "python3.11"):
         if shutil.which(candidate):
             os.execvp(candidate, [candidate, os.path.abspath(__file__), *sys.argv[1:]])
-    sys.exit(f"needs python 3.11+ for tomllib; this is {sys.version.split()[0]} "
-             "and no newer python3.1x was found on PATH")
+    try:
+        import tomli  # noqa: F401  — imported for the check; the parser imports it
+    except ModuleNotFoundError:
+        sys.exit(
+            f"dryrun needs a TOML parser and this is python {sys.version.split()[0]} "
+            "(tomllib arrived in 3.11).\n"
+            "  either:  pip install tomli\n"
+            "  or:      install any python 3.11+ and re-run "
+            "(brew install python@3.12, apt install python3.12, ...)\n"
+            "The arena is unaffected either way — it runs python 3.12 in a "
+            "container. This is only the local replay."
+        )
 
 from gentar.toml_scenario import TomlScenario
 
