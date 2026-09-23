@@ -205,8 +205,9 @@ class _TranscriptTap:
         pass
 
 
-_KEYS = {"enter": "\r", "escape": "\x1b", "down": "\x1b[B", "up": "\x1b[A",
-         "ctrl-c": "\x03"}
+# The vocabulary lives in a leaf module so the scenario parser can validate
+# `key` turns without importing pexpect (see gentar/keys.py).
+from gentar.keys import KEYS as _KEYS  # noqa: E402
 
 
 def _render(raw: str, height: int = 0) -> str:

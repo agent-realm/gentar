@@ -88,6 +88,32 @@ def satisfied_group(groups: list[list[str]], get) -> list[str] | None:
     return None
 
 
+
+def dropped_credentials(groups: list[list[str]], get) -> list[str]:
+    """Declared names that ARE set but will NOT be forwarded, because they
+    sit outside the winning group. Forwarding only the winner is correct —
+    it is what stops a stray endpoint redirecting a key — but doing it
+    silently turns a schema mistake into a failure three layers away.
+
+    The case that made this necessary (the first real adopter,
+    claude-playbooks): `credentials = ["ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL"]` parses fine and reads like a pair, but a flat
+    list is ALTERNATIVES — so the token won alone, the set base URL was
+    dropped without a word, and the agent reported "Invalid API key" from
+    inside the bench. Written `[["ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL"]]` it is one group and both travel. Nothing is
+    dropped when no group wins: the guard refuses that run instead."""
+    won = satisfied_group(groups, get)
+    if won is None:
+        return []
+    seen, out = set(won), []
+    for g in groups:
+        for name in g:
+            if name not in seen and get(name):
+                seen.add(name)
+                out.append(name)
+    return out
+
 def credentials_satisfied(groups: list[list[str]], get) -> bool:
     """True when at least one alternative group is FULLY present — the
     guard's rule as a predicate."""
@@ -165,7 +191,7 @@ class TomlScenario:
                 keys = t.get("keys") or ([t["key"]] if t.get("key") else [])
                 if not keys:
                     raise ScenarioError(f"{path}: driver.turns[{i}] missing key/keys")
-                from gentar.pty_driver import _KEYS
+                from gentar.keys import KEYS as _KEYS
                 bad = [k for k in keys if k not in _KEYS]
                 if bad:
                     raise ScenarioError(
