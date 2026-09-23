@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""redact — replace secret VALUES in files a run publishes, in place.
+
+    GENTAR_REDACT_NAMES="GENTAR_BENCH_HOST ANTHROPIC_AUTH_TOKEN ..." bin/redact FILE...
+
+A public repository's CI artifacts can be downloaded by any logged-in
+GitHub user, and GitHub masks secrets in LOGS, not in artifacts. A report
+or dashboard can carry a value by accident — an ssh error naming the
+bench-host, a command echoing a variable — so before a run's files are
+published, the value of every named variable present in the environment is
+replaced by «redacted:NAME». Values shorter than 4 characters are left
+alone (they would match everywhere and hide nothing).
+
+Longest values first, so a value containing another is replaced whole.
+Exit 0 done · 1 a file could not be rewritten · 2 usage. The caller decides
+what an unredactable file means (the kit does not publish its dashboard).
+"""
+import os
+import sys
+
+
+def main(argv):
+    files = argv[1:]
+    if not files:
+        print("usage: GENTAR_REDACT_NAMES='A B' bin/redact FILE...", file=sys.stderr)
+        return 2
+    names = os.environ.get("GENTAR_REDACT_NAMES", "").split()
+    pairs = sorted(((os.environ[n], n) for n in names
+                    if len(os.environ.get(n, "")) >= 4),
+                   key=lambda p: -len(p[0]))
+    rc = 0
+    for f in files:
+        try:
+            with open(f, encoding="utf-8", errors="surrogateescape") as fh:
+                text = fh.read()
+            for value, name in pairs:
+                text = text.replace(value, f"«redacted:{name}»")
+            with open(f, "w", encoding="utf-8", errors="surrogateescape") as fh:
+                fh.write(text)
+        except OSError as exc:
+            print(f"redact: {f}: {exc}", file=sys.stderr)
+            rc = 1
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

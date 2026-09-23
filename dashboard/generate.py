@@ -140,6 +140,23 @@ def fetch(url, user, pw, db, n_runs):
     return runs, grid, events, agent
 
 
+# Steps whose detail is an agent's screen, not a command's output. The run
+# report carries it for the fix loop; the dashboard — which a public repo
+# publishes as a CI artifact — shows only that it exists.
+PRIVATE_DETAIL_STEPS = {"driver.transcript"}
+
+
+def public_events(events):
+    """Events fit to publish: transcript details replaced by their length."""
+    out = []
+    for e in events:
+        if e.get("step") in PRIVATE_DETAIL_STEPS:
+            n = len(e.get("detail") or "")
+            e = {**e, "detail": f"(agent transcript, {n} chars — in the run report, not here)"}
+        out.append(e)
+    return out
+
+
 def badge(status: str) -> str:
     color = STATUS_COLOR.get(status, "#8a8a86")
     text_color = STATUS_DARK_TEXT.get(status, "#ffffff")
@@ -326,7 +343,7 @@ def main(argv):
 
     def once():
         runs, grid, events, agent = fetch(url, user, pw, db, args.runs)
-        html_body = render(runs, grid, events, agent, db, args.watch)
+        html_body = render(runs, grid, public_events(events), agent, db, args.watch)
         write_html(args.out, html_body, args.watch)
         print(f"dashboard: {args.out}  ({len(runs)} runs, {len(grid)} scenario rows, {len(events)} events, {len(agent)} runs with agent spans)")
 

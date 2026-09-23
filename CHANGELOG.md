@@ -22,6 +22,35 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.4.2 — 2026-09-23
+
+**Every run leaves a dashboard** — the pilot's ask since the morning.
+
+### Added
+
+- After its suites, `run.sh` renders `gentar/reports/dashboard.html` from
+  the run's own ClickHouse before teardown takes it: a verdict per suite
+  and every step with duration, status and output, as one self-contained
+  file, uploaded with `arena-reports` for phase 2, targeted and floor runs
+  alike. Previously the spans died with the stack and a run left a page of
+  text. A render failure is reported and skipped — never the verdict,
+  never the reports.
+- `bin/redact`: before a run's files are published, the values of the
+  bench-host settings and of every declared credential are replaced by
+  `«redacted:NAME»` — in the dashboard AND the reports. A public repo's
+  artifacts are downloadable by any logged-in GitHub user, and GitHub
+  masks secrets only in logs; an ssh error naming the bench-host, or a step
+  echoing a token, used to reach the report artifact as-is. A dashboard
+  that cannot be redacted is not published.
+- The dashboard shows an agent's screen transcript only by its length; it
+  stays in the run report for the fix loop.
+
+### Changed
+
+- The kit's policy template warns that `[phase1] setup` applies to every
+  `os` leg: Go 1.21 builds binaries current macOS refuses ("missing
+  LC_UUID load command") — claude-playbooks, first macOS run.
+
 ## 0.4.1 — 2026-09-23
 
 Queued kit feedback from claude-playbooks, released on gentar's schedule.
