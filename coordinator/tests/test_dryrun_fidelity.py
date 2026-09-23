@@ -38,8 +38,8 @@ def prepare(env):
 """
 
 
-@unittest.skipUnless(KIT.exists(), "the kit is not in the image build context")
-class DryrunFidelityTest(unittest.TestCase):
+class _ScratchAdoption(unittest.TestCase):
+    """A scratch adoption with the kit's dryrun.py; no tests of its own."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -63,6 +63,10 @@ class DryrunFidelityTest(unittest.TestCase):
 
     def prepared_for(self):
         return len(self.log.read_text().splitlines())
+
+
+@unittest.skipUnless(KIT.exists(), "the kit is not in the image build context")
+class DryrunFidelityTest(_ScratchAdoption):
 
     def test_prepare_runs_only_for_suites_it_stands_in_for(self):
         (self.repo / "gentar" / "hooks.py").write_text(HOOKS)
@@ -91,6 +95,75 @@ class DryrunFidelityTest(unittest.TestCase):
         r = self.dryrun(GENTAR_DRYRUN_SYSTEM_DIRS=str(exposed), GENTAR_DRYRUN_STRICT="1")
         self.assertEqual(r.returncode, 2)
         self.assertIn("refusing", r.stderr)
+
+
+TEMPLATED = """[scenario]
+name = "{name}"
+subject = "fid"
+template = "{tpl}"
+[oracle]
+steps = ["{step}"]
+[[verify.commands]]
+command = "true"
+"""
+
+
+@unittest.skipUnless(KIT.exists(), "the kit is not in the image build context")
+class TemplateStagingTest(_ScratchAdoption):
+    """A suite whose bench template supplies a tool this host lacks is
+    UNVERIFIED — naming the template — unless the repo's stager installs
+    the REAL tool; a stager that raises is broken, not unverified."""
+
+    def templated(self, tpl="tool-bench-v1", step="mytool"):
+        (self.repo / "gentar" / "scenarios" / "needs-tool.toml").write_text(
+            TEMPLATED.format(name="needs-tool", tpl=tpl, step=step))
+
+    def hooks(self, body):
+        (self.repo / "gentar" / "hooks.py").write_text(body)
+
+    def test_declared_without_a_stager_is_unverified_and_named(self):
+        self.hooks('TEMPLATES = {"tool-bench-v1": None}\n')
+        self.templated()
+        r = self.dryrun()
+        self.assertEqual(r.returncode, 1, r.stdout)       # not proven
+        self.assertIn("UNVERIFIED (template tool-bench-v1", r.stdout)
+        r = self.dryrun(GENTAR_DRYRUN_UNVERIFIED="ok")    # what --check sets
+        self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_a_stager_that_cannot_is_unverified(self):
+        self.hooks('TEMPLATES = {"tool-bench-v1": lambda env: False}\n')
+        self.templated()
+        r = self.dryrun(GENTAR_DRYRUN_UNVERIFIED="ok")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("UNVERIFIED", r.stdout)
+
+    def test_a_stager_that_installs_the_tool_makes_the_suite_run(self):
+        self.hooks(
+            "import os\n"
+            "def stage(env):\n"
+            "    b = os.path.join(env['HOME'], '.local/bin/mytool')\n"
+            "    open(b, 'w').write('#!/bin/sh\\nexit 0\\n'); os.chmod(b, 0o755)\n"
+            "    return True\n"
+            'TEMPLATES = {"tool-bench-v1": stage}\n')
+        self.templated()
+        r = self.dryrun()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("ALL PASS", r.stdout)
+
+    def test_a_stager_that_raises_is_a_failure_even_under_check(self):
+        self.hooks("def stage(env):\n    raise RuntimeError('boom')\n"
+                   'TEMPLATES = {"tool-bench-v1": stage}\n')
+        self.templated()
+        r = self.dryrun(GENTAR_DRYRUN_UNVERIFIED="ok")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("FAILURE (stager for template tool-bench-v1 raised)", r.stdout)
+        self.assertIn("boom", r.stdout)
+
+    def test_an_undeclared_template_runs_as_before(self):
+        self.templated(tpl="plain-bench-v1", step="true")
+        r = self.dryrun()
+        self.assertEqual(r.returncode, 0, r.stdout)
+        self.assertIn("ALL PASS", r.stdout)
 
 
 if __name__ == "__main__":

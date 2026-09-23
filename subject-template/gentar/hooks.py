@@ -25,6 +25,20 @@ SKIP_STEP_SUBSTR = ()
 HIDE_FROM_PATH = ()
 
 
+# Bench templates that supply tools a dry-run host lacks (a CLI baked into
+# the template from a private repo, say). For a suite whose `template` is a
+# key here, the value decides:
+#   a function(env) -> True    it installed the REAL tool into
+#                              env["HOME"] + "/.local/bin"; the suite runs
+#   ... -> False, or None      it cannot here (no source on this host); the
+#                              suite reports UNVERIFIED, naming the template
+#   ... raises                 the stager is broken: a FAILURE
+# Never stage a stub: a suite that passes against a fake proves nothing.
+# Templates not listed run as before. Example:
+#   TEMPLATES = {"my-bench-v1": stage_my_cli}
+TEMPLATES = {}
+
+
 def prepare(env: dict) -> None:
     """Build/stage what a suite needs, in that suite's fresh home.
 
