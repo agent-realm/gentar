@@ -86,7 +86,7 @@ def _sql_str(v):
     return "'" + str(v).replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
-def fetch(url, user, pw, db, n_runs):
+def fetch(url, user, pw, db, n_runs, since=0):
     # A run is identified by (subject, run_id), never run_id alone --
     # the pair is carried as two fields, never joined into one string.
     runs = ch_query(url, user, pw, f"""
@@ -100,6 +100,7 @@ def fetch(url, user, pw, db, n_runs):
                countIf(status='skip') AS n_skip,
                countIf(status='error') AS n_error
         FROM {db}.latest_scenario_status
+        WHERE toUnixTimestamp(run_started) >= {int(since)}
         GROUP BY subject, run_id
         ORDER BY last_event DESC
         LIMIT {int(n_runs)}
@@ -138,6 +139,29 @@ def fetch(url, user, pw, db, n_runs):
         GROUP BY run_id
     """)
     return runs, grid, events, agent
+
+
+# Steps whose detail is an agent's screen, not a command's output. The run
+# report carries it for the fix loop; the dashboard — which a public repo
+# publishes as a CI artifact — shows only that it exists.
+PRIVATE_DETAIL_STEPS = {"driver.transcript"}
+
+
+def _hidden(detail):
+    return f"(agent transcript, {len(detail or '')} chars — in the run report, not here)"
+
+
+def public_events(events):
+    """Events fit to publish: transcript details replaced by their length."""
+    return [{**e, "detail": _hidden(e.get("detail"))}
+            if e.get("step") in PRIVATE_DETAIL_STEPS else e for e in events]
+
+
+def public_grid(grid):
+    """The per-scenario grid shows its latest step's detail; when that step
+    is a transcript, the same rule applies (agy review)."""
+    return [{**r, "last_detail": _hidden(r.get("last_detail"))}
+            if r.get("current_step") in PRIVATE_DETAIL_STEPS else r for r in grid]
 
 
 def badge(status: str) -> str:
@@ -320,13 +344,18 @@ def main(argv):
     ap.add_argument("--runs", type=int, default=10, help="how many recent runs to embed (default 10)")
     ap.add_argument("--out", default=os.environ.get("GENTAR_DASHBOARD_OUT", DEFAULT_OUT))
     ap.add_argument("--watch", action="store_true", help="regenerate every 5s (also stamps a <meta refresh>)")
+    # A published dashboard shows only its own invocation's runs: a kept
+    # arena's ClickHouse still holds earlier ones, whose credentials the
+    # publisher does not know to redact (agy review).
+    ap.add_argument("--since", type=int, default=0,
+                    help="only runs started at or after this Unix time")
     args = ap.parse_args(argv)
 
     url, user, pw, db = resolve_ch()
 
     def once():
-        runs, grid, events, agent = fetch(url, user, pw, db, args.runs)
-        html_body = render(runs, grid, events, agent, db, args.watch)
+        runs, grid, events, agent = fetch(url, user, pw, db, args.runs, args.since)
+        html_body = render(runs, public_grid(grid), public_events(events), agent, db, args.watch)
         write_html(args.out, html_body, args.watch)
         print(f"dashboard: {args.out}  ({len(runs)} runs, {len(grid)} scenario rows, {len(events)} events, {len(agent)} runs with agent spans)")
 

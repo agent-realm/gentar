@@ -14,7 +14,7 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.4.1` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.4.2` |
 
 ## Quickstart (local)
 
@@ -78,22 +78,32 @@ it does not stop one-off containers.)
 
 ### Watching a run
 
-The engine ships a dashboard: a status grid per suite and each step's
-timeline. (It has a panel for spans software inside a bench self-reports;
-no agent CLI writes those yet, so for an agent suite it stays empty.) It
-reads the arena's
-ClickHouse, so the stack has to be up while you look — keep it with
-`GENTAR_KEEP_ARENA=1` and, from a second shell:
+**Every run leaves a dashboard.** Before the arena is torn down, `run.sh`
+renders `gentar/reports/dashboard.html` from that run's own ClickHouse: a
+verdict per suite, and every step with its duration, status and output. It
+is one self-contained file — download the `arena-reports` artifact from the
+Actions run and open it, no server. A render that fails is said and
+skipped; it never changes the verdict or the reports.
+
+It is built to be safe as a PUBLIC repository's artifact (anyone logged in
+to GitHub can download those, and GitHub masks secrets in logs, not in
+artifacts): the values of the bench-host settings and of every credential
+your suites declare are replaced by `«redacted:NAME»` in the dashboard and
+the reports, and an agent's screen transcript appears on the dashboard only
+as its length (it stays in the run report, for the fix loop). A dashboard
+that cannot be redacted is not published.
+
+To watch a run live instead, keep the stack up with `GENTAR_KEEP_ARENA=1` and,
+from a second shell (use your own port if you moved it):
 
 ```bash
 GENTAR_CLICKHOUSE_HOST_PORT=8123 python3 gentar/.arena/dashboard/generate.py \
   --watch --out gentar/reports/dashboard.html          # regenerates every 5s
 ```
 
-Use your own port if you moved it. It writes an HTML file and prints its
-path; open that in a browser, which reloads itself. Until the first suite
-creates its tables it says it is waiting — not an error. The ClickHouse
-goes with the arena, so after `--down` there is nothing left to show.
+Until the first suite creates its tables it says it is waiting — not an
+error. The ClickHouse goes with the arena, so after `--down` only the
+rendered file is left.
 
 ## When this repo's code changes
 

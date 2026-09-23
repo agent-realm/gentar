@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""redact — replace secret VALUES in files a run publishes, in place.
+
+    GENTAR_REDACT_NAMES="GENTAR_BENCH_HOST ANTHROPIC_AUTH_TOKEN ..." bin/redact FILE...
+
+A public repository's CI artifacts can be downloaded by any logged-in
+GitHub user, and GitHub masks secrets in LOGS, not in artifacts. A report
+or dashboard can carry a value by accident — an ssh error naming the
+bench-host, a command echoing a variable — so before a run's files are
+published, the value of every named variable present in the environment is
+replaced by «redacted:NAME». Values shorter than 4 characters are left
+alone (they would match everywhere and hide nothing).
+
+Values come from the environment AND from what `docker compose config`
+resolved for the coordinator: a bench-host configured only in the arena's
+.env reaches the run through compose without ever being in this process's
+environment, and would otherwise go out unredacted (agy review). The engine
+checkout is this script's parent directory (GENTAR_ENGINE_DIR overrides).
+
+Longest values first, so a value containing another is replaced whole.
+Exit 0 done · 1 a file could not be rewritten · 2 usage. The caller decides
+what an unredactable file means (the kit does not publish its dashboard).
+"""
+import html
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def compose_env():
+    """The coordinator's environment as compose resolved it, or None when
+    compose could not say."""
+    engine = os.environ.get("GENTAR_ENGINE_DIR") or str(Path(__file__).resolve().parent.parent)
+    try:
+        out = subprocess.run(
+            ["docker", "compose", "--project-directory", engine,
+             "-f", os.path.join(engine, "docker-compose.yml"),
+             "config", "--format", "json"],
+            capture_output=True, text=True, timeout=60)
+        if out.returncode != 0:
+            return None
+        env = json.loads(out.stdout)["services"]["coordinator"].get("environment") or {}
+        return {k: v for k, v in env.items() if isinstance(v, str)}
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        return None
+
+
+def main(argv):
+    files = argv[1:]
+    if not files:
+        print("usage: GENTAR_REDACT_NAMES='A B' bin/redact FILE...", file=sys.stderr)
+        return 2
+    names = os.environ.get("GENTAR_REDACT_NAMES", "").split()
+    resolved = compose_env()
+    if resolved is None:
+        # Compose could not say, so a name missing from this environment
+        # may still hold a value the run used (set only in .env). Refuse
+        # rather than publish on a guess (agy review); the caller keeps the
+        # file unpublished.
+        unknown = [n for n in names if n not in os.environ]
+        if unknown:
+            print("redact: `docker compose config` did not answer, and "
+                  f"{len(unknown)} named variable(s) are not in the environment "
+                  "— cannot prove the file clean", file=sys.stderr)
+            return 1
+        resolved = {}
+    values = set()
+    for n in names:
+        for v in (os.environ.get(n, ""), resolved.get(n, "")):
+            if len(v) >= 4:
+                values.add((v, n))
+    # Every form a value can take in a published file, not only the raw
+    # one: the dashboard embeds data as JSON (a backslash, quote, control
+    # character or non-ASCII byte comes out escaped) and HTML may escape
+    # it again — a raw-only replace missed those (agy review).
+    forms = set()
+    for v, n in values:
+        for f in (v,
+                  json.dumps(v)[1:-1],
+                  json.dumps(v, ensure_ascii=False)[1:-1],
+                  html.escape(v),
+                  html.escape(v, quote=False),
+                  html.escape(json.dumps(v)[1:-1])):
+            if len(f) >= 4:
+                forms.add((f, n))
+    pairs = sorted(forms, key=lambda p: -len(p[0]))
+    rc = 0
+    for f in files:
+        try:
+            with open(f, encoding="utf-8", errors="surrogateescape") as fh:
+                text = fh.read()
+            for value, name in pairs:
+                text = text.replace(value, f"«redacted:{name}»")
+            with open(f, "w", encoding="utf-8", errors="surrogateescape") as fh:
+                fh.write(text)
+        except OSError as exc:
+            print(f"redact: {f}: {exc}", file=sys.stderr)
+            rc = 1
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
