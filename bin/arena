@@ -109,10 +109,36 @@ require_bench_key() {
   key=$(printf '%s' "$key" | sed 's/\\"/"/g; s/\\\\/\\/g')
   [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"
   case "$key" in "~/"*) key="$HOME/${key#\~/}" ;; esac
-  [ -r "$key" ] && return 0
+  # Readable AND non-blank. CI stages the key with printf '%s\n', so an
+  # UNSET secret becomes a one-byte file holding only the newline — which
+  # passes -r and -s alike and then fails every suite at ssh, reading as a
+  # red arena rather than a missing secret (claude-playbooks). grep -q
+  # inspects without printing: the key's contents never reach a log.
+  if [ -r "$key" ] && grep -q '[^[:space:]]' "$key" 2>/dev/null; then return 0; fi
+  if [ -r "$key" ]; then
+    echo "arena: bench ssh key at $key is EMPTY — the secret that should fill it is" \
+         "probably unset (BENCH_SSH_KEY in CI)" >&2
+    exit 2
+  fi
   echo "arena: bench ssh key not found at $key — set GENTAR_BENCH_KEY_FILE" \
        "(in .env or the shell) to the key the coordinator uses to reach the bench-host" >&2
   exit 2
+}
+
+# EXIT tears down on any normal end. INT and TERM need their OWN handlers
+# that tear down AND exit. A signal trap that merely returns lets bash
+# RESUME the script after the interrupted command: the next scenario starts
+# against an arena that was just torn down, and the run finishes with the
+# worst verdict it saw — 0 if nothing had failed yet. A CI cancel is a
+# SIGTERM to this shell, so a cancelled run read as a PASS. (Found by the
+# first real adopter, claude-playbooks, with a real SIGTERM; a test that
+# signals the whole process group hides it, because the child then dies
+# with 130 and carries the failure for us.) EXIT still fires after these
+# exits and sees _torn_down, so teardown happens exactly once.
+arm_traps() {
+  trap teardown EXIT
+  trap 'teardown; exit 130' INT
+  trap 'teardown; exit 143' TERM
 }
 
 _torn_down=0
@@ -190,7 +216,7 @@ start_arena() {
 cmd_run() {
   [ $# -ge 1 ] || { echo "usage: bin/arena run <scenario> [scenario...]" >&2; exit 64; }
   require_bench_key
-  trap teardown EXIT INT TERM
+  arm_traps
   compose build coordinator
   start_arena
   local status=0 rc
@@ -218,7 +244,7 @@ cmd_sql() {
 
 cmd_dashboard() {
   require_bench_key
-  trap teardown EXIT INT TERM
+  arm_traps
   start_arena
   compose run --rm --no-deps dashboard
 }
@@ -226,7 +252,7 @@ cmd_dashboard() {
 cmd_ls() {
   # No arena needed: `ls` reads the scenario files, nothing else.
   require_bench_key
-  trap teardown EXIT INT TERM
+  arm_traps
   compose run --rm --no-deps coordinator ls
 }
 
