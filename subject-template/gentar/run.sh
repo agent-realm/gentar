@@ -539,8 +539,19 @@ teardown_arena() {
     # Point at --down, not raw docker: it knows the two steps (`compose
     # down` alone refuses the network with "Resource is still in use",
     # because it does not stop one-off containers). (claude-playbooks.)
+    #
+    # The ClickHouse port is the one compose PUBLISHED, not the shell's:
+    # a port moved only in the arena's .env would otherwise print 8123,
+    # and on a host where another arena holds 8123 the dashboard renders
+    # that arena. Line-oriented read of `config --format json`, as for the
+    # bench key above (the "published" line follows "target": 8123).
+    local chport
+    chport=$({ arena config --format json 2>/dev/null || true; } \
+      | sed -E -n '/"target": *8123[,]?$/,/"published"/{ s/.*"published": *"?([0-9]+).*/\1/p; }' \
+      | head -1)
+    chport=${chport:-${GENTAR_CLICKHOUSE_HOST_PORT:-8123}}
     echo "arena kept up (GENTAR_KEEP_ARENA=1). Watch it, then tear it down:" >&2
-    echo "  GENTAR_CLICKHOUSE_HOST_PORT=${GENTAR_CLICKHOUSE_HOST_PORT:-8123} python3 $ARENA/dashboard/generate.py --watch --out $HERE/reports/dashboard.html" >&2
+    echo "  GENTAR_CLICKHOUSE_HOST_PORT=$chport python3 $ARENA/dashboard/generate.py --watch --out $HERE/reports/dashboard.html" >&2
     echo "  gentar/run.sh --down" >&2
     return "$rc"
   fi

@@ -79,7 +79,9 @@ scenario schema or the exit-code contract; an adopter re-copies the kit.
 ### Kit
 
 - `GENTAR_KEEP_ARENA=1` prints `gentar/run.sh --down` instead of two raw
-  docker commands, and the dashboard command to watch the run.
+  docker commands, and the dashboard command to watch the run — with the
+  ClickHouse port compose actually published, so a port moved only in the
+  arena's `.env` is not printed as 8123.
 - The kit README documents the dashboard (it was undiscoverable from an
   adopter's repo), and no longer says the subject name lives in `run.sh`.
 - The workflow's cost comment no longer calls its concurrency group
