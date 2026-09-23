@@ -214,7 +214,12 @@ if [ "$CHECK_ONLY" = 1 ]; then
   fi
   rc=0
   python3 "$HERE/plan.py" lint "${GENTAR_DIR:-$HERE/.arena}" || rc=1
-  (cd "$REPO" && GENTAR_DRYRUN_UNVERIFIED=ok python3 "$HERE/dryrun.py") || rc=1
+  # In CI the dry-run refuses a host whose system install dirs are
+  # writable (the kit's checks job makes the runner bench-like first);
+  # locally it warns.
+  strict=0; [ "${CI:-}" = true ] && strict=1
+  (cd "$REPO" && GENTAR_DRYRUN_UNVERIFIED=ok GENTAR_DRYRUN_STRICT=$strict \
+      python3 "$HERE/dryrun.py") || rc=1
   [ "$rc" = 0 ] && echo "check: clean" || echo "check: FAILED (see above)" >&2
   exit "$rc"
 fi

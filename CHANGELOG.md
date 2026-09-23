@@ -85,6 +85,15 @@ the kit, which is why this is a minor bump.
   arena another live run holds.
 - The workflow's bench-key guard treats a whitespace-only secret as blank,
   agreeing with `run.sh` (claude-playbooks).
+- **The dry-run describes a bench, not its host** (claude-playbooks, first
+  CI run of `--check`). `prepare()` runs only for suites with a step it
+  stands in for (a `SKIP_STEP_SUBSTR` match; a repo declaring none keeps
+  prepare-for-every-suite) — its build no longer shadows what an unrelated
+  suite installs. And a host whose system install dirs are writable (a
+  hosted runner's `/usr/local/bin`, an Intel Mac's) is warned about locally
+  and refused in CI: an install there writes outside the scratch home and
+  passes or fails for the host's reasons. The kit's `checks` job makes the
+  hosted runner bench-like (system bin dirs root-owned, 0755) first.
 - `dryrun.py` reports an UNVERIFIED-only suite without failing when run by
   `--check`: those turns need the arena, and a check that always fails is
   a check people learn to ignore.
