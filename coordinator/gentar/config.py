@@ -59,6 +59,9 @@ class Config:
             "GENTAR_BENCH_KNOWN_HOSTS", "/tmp/gentar-known-hosts"
         )
         self.sbx_bin = _opt("GENTAR_SBX_BIN", "sbx")
+        # "allow" skips the stored-sbx-secrets refusal (SbxBenchHost.
+        # preflight): for an arena that uses sbx secrets deliberately.
+        self.sbx_secrets = _opt("GENTAR_SBX_SECRETS")
         # Host-side dir that becomes each sandbox's workspace bind-mount.
         self.bench_workspace_root = _opt(
             "GENTAR_BENCH_WORKSPACE_ROOT", "/tmp/gentar-workspaces"

@@ -95,6 +95,12 @@ class BenchHost:
 
     # -- interface (subclass responsibility) -------------------------------
 
+    def preflight(self) -> list[str]:
+        """Reasons this host must not be given a bench right now, checked
+        before any is created (the caller refuses with exit 2). Empty =
+        go. A tier with nothing to check inherits this."""
+        return []
+
     def workspace(self, name: str) -> str:
         raise NotImplementedError
 
@@ -156,6 +162,44 @@ class SbxBenchHost(BenchHost):
 
     def workspace(self, name: str) -> str:
         return f"{self.cfg.bench_workspace_root}/{name}"
+
+    def preflight(self) -> list[str]:
+        """No stored sbx secrets on the bench-host, unless allowed.
+
+        Every sbx sandbox carries `proxy-managed` placeholders for the
+        common provider keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) and a
+        format-shaped GH_TOKEN; sbx's credential proxy swaps a real value
+        in for any service with a stored secret. So one `sbx secret set`
+        on a shared bench-host would hand that key to EVERY suite of every
+        arena there, whatever credential group the engine forwarded — the
+        guarantee that only the winning group reaches a bench would hold
+        by host state, not by construction (claude-playbooks, measured on
+        arena-142). sbx 0.39 cannot create a sandbox with the proxy's
+        injection off, so the engine refuses instead.
+
+        GENTAR_SBX_SECRETS=allow is for an arena that uses sbx secrets as
+        its credential mechanism on purpose. Only a count is reported,
+        never the listing."""
+        if self.cfg.sbx_secrets == "allow":
+            return []
+        proc = self._run([self.cfg.sbx_bin, "secret", "ls"], timeout=60,
+                         strict=False)
+        out = (proc.stdout + proc.stderr).strip()
+        if proc.returncode != 0:
+            return [f"could not check for stored sbx secrets on "
+                    f"{self.cfg.bench_host} (`sbx secret ls` exited "
+                    f"{proc.returncode}); set GENTAR_SBX_SECRETS=allow to "
+                    f"run without the check"]
+        if out.startswith("No secrets found"):
+            return []
+        n = len([l for l in out.splitlines() if l.strip()])
+        return [f"the bench-host {self.cfg.bench_host} has stored sbx "
+                f"secrets ({n} line(s) in `sbx secret ls`): sbx's credential "
+                f"proxy would resolve every sandbox's `proxy-managed` "
+                f"placeholders to them, whatever credentials this run "
+                f"forwards. Remove them (`sbx secret rm`), or set "
+                f"GENTAR_SBX_SECRETS=allow if this arena uses sbx secrets "
+                f"on purpose"]
 
     def create(self, name: str, agent: str = "shell",
                template: str | None = None) -> None:

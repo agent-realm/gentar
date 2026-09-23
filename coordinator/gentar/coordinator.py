@@ -238,6 +238,26 @@ def run(name: str, cfg: Config | None = None) -> int:
     # Bench tier: the scenario's `bench` key overrides the install default
     # (config bench_kind, "sbx"); builtins always use the default tier.
     bench = make_bench(cfg, kind=(scenario.bench if scenario else ""))
+    # -- host guard: refuse before any bench exists ----------------------
+    # What the config cannot know: the state of the bench-host itself
+    # (for sbx, stored secrets its credential proxy would hand to every
+    # sandbox). Same refusal contract as above: exit 2, no bench.
+    problems = bench.preflight()
+    if problems:
+        msg = ("bench-host: " + "; ".join(problems)
+               + " — refusing before any bench exists.")
+        print(f"Error: {msg}")
+        Spans(cfg).emit(ARENA_SUBJECT, "", name, "bench.preflight.refuse",
+                        "error", attrs={"bench_kind": bench_kind},
+                        detail="run refused: bench-host preflight")
+        report = RunReport(
+            scenario=name,
+            run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+            subject=subject, reproduce=f"docker compose run --rm coordinator run {name}",
+            error=msg)
+        report.mark("refuse", 2)
+        _write_report(report, cfg)
+        return 2
     spans = Spans(cfg)
     run_id = new_run_id(cfg.name_prefix)
     report = RunReport(

@@ -22,6 +22,42 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.4.1 — 2026-09-23
+
+Queued kit feedback from claude-playbooks, released on gentar's schedule.
+No schema or exit-code change; everything new is opt-in except the guard.
+
+### Added
+
+- **An sbx bench-host with stored secrets is refused** (exit 2, before any
+  bench exists). Every sbx sandbox carries `proxy-managed` placeholders for
+  the common provider keys and a token-shaped fake `GH_TOKEN`, and sbx's
+  credential proxy swaps in a real value for any service with a stored
+  secret — so one `sbx secret set` on a shared host would hand that key to
+  every suite there, whatever credential group the engine forwarded
+  (claude-playbooks, measured on arena-142: placeholders present, no secrets
+  stored). The guarantee now holds by construction, not by host state.
+  sbx 0.39 cannot turn the injection off per sandbox; an arena that uses sbx
+  secrets on purpose sets `GENTAR_SBX_SECRETS=allow`. Only a count is
+  reported, never the listing. New `BenchHost.preflight()` hook.
+- **`TEMPLATES` in `hooks.py`**: a suite whose bench template supplies a
+  tool the dry-run host lacks is `UNVERIFIED (template …)` unless the
+  repo's stager installs the real tool; a stager that raises is a failure.
+  Undeclared templates run as before.
+- **`[phase1] os`**: run the bench-free checks on `macos-latest` too (the
+  default stays `ubuntu-latest`). GitHub-hosted labels only — the checks
+  job runs PR code. On macOS it is the dry-run on macOS userland, which
+  finds real bugs (bash 3.2 silently sources nothing from `source <(…)`),
+  not a macOS bench.
+
+### Changed
+
+- The kit README says benches carry placeholder keys: pick a credential by
+  the declared group's variables, never by presence (a presence test sent
+  the placeholder to the real API and got a 401).
+- The checks job's bench-like step is OS-aware (`root:wheel` on macOS) and
+  only touches `/usr/local/{bin,sbin}`.
+
 ## 0.4.0 — 2026-09-23
 
 **The run policy.** Which suites run when is decided once, at adaptation,

@@ -118,6 +118,9 @@ services:
       # GENTAR_NAME_PREFIX as its default ("gentar"), so forwarding it
       # empty is safe. CI sets it per job; bin/bench-reap removes by it.
       GENTAR_NAME_PREFIX: ${GENTAR_NAME_PREFIX:-}
+      # "allow" = this arena uses sbx stored secrets on purpose; otherwise
+      # an sbx bench-host holding any is refused (credential proxy).
+      GENTAR_SBX_SECRETS: ${GENTAR_SBX_SECRETS:-}
     volumes:
       # Subject checkouts, mounted read-only — never baked into images.
       - ${GENTAR_SUBJECTS_DIR:-./subjects}:/subjects:ro

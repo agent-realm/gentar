@@ -25,7 +25,7 @@ workflow:
 | 2 | **Suites** | `gentar/scenarios/*.toml` — install *decisions* + reality assertions, never scripts | `first-suite.toml`, fully commented |
 | 3 | **Credentials** | `credentials = [names]` per suite — env var NAMES; entries are alternatives, a list entry is an all-of group; none = oracle suite | none (first-suite is credential-less) |
 | 4 | **Trigger** | `.github/workflows/gentar-arena.yml` (own arena, kept byte-identical to the kit) and/or a dispatch job (central arena) | own-arena workflow: PRs, push to main, tags, dispatch — what each runs is the run policy's |
-| 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.4.0` — a release tag, bumped deliberately |
+| 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.4.1` — a release tag, bumped deliberately |
 | 6 | **Run policy** | `gentar/policy.toml` — phase 1 on PRs and main pushes, phase 2 (full regression) on dispatch / `arena` / `v*-rc*`, releases gated by `gentar/release-gate.sh` | PRs bench-free (`bench = "off"`), empty floor, gate on |
 | 7 | **Dry-run hooks** | `gentar/hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | no-ops |
 
@@ -116,7 +116,7 @@ Clones the engine into `gentar/.arena`, checks out the pinned
 `GENTAR_REF`, and seeds the arena's `.env` from its `.env.example`. No
 Docker, no bench — this is a git operation.
 
-Observe: `engine staged: …/gentar/.arena @ v0.4.0 (<sha>)` and a path to
+Observe: `engine staged: …/gentar/.arena @ v0.4.1 (<sha>)` and a path to
 the arena env file.
 
 **The seeded `.env` holds placeholders, not a working config — edit it

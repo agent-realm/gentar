@@ -13,6 +13,7 @@ The kit lives outside the coordinator image's build context, so inside
 
 import importlib.util
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -189,6 +190,20 @@ class PlanTest(unittest.TestCase):
             with self.subTest(text=text[-40:]), self.assertRaises(self.p.Refuse):
                 self.policy(text)
 
+    def test_check_os_defaults_to_ubuntu_and_takes_macos(self):
+        self.assertEqual(self.pr()["os"], ["ubuntu-latest"])
+        pol = self.policy(POLICY.replace('setup = { go = "1.21" }',
+                                         'setup = { go = "1.21" }\nos = ["ubuntu-latest", "macos-latest"]'))
+        self.assertEqual(self.pr(policy=pol)["os"], ["ubuntu-latest", "macos-latest"])
+
+    def test_check_os_must_be_github_hosted(self):
+        # the checks job runs PR code: a self-hosted label here would put it
+        # on the runner the bench job guards
+        for bad in ('["self-hosted"]', '["arena"]', '["windows-latest"]', "[]"):
+            with self.subTest(os=bad), self.assertRaises(self.p.Refuse):
+                self.policy(POLICY.replace('setup = { go = "1.21" }',
+                                           f'setup = {{ go = "1.21" }}\nos = {bad}'))
+
     def test_setup_reaches_the_plan(self):
         r = self.pr()
         self.assertEqual(r["setup"], {"go": "1.21"})
@@ -207,6 +222,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(lines["checks"], "true")
         self.assertEqual(lines["setup_go"], "1.21")
         self.assertEqual(lines["setup_node"], "")
+        self.assertEqual(json.loads(lines["os"]), ["ubuntu-latest"])
 
     # --- lint -------------------------------------------------------------
 
@@ -290,9 +306,12 @@ class WorkflowInvariantTest(unittest.TestCase):
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", bench)
 
     def test_plan_and_checks_are_github_hosted(self):
+        # plan is fixed; checks runs on the policy's [phase1] os, which
+        # plan.py restricts to GitHub-hosted labels (PlanTest covers it)
         jobs = self.jobs()
-        for j in ("plan", "checks"):
-            self.assertIn("runs-on: ubuntu-latest", jobs[j])
+        self.assertIn("runs-on: ubuntu-latest", jobs["plan"])
+        self.assertIn("runs-on: ${{ matrix.os }}", jobs["checks"])
+        self.assertIn("os: ${{ fromJSON(needs.plan.outputs.os) }}", jobs["checks"])
 
     def test_pushes_to_any_branch_reach_the_planner(self):
         # the default branch is the repo's (main, master, trunk); only the

@@ -14,7 +14,7 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.4.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.4.1` |
 
 ## Quickstart (local)
 
@@ -141,7 +141,7 @@ workflow's first job asks it what this event should run.
 
 | Event | Runs |
 |---|---|
-| pull request | **phase 1**: bench-free checks on a GitHub-hosted runner (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
+| pull request | **phase 1**: bench-free checks on GitHub-hosted runners — `ubuntu-latest`, plus `macos-latest` if `[phase1] os` lists it (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
 | push to the default branch | **phase 1**: the checks, plus `[phase1] floor` on the bench |
 | dispatch (no suites), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
 | `arena-<suite>` tag, or a dispatch naming suites | exactly those suites (`arena / targeted`; never counts as phase 2) |
@@ -168,6 +168,14 @@ refused with exit 2 before a bench is spent, since a PR body is text a
 stranger can write. Set the **floor** to the cheap deterministic suites:
 they run whatever a PR declares, so a narrow pick never costs the guard
 rails.
+
+**Suites that need their bench template's tools.** A dry-run runs on the
+host, so a suite whose `template` bakes in a tool the host lacks (a CLI from
+a private repo, say) cannot pass it. Declare the template in `hooks.py`'s
+`TEMPLATES` with a stager that installs the REAL tool when it can: staged,
+the suite runs; not staged, it reports `UNVERIFIED (template …)` — named,
+never green by stub, never red by harness; a stager that raises is a
+failure. Undeclared templates run as before.
 
 **Gating a release.** Make the first job of your release workflow
 
@@ -309,6 +317,17 @@ a pair must be a nested list — `[["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"
 Written flat, the two are either-or: the token wins alone and the URL is
 dropped. The engine warns when a declared credential is set but not forwarded,
 in the log and in the report.
+
+**Benches carry placeholder keys.** An sbx sandbox holds `proxy-managed` in
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GOOGLE_API_KEY`
+and a few more, and a token-shaped fake `GH_TOKEN` — its credential proxy's
+stand-ins, whatever your suite declared. So a suite must pick a credential by
+the variables of the group it declared, never by presence: `[ -n
+"$ANTHROPIC_API_KEY" ]` is true on every bench and sends the placeholder to
+the real API, which answers 401 (claude-playbooks). The engine refuses an sbx
+bench-host that has stored secrets (`sbx secret ls`), since the proxy would
+then resolve those placeholders to a real key for every suite; set
+`GENTAR_SBX_SECRETS=allow` only if an arena uses sbx secrets on purpose.
 
 The workflow stages the checkout exactly like `run.sh` does, so local
 and CI run the same way.
