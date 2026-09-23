@@ -76,8 +76,10 @@ it does not stop one-off containers.)
 
 ### Watching a run
 
-The engine ships a dashboard: a status grid per suite, each step's
-timeline, and the agent's own telemetry joined to it. It reads the arena's
+The engine ships a dashboard: a status grid per suite and each step's
+timeline. (It has a panel for spans software inside a bench self-reports;
+no agent CLI writes those yet, so for an agent suite it stays empty.) It
+reads the arena's
 ClickHouse, so the stack has to be up while you look — keep it with
 `GENTAR_KEEP_ARENA=1` and, from a second shell:
 
