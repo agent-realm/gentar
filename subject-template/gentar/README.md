@@ -82,8 +82,8 @@ ClickHouse, so the stack has to be up while you look — keep it with
 `GENTAR_KEEP_ARENA=1` and, from a second shell:
 
 ```bash
-GENTAR_CLICKHOUSE_HOST_PORT=8123 \
-  python3 gentar/.arena/dashboard/generate.py --watch   # regenerates every 5s
+GENTAR_CLICKHOUSE_HOST_PORT=8123 python3 gentar/.arena/dashboard/generate.py \
+  --watch --out gentar/reports/dashboard.html          # regenerates every 5s
 ```
 
 Use your own port if you moved it. It writes an HTML file and prints its

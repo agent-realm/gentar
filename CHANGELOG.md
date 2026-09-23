@@ -66,6 +66,12 @@ scenario schema or the exit-code contract; an adopter re-copies the kit.
   the port: it defaulted to 8123 and ignored `GENTAR_CLICKHOUSE_HOST_PORT`
   — on a host where another arena holds 8123, it rendered *that* arena.
   It now follows the host port unless `GENTAR_CLICKHOUSE_URL` is given.
+- **The dashboard could not run on a host.** Its default output was
+  `/out/dashboard.html`, the compose container's mount; run on a host
+  there is no `/out`, and a non-root user cannot create one. Outside the
+  container it now writes `dashboard/out/dashboard.html` — the same
+  place the container's mount lands — and the kit's printed command
+  passes `--out gentar/reports/dashboard.html`.
 - **The dashboard logged an HTTP 404 on start.** That is ClickHouse's
   unknown-table answer while the arena is still creating its schema; it
   now says it is waiting.

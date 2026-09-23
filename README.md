@@ -136,8 +136,8 @@ two independent structural guarantees instead:
 
 Keep a stack up to poke at ClickHouse with `GENTAR_KEEP_ARENA=1`, then
 `bin/arena down`. While it is up, `python3 dashboard/generate.py --watch`
-renders a self-refreshing dashboard from it (it follows
-`GENTAR_CLICKHOUSE_HOST_PORT` if you moved the port). Arena ClickHouse data does not survive a teardown; it
+renders a self-refreshing dashboard from it to `dashboard/out/dashboard.html`
+(it follows `GENTAR_CLICKHOUSE_HOST_PORT` if you moved the port). Arena ClickHouse data does not survive a teardown; it
 never did — every teardown path runs `down -v`.
 
 ### Bench tiers

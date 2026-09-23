@@ -18,7 +18,13 @@ import time
 import urllib.error
 import urllib.request
 
-DEFAULT_OUT = "/out/dashboard.html"
+# /out is the compose service's mount. Run on a host (a kept arena, the
+# kit's printed command) there is no /out and a non-root user cannot make
+# one, so fall back to dashboard/out/ beside this script (gitignored).
+DEFAULT_OUT = ("/out/dashboard.html"
+               if os.path.isdir("/out") and os.access("/out", os.W_OK)
+               else os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "out", "dashboard.html"))
 
 # Status palette (dataviz skill, references/palette.md -- fixed, never
 # themed). pass=good, fail/error=critical-ish, running=warning, skip=neutral.
