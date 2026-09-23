@@ -188,14 +188,19 @@ arena_lock() {            # wait|try -> 0 held · 1 held by another · 2 refused
       _lock_mode=mkdir; _lock_note "$d/holder"; return 0
     fi
     pid=$(awk '{print $2; exit}' "$d/holder" 2>/dev/null || true)
+    case "$pid" in *[!0-9]*) pid="" ;; esac
     # Stale: a holder pid that no longer exists. kill -0 also fails for a
     # live process of ANOTHER user, so ask ps before deciding it is gone.
-    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && ! ps -p "$pid" >/dev/null 2>&1; then
+    # Or no readable holder at all in a lock dir more than a minute old: a
+    # run killed between mkdir and writing its note (a live one writes it
+    # in milliseconds) — without this, every later run waited forever.
+    if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && ! ps -p "$pid" >/dev/null 2>&1; } \
+       || { [ -z "$pid" ] && [ -n "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
       rm -rf "$d" 2>/dev/null && continue
       # Not ours to remove (a lock from before 0.4.0's shared directory, or
       # permissions changed by hand). Say exactly what to do rather than
       # hang or die on `set -e`.
-      echo "stale arena lock $d (holder pid $pid is gone) cannot be removed by $(id -un 2>/dev/null || echo this user); remove it: rm -rf '$d'" >&2
+      echo "stale arena lock $d (holder ${pid:+pid $pid }is gone) cannot be removed by $(id -un 2>/dev/null || echo this user); remove it: rm -rf '$d'" >&2
       return 2
     fi
     [ "$1" = try ] && return 1

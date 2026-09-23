@@ -49,7 +49,8 @@ the kit, which is why this is a minor bump.
   behaves as 0.3.x did. `gentar/run.sh --plan` shows it for any event.
 - `gentar/run.sh --check` — stage the engine, lint the adaptation (a flat
   credential list holding an endpoint; a kit file that differs from the
-  pinned engine's copy), dry-run every suite. A fork's PR, which gets no
+  pinned engine's copy — the workflow and release gate may be absent, for a
+  central-dispatch subject or one that never releases), dry-run every suite. A fork's PR, which gets no
   secrets and so cannot stage a private engine, is a named skip.
 - `gentar/release-gate.sh` — names what it found when it refuses: a failed
   phase 2, a cancelled one, or a run GitHub cancelled before any job
@@ -83,7 +84,9 @@ the kit, which is why this is a minor bump.
   command to remove it, never hung on. Shared means advisory between local
   users, not a way to redirect this one's writes: a symlinked lock root or
   lock file is refused, the lock file is created with O_EXCL, and holder
-  notes are written to a temp file and renamed into place (claude-playbooks). The
+  notes are written to a temp file and renamed into place (claude-playbooks).
+  A mkdir lock with no readable holder note that is over a minute old — a
+  run killed between creating it and writing the note — counts as stale. The
   workflow's group is per-ref, for dedup only. `--down` never tears down an
   arena another live run holds.
 - The workflow's bench-key guard treats a whitespace-only secret as blank,

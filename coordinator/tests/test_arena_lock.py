@@ -156,6 +156,24 @@ class ArenaLockTest(unittest.TestCase):
         self.assertIn("not torn down", r.stdout)
         self.assertFalse(self.stopped())
 
+    @unittest.skipIf(shutil.which("flock", path="/usr/bin:/bin:/usr/sbin:/sbin"),
+                     "the mkdir lock is the macOS fallback")
+    def test_a_lock_dir_without_a_holder_note(self):
+        # a run killed between mkdir and writing its note left no pid, and
+        # every later run waited forever. Fresh: someone is mid-write — leave
+        # it. Over a minute old: stale.
+        d = self.root / "gentar-arena-lockrepo.lock.d"
+        d.mkdir()
+        r = self.down()
+        self.assertIn("in use by another run", r.stdout)
+        self.assertFalse(self.stopped())
+        old = __import__("time").time() - 120
+        os.utime(d, (old, old))
+        r = self.down()
+        self.assertIn("torn down", r.stdout)
+        self.assertTrue(self.stopped())
+        self.assertFalse(d.exists())
+
     def test_a_symlinked_lock_root_is_refused(self):
         # a local user pre-creating the shared root as a link would redirect
         # where this user writes (claude-playbooks)

@@ -240,6 +240,27 @@ class PlanTest(unittest.TestCase):
         (repo / "gentar" / "run.sh").write_text("kit\n")
         self.assertEqual(self.p.lint(self.policy(), engine), [])
 
+    def test_lint_allows_the_optional_kit_files_to_be_absent(self):
+        # a central-dispatch subject has no own-arena workflow; a repo that
+        # never releases has no release gate. Required ones still fail.
+        repo = self.tmp / "repo2"
+        (repo / "gentar").mkdir(parents=True)
+        engine = self.tmp / "engine2"
+        for f in ("gentar/run.sh", "gentar/release-gate.sh"):
+            (engine / "subject-template" / f).parent.mkdir(parents=True, exist_ok=True)
+            (engine / "subject-template" / f).write_text("kit\n")
+        (engine / "subject-template/.github/workflows").mkdir(parents=True)
+        (engine / "subject-template/.github/workflows/gentar-arena.yml").write_text("kit\n")
+        (repo / "gentar" / "run.sh").write_text("kit\n")
+        self.p.HERE = repo / "gentar"
+        with redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(self.p.lint(self.policy(), engine), [])
+        self.assertIn("not present", out.getvalue())
+        (repo / "gentar" / "run.sh").unlink()
+        with redirect_stdout(io.StringIO()):
+            problems = self.p.lint(self.policy(), engine)
+        self.assertTrue(any("gentar/run.sh: missing" in p for p in problems), problems)
+
 
 @unittest.skipUnless(WORKFLOW.exists(), "the kit is not in the image build context")
 class WorkflowInvariantTest(unittest.TestCase):
