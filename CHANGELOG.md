@@ -80,7 +80,10 @@ the kit, which is why this is a minor bump.
   detection on macOS — and a later run waits, saying for whom. Locks live
   in a shared, non-sticky `gentar-locks/` directory, so any runner user
   can clear a dead run's lock; one it cannot remove is named with the
-  command to remove it, never hung on. The
+  command to remove it, never hung on. Shared means advisory between local
+  users, not a way to redirect this one's writes: a symlinked lock root or
+  lock file is refused, the lock file is created with O_EXCL, and holder
+  notes are written to a temp file and renamed into place (claude-playbooks). The
   workflow's group is per-ref, for dedup only. `--down` never tears down an
   arena another live run holds.
 - The workflow's bench-key guard treats a whitespace-only secret as blank,

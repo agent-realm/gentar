@@ -156,6 +156,26 @@ class ArenaLockTest(unittest.TestCase):
         self.assertIn("not torn down", r.stdout)
         self.assertFalse(self.stopped())
 
+    def test_a_symlinked_lock_root_is_refused(self):
+        # a local user pre-creating the shared root as a link would redirect
+        # where this user writes (claude-playbooks)
+        os.rmdir(self.root)
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        os.symlink(elsewhere, self.root)
+        r = self.down()
+        self.assertIn("arena lock refused", r.stderr)
+        self.assertIn("not torn down", r.stdout)
+        self.assertFalse(self.stopped())
+        self.assertEqual(list(elsewhere.iterdir()), [], "wrote through the link")
+
+    def test_a_planted_holder_link_is_replaced_not_followed(self):
+        victim = self.tmp / "victim"
+        victim.write_text("precious\n")
+        os.symlink(victim, self.root / "gentar-arena-lockrepo.lock.holder")
+        self.down()
+        self.assertEqual(victim.read_text(), "precious\n", "clobbered through a planted link")
+
 
 if __name__ == "__main__":
     unittest.main()
