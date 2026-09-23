@@ -22,6 +22,53 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.3.1 — 2026-09-23
+
+Fixes only, from the first adopter's re-adaptation to 0.3.0
+(claude-playbooks) and one gap of the engine's own. No change to the
+scenario schema or the exit-code contract; an adopter re-copies the kit.
+
+### Fixed
+
+- **A cancelled CI job left its bench sandbox on the shared bench-host.**
+  The coordinator removes its sandbox when a scenario ends; a job
+  cancelled mid-bench never gets there, and teardown only *reported*
+  strays. CI now gives every job its own `GENTAR_NAME_PREFIX`
+  (`gentar-gh<run_id>-a<attempt>-<job><index>`) and teardown runs the new
+  `bin/bench-reap`, which removes exactly the sandboxes (and workspaces)
+  whose whole name is that prefix plus the coordinator's run-id shape.
+  `gentar-gh123-…` never matches `gentar-gh1234-…`; attempt 2 never reaps
+  attempt 1; the unscoped default prefix is refused. In the kit,
+  `gentar/run.sh --down` reaps when the prefix is set and does not touch
+  the bench-host when it is not (every local run). Proven by SIGKILLing a
+  live coordinator mid-bench and reaping the stranded sandbox, with a
+  same-shaped decoy left untouched.
+- **`GENTAR_NAME_PREFIX` never reached the coordinator.** The compose file
+  did not forward it, so the knob in `.env.example` did nothing. It is
+  forwarded now, and an empty value reads as the default.
+- **The dashboard read the wrong ClickHouse** when an adopter had moved
+  the port: it defaulted to 8123 and ignored `GENTAR_CLICKHOUSE_HOST_PORT`
+  — on a host where another arena holds 8123, it rendered *that* arena.
+  It now follows the host port unless `GENTAR_CLICKHOUSE_URL` is given.
+- **The dashboard logged an HTTP 404 on start.** That is ClickHouse's
+  unknown-table answer while the arena is still creating its schema; it
+  now says it is waiting.
+
+### Kit
+
+- `GENTAR_KEEP_ARENA=1` prints `gentar/run.sh --down` instead of two raw
+  docker commands, and the dashboard command to watch the run.
+- The kit README documents the dashboard (it was undiscoverable from an
+  adopter's repo), and no longer says the subject name lives in `run.sh`.
+- The workflow's cost comment no longer calls its concurrency group
+  per-ref; it is one per repository.
+- `HIDE_FROM_PATH` covers the second reason to hide a name: a host tool
+  the subject CALLS that a bench does not have.
+- Documented: a tag push runs the tagged commit's workflow even before it
+  is on the default branch, which is how an adoption PR gets a CI arena
+  before merge.
+- `GENTAR_REF` pins `v0.3.1`.
+
 ## 0.3.0 — 2026-09-23
 
 The first real adoption. claude-playbooks adapted gentar v0.2.0 into a

@@ -8,11 +8,11 @@ can hand to an agent to fix what failed.
 
 | Declaration | Where | This repo's value |
 |---|---|---|
-| subject name | `subject = "…"` in every scenario TOML + `SUBJECT` in `run.sh` | `<REPO>` |
+| subject name | `subject = "…"` in every scenario TOML — `run.sh` reads it from there and refuses scenarios that disagree | `<REPO>` |
 | suites | `scenarios/*.toml` — decisions + reality assertions | see below |
 | credentials | `credentials = [names]` per suite — entries are ALTERNATIVES, a list entry is an all-of group (`["KEY", ["TOKEN","BASE_URL"]]` = the key alone, or the token and its endpoint together). None present refuses (exit 2) before a bench exists | per suite |
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | see workflow |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.3.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.3.1` |
 
 ## Quickstart (local)
 
@@ -70,9 +70,26 @@ docker ps -a --filter label=com.docker.compose.project=arena-<REPO>
 ```
 
 To keep a stack up and inspect ClickHouse, set `GENTAR_KEEP_ARENA=1`; you
-then own the teardown, which the runner prints as two commands. Both are
-needed: `compose down` alone refuses the network with "Resource is still
-in use", because it does not stop one-off containers.
+then own the teardown: `gentar/run.sh --down`. (Not a bare `docker compose
+down`, which refuses the network with "Resource is still in use", because
+it does not stop one-off containers.)
+
+### Watching a run
+
+The engine ships a dashboard: a status grid per suite, each step's
+timeline, and the agent's own telemetry joined to it. It reads the arena's
+ClickHouse, so the stack has to be up while you look — keep it with
+`GENTAR_KEEP_ARENA=1` and, from a second shell:
+
+```bash
+GENTAR_CLICKHOUSE_HOST_PORT=8123 \
+  python3 gentar/.arena/dashboard/generate.py --watch   # regenerates every 5s
+```
+
+Use your own port if you moved it. It writes an HTML file and prints its
+path; open that in a browser, which reloads itself. Until the first suite
+creates its tables it says it is waiting — not an error. The ClickHouse
+goes with the arena, so after `--down` there is nothing left to show.
 
 ## When this repo's code changes
 

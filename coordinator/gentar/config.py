@@ -105,7 +105,11 @@ class Config:
         self.clickhouse_db = _opt("GENTAR_CLICKHOUSE_DB", "gentar")
 
         # Sandbox name prefix; run id is appended by the coordinator.
-        self.name_prefix = _opt("GENTAR_NAME_PREFIX", "gentar")
+        # Empty reads as the default: compose forwards it as
+        # ${GENTAR_NAME_PREFIX:-}, which is an empty string when unset.
+        # CI sets a per-job prefix so bin/bench-reap can remove exactly
+        # the sandboxes a cancelled job stranded.
+        self.name_prefix = _opt("GENTAR_NAME_PREFIX") or "gentar"
 
         # Subjects root: mounted read-only into the coordinator container
         # (compose volume). A scenario's `subject` names a dir under it.

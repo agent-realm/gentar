@@ -175,6 +175,21 @@ class RefusalTest(unittest.TestCase):
         self.assertIn("bench created despite refusal", str(caught.exception))
 
 
+
+class NamePrefixTest(unittest.TestCase):
+    """docker-compose.yml forwards GENTAR_NAME_PREFIX as ${VAR:-}, which is
+    an EMPTY STRING when the caller set nothing. Empty must read as the
+    default, or every local run would name its sandboxes `-<stamp>`."""
+
+    def test_unset_and_empty_both_read_as_the_default(self):
+        self.assertEqual(cfg_with().name_prefix, "gentar")
+        self.assertEqual(cfg_with(GENTAR_NAME_PREFIX="").name_prefix, "gentar")
+
+    def test_a_ci_prefix_is_used_verbatim(self):
+        cfg = cfg_with(GENTAR_NAME_PREFIX="gentar-gh123-a1-gate0")
+        self.assertEqual(cfg.name_prefix, "gentar-gh123-a1-gate0")
+
+
 if __name__ == "__main__":
     unittest.main()
 
