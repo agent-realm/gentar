@@ -320,6 +320,13 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
         print(line)
     if fails:
         print(f"  (home kept for inspection: {home})")
+    # `run.sh --check` (phase 1, bench-free) sets this: a suite that is
+    # only UNVERIFIED has no defect the dry-run can see, and failing every
+    # PR on turns only the arena can replay would train people to ignore
+    # the check. The verdict line above still says UNVERIFIED.
+    if (os.environ.get("GENTAR_DRYRUN_UNVERIFIED") == "ok"
+            and unreplayed and fails == len(unreplayed)):
+        return 0
     return fails
 
 
