@@ -36,6 +36,22 @@ NOT_MINE = [
     "gentar-20260923-101010-abcdef",                    # a default-prefix run
 ]
 
+# `docker compose config --format json`: answers from $COMPOSE_JSON when a
+# test sets it, otherwise fails like a host without compose.
+FAKE_DOCKER = """#!/usr/bin/env bash
+[ -n "$COMPOSE_JSON" ] || exit 1
+cat "$COMPOSE_JSON"
+"""
+
+
+def compose_config(env, key_file=None):
+    """The pretty-printed shape `docker compose config --format json` emits."""
+    doc = {"services": {"coordinator": {"environment": env}}}
+    if key_file:
+        doc["secrets"] = {"bench_ssh_key": {"name": "x", "file": key_file}}
+    return json.dumps(doc, indent=2)
+
+
 FAKE_SSH = """#!/usr/bin/env bash
 # last argument is the remote command
 cmd="${@: -1}"
@@ -55,10 +71,13 @@ class BenchReapTest(unittest.TestCase):
         ssh = self.tmp / "ssh"
         ssh.write_text(FAKE_SSH)
         ssh.chmod(ssh.stat().st_mode | stat.S_IEXEC)
+        docker = self.tmp / "docker"
+        docker.write_text(FAKE_DOCKER)
+        docker.chmod(docker.stat().st_mode | stat.S_IEXEC)
+        self.compose = self.tmp / "compose.json"   # absent unless a test writes it
         self.listing = self.tmp / "ls.json"
         self.workspaces = self.tmp / "ws.txt"
         self.workspaces.write_text("")
-        self.env_file = self.tmp / "arena.env"      # absent unless a test writes it
         self.log = self.tmp / "remote.log"
         self.log.touch()
         self.sandboxes([MINE] + NOT_MINE)
@@ -71,7 +90,7 @@ class BenchReapTest(unittest.TestCase):
         base = {"PATH": f"{self.tmp}:{os.environ['PATH']}",
                 "LISTING": str(self.listing), "LOG": str(self.log),
                 "WORKSPACES": str(self.workspaces),
-                "GENTAR_ENV_FILE": str(self.env_file),
+                "COMPOSE_JSON": "",
                 "GENTAR_BENCH_HOST": "bench.test", "GENTAR_BENCH_USER": "u",
                 "GENTAR_NAME_PREFIX": PREFIX}
         base.update(env)
@@ -132,24 +151,47 @@ class BenchReapTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.removed(), [f"rm -rf /tmp/gentar-workspaces/{orphan}"])
 
-    def test_bench_settings_come_from_the_arena_env_when_the_shell_has_none(self):
-        # compose hands the coordinator the arena's .env; an install
-        # configured only there must be reaped where it actually runs
-        self.env_file.write_text(
-            "GENTAR_BENCH_HOST=bench.test\n"
-            "GENTAR_BENCH_USER='u'\n"
-            'GENTAR_BENCH_WORKSPACE_ROOT="/srv/ws"\n')
-        r = self.reap(GENTAR_BENCH_HOST="", GENTAR_BENCH_USER="")
+    def test_bench_settings_are_what_compose_resolved_for_the_coordinator(self):
+        # compose applies the arena's .env, interpolation, comments and
+        # relative paths; the reaper must reach the host the run reached
+        self.compose.write_text(compose_config({
+            "GENTAR_BENCH_HOST": "bench.test", "GENTAR_BENCH_USER": "u",
+            "GENTAR_BENCH_WORKSPACE_ROOT": "/srv/ws"}))
+        r = self.reap(COMPOSE_JSON=str(self.compose),
+                      GENTAR_BENCH_HOST="", GENTAR_BENCH_USER="")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.removed(), [
             f"sbx rm {MINE} --force && rm -rf /srv/ws/{MINE}"])
 
-    def test_the_shell_wins_over_the_arena_env(self):
-        self.env_file.write_text("GENTAR_BENCH_WORKSPACE_ROOT=/srv/ws\n")
+    def test_compose_wins_over_the_shell(self):
+        # an env_file-only value reaches the coordinator whatever the shell
+        # holds, so that is the value the sandbox was created with
+        self.compose.write_text(compose_config({
+            "GENTAR_BENCH_WORKSPACE_ROOT": "/srv/ws"}))
+        r = self.reap(COMPOSE_JSON=str(self.compose),
+                      GENTAR_BENCH_WORKSPACE_ROOT="/tmp/other")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.removed(), [
+            f"sbx rm {MINE} --force && rm -rf /srv/ws/{MINE}"])
+
+    def test_without_compose_the_shell_is_used(self):
         r = self.reap(GENTAR_BENCH_WORKSPACE_ROOT="/tmp/other")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.removed(), [
             f"sbx rm {MINE} --force && rm -rf /tmp/other/{MINE}"])
+
+    def test_the_key_is_the_secret_path_compose_resolved(self):
+        self.compose.write_text(compose_config(
+            {"GENTAR_BENCH_HOST": "bench.test", "GENTAR_BENCH_USER": "u"},
+            key_file="/abs/keys/bench_key"))
+        spy = self.tmp / "ssh"
+        spy.write_text(FAKE_SSH.replace('cmd="${@: -1}"',
+                                        'cmd="${@: -1}"; printf "%s\\n" "$*" >> "$LOG.argv"'))
+        r = self.reap(COMPOSE_JSON=str(self.compose), GENTAR_BENCH_KEY_FILE="/wrong")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        argv = (self.tmp / "remote.log.argv").read_text()
+        self.assertIn("-i /abs/keys/bench_key", argv)
+        self.assertNotIn("/wrong", argv)
 
     def test_an_unreachable_bench_host_is_a_failure_not_a_clean_bill(self):
         r = self.reap(FAIL_LS="1")

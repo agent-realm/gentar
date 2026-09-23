@@ -26,9 +26,12 @@
 #
 # Reads the same variables the coordinator does: GENTAR_BENCH_HOST,
 # GENTAR_BENCH_USER, GENTAR_BENCH_KEY_FILE, GENTAR_BENCH_JUMP (optional),
-# GENTAR_SBX_BIN, GENTAR_BENCH_WORKSPACE_ROOT — from the shell first, then
-# from the arena's .env (the file compose hands the coordinator), so an
-# install configured only in .env is reaped where it actually runs.
+# GENTAR_SBX_BIN, GENTAR_BENCH_WORKSPACE_ROOT — and takes them from the same
+# place the coordinator does: `docker compose config` on the engine, which
+# applies the arena's .env, interpolation, inline comments and relative
+# paths exactly as the run did. Re-parsing .env here would disagree with
+# compose on any of those and send the reaper to the wrong host or key.
+# Without a working compose, the shell's values are used.
 #
 # A workspace is reaped even when its sandbox is absent: the sbx tier
 # pushes the workspace BEFORE `sbx create`, so a job cancelled in between
@@ -66,27 +69,31 @@ if [ "${#PREFIX}" -gt 41 ]; then
   exit 2
 fi
 
-# Fill the bench settings the shell did not set from the arena's .env.
-# Read, never sourced: it is a compose env file, not shell, and sourcing
-# would run whatever is in it. Shell wins, as it does for compose.
-ENV_FILE=${GENTAR_ENV_FILE:-$(cd "$(dirname "$0")/.." && pwd)/.env}
-from_env_file() {
-  local v
-  [ -f "$ENV_FILE" ] || return 0
-  v=$(grep -E "^[[:space:]]*$1=" "$ENV_FILE" | tail -1 | sed -E "s/^[^=]*=//; s/^[[:space:]]+//; s/[[:space:]]+\$//") || true
-  case "$v" in
-    \"*\") v=${v#\"}; v=${v%\"} ;;
-    \'*\') v=${v#\'}; v=${v%\'} ;;
-  esac
-  printf '%s' "$v"
+# What compose resolved for the coordinator. Line-oriented reads of the
+# pretty-printed JSON, no parser needed (same approach as bin/arena's
+# require_bench_key). The bench vars appear only in the coordinator.
+# `sed -E`, not BRE: BSD sed (macOS) has no `\|` in BRE and matches
+# nothing, silently.
+ENGINE=${GENTAR_ENGINE_DIR:-$(cd "$(dirname "$0")/.." && pwd)}
+resolved=$(docker compose --project-directory "$ENGINE" \
+             -f "$ENGINE/docker-compose.yml" config --format json 2>/dev/null) || resolved=""
+unjson() { sed 's/\\"/"/g; s/\\\\/\\/g'; }
+compose_env() {
+  printf '%s\n' "$resolved" \
+    | sed -E -n "s/^[[:space:]]*\"$1\": *\"(([^\"\\]|\\.)*)\".*/\1/p" | head -1 | unjson
 }
-for var in GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_KEY_FILE \
-           GENTAR_BENCH_JUMP GENTAR_SBX_BIN GENTAR_BENCH_WORKSPACE_ROOT; do
-  if [ -z "${!var:-}" ]; then
-    val=$(from_env_file "$var")
+if [ -n "$resolved" ]; then
+  for var in GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_JUMP \
+             GENTAR_SBX_BIN GENTAR_BENCH_WORKSPACE_ROOT; do
+    val=$(compose_env "$var")
     [ -n "$val" ] && export "$var=$val"
-  fi
-done
+  done
+  # The key is a compose SECRET, not an env var: its resolved bind path.
+  key=$(printf '%s\n' "$resolved" \
+    | sed -E -n '/"bench_ssh_key"/,/}/{ s/.*"file": *"(([^"\\]|\\.)*)".*/\1/p; }' | head -1 | unjson)
+  [ -n "$key" ] && export GENTAR_BENCH_KEY_FILE="$key"
+fi
+case "${GENTAR_BENCH_KEY_FILE:-}" in "~/"*) GENTAR_BENCH_KEY_FILE="$HOME/${GENTAR_BENCH_KEY_FILE#\~/}" ;; esac
 
 HOST=${GENTAR_BENCH_HOST:-}
 USER_=${GENTAR_BENCH_USER:-}

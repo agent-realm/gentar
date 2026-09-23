@@ -123,9 +123,11 @@ require_bench_key() {
   # land on different lines, so a single-line match finds nothing and the
   # fallback to the shell variable passes while the run mounts a different,
   # missing file named only in .env. Range-match from the key to its
-  # closing brace instead — line-oriented, no JSON parser needed.
+  # closing brace instead — line-oriented, no JSON parser needed. `sed -E`:
+  # BSD sed (macOS) has no `\|` in BRE, so the old pattern matched nothing
+  # there and this check silently fell back to the shell variable.
   key=$({ compose config --format json 2>/dev/null || true; } \
-    | sed -n '/"bench_ssh_key"/,/}/{ s/.*"file": *"\(\([^"\\]\|\\.\)*\)".*/\1/p; }' | head -1)
+    | sed -E -n '/"bench_ssh_key"/,/}/{ s/.*"file": *"(([^"\\]|\\.)*)".*/\1/p; }' | head -1)
   # JSON-escaped: a path may legitimately contain a quote or backslash.
   key=$(printf '%s' "$key" | sed 's/\\"/"/g; s/\\\\/\\/g')
   [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"

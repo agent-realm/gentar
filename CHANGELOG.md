@@ -40,9 +40,10 @@ scenario schema or the exit-code contract; an adopter re-copies the kit.
   whose whole name is that prefix plus the coordinator's run-id shape —
   including a workspace whose sandbox was never created, since sbx pushes
   before it creates. `…-123-…` never matches `…-1234-…`; attempt 2 never
-  reaps attempt 1; the unscoped default prefix is refused. It reads the
-  bench settings from the shell and then the arena's `.env`, the same
-  sources the coordinator gets them from. In the kit,
+  reaps attempt 1; the unscoped default prefix is refused. It takes the
+  bench settings from `docker compose config` — what compose resolved
+  for the coordinator, `.env` interpolation, comments and relative paths
+  included — and falls back to the shell only without compose. In the kit,
   `gentar/run.sh --down` reaps when the prefix is set and does not touch
   the bench-host when it is not (every local run). Proven by SIGKILLing a
   live coordinator mid-bench and reaping the stranded sandbox, with a
@@ -56,6 +57,11 @@ scenario schema or the exit-code contract; an adopter re-copies the kit.
   a prefix and reap each other's benches. (claude-playbooks.) So is one
   over 41 characters: sbx rejects a name over 64 (measured; its help does
   not say) and the run id appends 23.
+- **`bin/arena`'s bench-key check did nothing on macOS.** It read the
+  key path compose resolved with a BRE using `\|`, which BSD sed does not
+  support, so it matched nothing and fell back to the shell variable: a
+  bad path set only in `.env` reached Docker's mount error instead of the
+  exit-2 refusal that names it. Now `sed -E`.
 - **The dashboard read the wrong ClickHouse** when an adopter had moved
   the port: it defaulted to 8123 and ignored `GENTAR_CLICKHOUSE_HOST_PORT`
   — on a host where another arena holds 8123, it rendered *that* arena.
