@@ -66,10 +66,21 @@ REPO=$(dirname "$HERE")
 if [ -n "${GENTAR_SUBJECT:-}" ]; then
   SUBJECT=$GENTAR_SUBJECT
 else
-  declared=$(sed -n 's/^[[:space:]]*subject[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+  # Either TOML string style: "basic" or 'literal'. Missing the second
+  # made a single-quoted subject read as NO subject.
+  declared=$(sed -n "s/^[[:space:]]*subject[[:space:]]*=[[:space:]]*[\"']\([^\"']*\)[\"'].*/\1/p" \
     "$HERE"/scenarios/*.toml 2>/dev/null | sort -u)
+  nscen=$(ls "$HERE"/scenarios/*.toml 2>/dev/null | wc -l | tr -d ' ')
   case "$(printf '%s\n' "$declared" | grep -c .)" in
-    0) SUBJECT=$(basename "$REPO") ;;          # no scenarios yet (--review says so)
+    0) if [ "$nscen" -gt 0 ]; then
+         # Scenarios exist but none declared a subject this could read. Never
+         # fall back to the directory: in a worktree that is the branch name,
+         # which is the bug this block exists to prevent.
+         echo "could not read subject = \"…\" from gentar/scenarios/*.toml" >&2
+         echo "declare it in each scenario, or set GENTAR_SUBJECT" >&2
+         exit 2
+       fi
+       SUBJECT=$(basename "$REPO") ;;          # no scenarios yet (--review says so)
     1) SUBJECT=$declared ;;
     *) echo "scenarios disagree on subject: $(echo $declared)" >&2
        echo "every gentar/scenarios/*.toml must declare the same subject = \"…\"" >&2
@@ -102,7 +113,8 @@ fi
 # top-level string is a group of one; a nested list is ONE all-of group.
 # Mirrors the engine's satisfied_group() grammar exactly (cross-checked
 # against its parser on flat, nested, multi-line and commented shapes).
-# awk, not python: this runs on a stock CI runner.
+# Both TOML string styles ("basic", 'literal'). awk, not python: this runs
+# on a stock CI runner.
 credential_groups() {
   awk '
     /^[[:space:]]*#/ { next }
@@ -112,17 +124,17 @@ credential_groups() {
       t = buf; o = gsub(/\[/, "", t); t = buf; c = gsub(/\]/, "", t)
       if (o > 0 && o == c) { inarr = 0; emit(buf) }
     }
-    function emit(b,   i, ch, depth, instr, cur, grp) {
+    function emit(b,   i, ch, depth, instr, cur, grp, q) {
       depth = 0; instr = 0; cur = ""; grp = ""
       for (i = 1; i <= length(b); i++) {
         ch = substr(b, i, 1)
         if (instr) {
-          if (ch == "\"") { instr = 0
+          if (ch == q) { instr = 0
             if (depth == 1) print cur; else grp = grp (grp == "" ? "" : " ") cur
           } else cur = cur ch
           continue
         }
-        if (ch == "\"") { instr = 1; cur = ""; continue }
+        if (ch == "\"" || ch == "\047") { instr = 1; q = ch; cur = ""; continue }
         if (ch == "[") { depth++; if (depth == 2) grp = ""; continue }
         if (ch == "]") { if (depth == 2 && grp != "") print grp; depth--; continue }
       }
@@ -559,7 +571,9 @@ extract_env_names() {         # files... -> one env var name per line
     /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
     inarr {
       line = $0
-      while (match(line, /"[A-Za-z_][A-Za-z0-9_]*"/)) {
+      # either TOML quote style — a 'literal' name used to forward nothing,
+      # and the coordinator then refused credentials the caller had set
+      while (match(line, /["\047][A-Za-z_][A-Za-z0-9_]*["\047]/)) {
         print substr(line, RSTART + 1, RLENGTH - 2)
         line = substr(line, RSTART + RLENGTH)
       }

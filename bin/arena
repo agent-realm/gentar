@@ -69,7 +69,9 @@ extract_env_names() {         # scenario files... -> one name per line
     /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
     inarr {
       line = $0
-      while (match(line, /"[A-Za-z_][A-Za-z0-9_]*"/)) {
+      # either TOML quote style — a 'literal' name used to forward nothing,
+      # and the coordinator then refused credentials the caller had set
+      while (match(line, /["\047][A-Za-z_][A-Za-z0-9_]*["\047]/)) {
         print substr(line, RSTART + 1, RLENGTH - 2)
         line = substr(line, RSTART + RLENGTH)
       }
