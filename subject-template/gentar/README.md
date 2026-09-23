@@ -290,6 +290,7 @@ Secrets/vars the workflow reads:
   repo's logs are public)
 - `secrets.GENTAR_CLONE_KEY` — read-only deploy key, only if the ENGINE repo is private
 - `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
+- `vars.GENTAR_REF` — only to run an engine ref other than `run.sh`'s pin (a branch or release candidate being proven); delete it afterwards
 - `secrets.ANTHROPIC_API_KEY` or `secrets.ANTHROPIC_AUTH_TOKEN` + `vars.ANTHROPIC_BASE_URL` — agent suites
 - `vars.ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL` — all four, for a routed endpoint
 - `vars.GENTAR_BUDGET_CAP` — ceiling the budget guard enforces (default 50000)

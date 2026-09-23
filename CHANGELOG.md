@@ -65,7 +65,11 @@ the kit, which is why this is a minor bump.
   self-hosted. It runs only when the plan asks and never for a fork's PR
   (checked from GitHub's context, not from the PR's files). Host ports and
   the budget cap come from repository variables, so the file needs no
-  edits.
+  edits. So does the engine ref: `vars.GENTAR_REF` overrides `run.sh`'s pin
+  on every event, which is how an adopter proves an untagged engine in CI
+  before it is released (claude-playbooks: the pin cannot be edited without
+  failing `--check`, and a dispatch only exists once the workflow is on the
+  default branch).
 - **Arenas of one repo are serialised on the host, not by GitHub.** A
   repository-wide concurrency group CANCELS a pending run when a newer one
   queues, so phase 2 and keyword runs were silently dropped behind ordinary

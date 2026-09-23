@@ -106,7 +106,11 @@ jobs:
         env:
           CLONE_KEY: ${{ secrets.GENTAR_CLONE_KEY }}
           GENTAR_REPO_URL: ${{ vars.GENTAR_REPO_URL }}
-          GENTAR_REF: ${{ github.event.inputs.gentar_ref }}
+          # Engine ref: a dispatch input, else the repository variable
+          # GENTAR_REF, else run.sh's pin. The variable is how an adopter
+          # proves an untagged engine (a branch, a release candidate) in CI
+          # on PRs and tags without editing a kit file; delete it after.
+          GENTAR_REF: ${{ github.event.inputs.gentar_ref || vars.GENTAR_REF }}
           GENTAR_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
 
   bench:
@@ -179,7 +183,11 @@ jobs:
         env:
           BENCH: ${{ needs.plan.outputs.bench }}
           SUITES: ${{ needs.plan.outputs.suites }}
-          GENTAR_REF: ${{ github.event.inputs.gentar_ref }}
+          # Engine ref: a dispatch input, else the repository variable
+          # GENTAR_REF, else run.sh's pin. The variable is how an adopter
+          # proves an untagged engine (a branch, a release candidate) in CI
+          # on PRs and tags without editing a kit file; delete it after.
+          GENTAR_REF: ${{ github.event.inputs.gentar_ref || vars.GENTAR_REF }}
           GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
           # SECRETS rather than variables: a public repo's logs are public.
           GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
