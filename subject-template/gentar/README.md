@@ -11,8 +11,10 @@ can hand to an agent to fix what failed.
 | subject name | `subject = "…"` in every scenario TOML — `run.sh` reads it from there and refuses scenarios that disagree | `<REPO>` |
 | suites | `scenarios/*.toml` — decisions + reality assertions | see below |
 | credentials | `credentials = [names]` per suite — entries are ALTERNATIVES, a list entry is an all-of group (`["KEY", ["TOKEN","BASE_URL"]]` = the key alone, or the token and its endpoint together). None present refuses (exit 2) before a bench exists | per suite |
-| trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | see workflow |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.3.1` |
+| trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
+| run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
+| dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.4.0` |
 
 ## Quickstart (local)
 
@@ -98,8 +100,8 @@ goes with the arena, so after `--down` there is nothing left to show.
 The suites here assert what is true of this repo, so the two move
 together.
 
-- **Code changed, behaviour did not** — nothing to do. The PR trigger
-  re-runs the suites against the change before it lands; the pass is the
+- **Code changed, behaviour did not** — nothing to do. Phase 1 checks
+  the PR before it lands (the run policy below); the pass is the
   evidence.
 - **Behaviour changed** — the scenarios change in the **same pull
   request**. A scenario asserts reality; stale reality fails honestly,
@@ -131,39 +133,65 @@ shipped executables and scripts against names the suites mention, so a
 **behaviour change inside a file a suite already names** does not show
 up. The diff is there for that.
 
-## Narrowing a pull request
+## Run policy — which suites run when
 
-A PR runs every suite it can. The bench-host is one shared machine, so a
-README typo and a rewrite of the install path cost the same wall-clock —
-and when the expensive tier makes every PR slow, people stop running it
-at all. A PR can say what it needs:
+Decided once, in `gentar/policy.toml`, and carried out by the workflow
+without further thought. `gentar/plan.py` is its only reader; the
+workflow's first job asks it what this event should run.
+
+| Event | Runs |
+|---|---|
+| pull request | **phase 1**: bench-free checks on a GitHub-hosted runner (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
+| push to the default branch | **phase 1**: the checks, plus `[phase1] floor` on the bench |
+| dispatch (no suites), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
+| `arena-<suite>` tag, or a dispatch naming suites | exactly those suites (`arena / targeted`; never counts as phase 2) |
+| `v*` tag | nothing — a release is **gated** on a green phase 2 of its commit (below), not tested after it |
+
+A fork's pull request never reaches the self-hosted runner, whatever the
+policy says: the bench job checks that from GitHub's own context. Try any
+event locally:
+
+```bash
+GITHUB_EVENT_NAME=push GITHUB_REF=refs/tags/v1.2.0-rc1 gentar/run.sh --plan
+```
+
+**Narrowing a PR** (`bench = "declared"` only): one line in the PR body,
 
 ```
 gentar: auth-flow config-migration
 ```
 
-anywhere in the **PR body**, one line. Those suites run, plus whatever
-`GENTAR_FLOOR` names, and nothing else. No line means today's behaviour:
-everything runnable.
+Those suites run, plus the floor. Declared, not inferred — a rule that
+reads the diff fails by silently *excluding* the suite that mattered. A
+suite name is letters, digits, dot, dash, underscore; anything else is
+refused with exit 2 before a bench is spent, since a PR body is text a
+stranger can write. Set the **floor** to the cheap deterministic suites:
+they run whatever a PR declares, so a narrow pick never costs the guard
+rails.
 
-**Set `GENTAR_FLOOR`** (a repo variable) to the cheap deterministic
-suites. They run whatever a PR declares, so a too-narrow pick costs
-coverage on the slow tier and never on the fast guard rails.
+**Gating a release.** Make the first job of your release workflow
 
-Two deliberate limits:
+```yaml
+  arena-gate:
+    runs-on: ubuntu-latest
+    permissions: { actions: read, contents: read }
+    steps:
+      - uses: actions/checkout@v4
+      - run: gentar/release-gate.sh "$GITHUB_SHA"
+        env: { GH_TOKEN: "${{ github.token }}" }
+```
 
-- **Declared, not inferred.** A rule that reads the diff and picks for
-  you fails by silently *excluding* the suite that mattered — a green PR
-  that never tested the change, which is the one outcome this engine
-  exists to refuse. A human narrowing on purpose is visible in the PR and
-  reviewable like any other claim in it.
-- **Only a PR narrows.** Pushes to the default branch and `v*` tags
-  ignore the declaration and run everything, so nothing a PR skipped
-  stays skipped.
+and every publishing job `needs: arena-gate`. It passes only if that exact
+commit has a green `arena / phase2`, however it was triggered — so run
+phase 2 first (push `arena`, or a `v*-rc*` tag, at the commit), then tag
+the release. A refusal names what it found instead: a failed phase 2, a
+cancelled one, or a run GitHub cancelled before it started.
+`[phase2] max_age_days` also refuses a pass older than that.
 
-A suite name is letters, digits, dot, dash, underscore; anything else in
-that line is refused with exit 2 before a bench is spent — a PR body is
-text a stranger can write.
+**One arena at a time per host.** Runs of this repo on one Docker host
+share a compose project and ports, so `run.sh` takes a host lock and a
+later run **waits**, printing who holds it. (A GitHub concurrency group
+cannot do this: it cancels a pending run when a newer one queues.)
 
 ## The fix loop
 
@@ -244,12 +272,12 @@ face. Decisions and reality assertions, never scripts.
 
 ## CI (`.github/workflows/`)
 
-The arena workflow runs every suite on pull requests, pushes to main,
-and `v*`/`arena*` tags (edit its `on:` block to taste — triggers are
-yours, the arena doesn't care; the PR trigger's cost is documented in
-the file). It needs a self-hosted runner labeled `arena` with Docker +
-reach to the bench-host; GitHub-hosted runners cannot reach an internal
-bench-host. One-time setup, ~5 min on any always-on machine with Docker:
+The arena workflow is the kit's, byte for byte — `--check` compares it —
+and does what the run policy says (above). Its `plan` and `checks` jobs
+run on GitHub-hosted runners; only the `bench` job needs a self-hosted
+runner labeled `arena` with Docker + reach to the bench-host.
+GitHub-hosted runners cannot reach an internal bench-host. One-time
+setup, ~5 min on any always-on machine with Docker:
 
 GitHub → this repo → Settings → Actions → Runners → New self-hosted
 runner → follow the commands → when configuring, labels: `arena`.
@@ -264,13 +292,16 @@ Secrets/vars the workflow reads:
 - `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
 - `secrets.ANTHROPIC_API_KEY` or `secrets.ANTHROPIC_AUTH_TOKEN` + `vars.ANTHROPIC_BASE_URL` — agent suites
 - `vars.ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL` — all four, for a routed endpoint
-- `GENTAR_BUDGET_CAP` in the workflow — ceiling the budget guard enforces
+- `vars.GENTAR_BUDGET_CAP` — ceiling the budget guard enforces (default 50000)
+- `vars.GENTAR_CLICKHOUSE_HOST_PORT`, `vars.GENTAR_OTLP_HOST_PORT` — move the
+  arena's host ports when another arena shares the runner's Docker host
 
 The three bench values are required; the workflow refuses with a named error
 before staging anything if one is missing or still the placeholder. Everything
-else is optional. The workflow's sweep is `gentar/run.sh --sweep`: suites whose
-credentials are absent are skipped and named, not run into a red refusal. It
-tears down with `gentar/run.sh --down`.
+else is optional. Phase 2 is `gentar/run.sh --sweep`: suites whose credentials
+are absent are skipped and named, not run into a red refusal. It tears down
+with `gentar/run.sh --down`, which also removes the bench sandboxes a cancelled
+job left behind — and never touches an arena another live run holds.
 
 **Credential grouping.** `credentials` lists *alternatives*. A provider that is
 a pair must be a nested list — `[["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]`.
@@ -286,8 +317,12 @@ and CI run the same way.
 ```
 gentar/
   scenarios/*.toml   # suites (this repo's own)
-  run.sh             # local kickoff — stage, run, report
-  dryrun.py          # local, bench-less step/assertion replay
+  policy.toml        # run policy — which suites run when (this repo's own)
+  hooks.py           # dry-run hooks: prepare(), HIDE_FROM_PATH (this repo's own)
+  run.sh             # kit — stage, run, report; --check, --plan, --down
+  dryrun.py          # kit — local, bench-less step/assertion replay
+  plan.py            # kit — the run policy's only reader
+  release-gate.sh    # kit — may this commit be released?
   reports/           # run reports land here (gitignored)
   .arena/            # gentar checkout (gitignored, auto-cloned)
 ```

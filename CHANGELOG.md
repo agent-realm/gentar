@@ -22,6 +22,84 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.4.0 — 2026-09-23
+
+**The run policy.** Which suites run when is decided once, at adaptation,
+and then automated — the pilot's policy, shaped with the first adopter
+(claude-playbooks):
+
+- **Phase 1** on every pull request and every push to the default branch:
+  bench-free checks on a GitHub-hosted runner (`gentar/run.sh --check`),
+  plus a floor of cheap suites on the bench for pushes — and for PRs only
+  when the policy allows PR code on the self-hosted runner.
+- **Phase 2**, the full regression, only on a dispatch, the `arena` tag or
+  a `v*-rc*` tag, as the job `arena / phase2`.
+- **A release is gated**, not tested after: `gentar/release-gate.sh <sha>`
+  refuses unless that exact commit has a green `arena / phase2`.
+
+No change to the scenario schema or the exit-code contract. What changes is
+the kit, which is why this is a minor bump.
+
+### Added
+
+- `gentar/policy.toml` (the subject's) and `gentar/plan.py` (the kit's, its
+  only reader). `plan` maps an event to `checks` / `bench`
+  (`none`·`targeted`·`phase2`) / `suites`; an unknown key, trigger or suite
+  is refused with exit 2, never defaulted. Without a policy.toml the kit
+  behaves as 0.3.x did. `gentar/run.sh --plan` shows it for any event.
+- `gentar/run.sh --check` — stage the engine, lint the adaptation (a flat
+  credential list holding an endpoint; a kit file that differs from the
+  pinned engine's copy), dry-run every suite. A fork's PR, which gets no
+  secrets and so cannot stage a private engine, is a named skip.
+- `gentar/release-gate.sh` — names what it found when it refuses: a failed
+  phase 2, a cancelled one, or a run GitHub cancelled before any job
+  started. Optional `[phase2] max_age_days`.
+- `gentar/hooks.py` — the dry-run hooks (`prepare()`, `HIDE_FROM_PATH`,
+  `SKIP_STEP_SUBSTR`) move out of `dryrun.py`, so every kit file can stay
+  byte-identical to the kit.
+
+### Changed
+
+- **The kit workflow** is built around a `plan` job on ubuntu-latest; the
+  `checks` job is GitHub-hosted too, and only the `bench` job is
+  self-hosted. It runs only when the plan asks and never for a fork's PR
+  (checked from GitHub's context, not from the PR's files). Host ports and
+  the budget cap come from repository variables, so the file needs no
+  edits.
+- **Arenas of one repo are serialised on the host, not by GitHub.** A
+  repository-wide concurrency group CANCELS a pending run when a newer one
+  queues, so phase 2 and keyword runs were silently dropped behind ordinary
+  main pushes (claude-playbooks, observed). `run.sh` now takes a host lock
+  per `arena-<subject>` — flock, or a mkdir lock with stale-holder
+  detection on macOS — and a later run waits, saying for whom. The
+  workflow's group is per-ref, for dedup only. `--down` never tears down an
+  arena another live run holds.
+- The workflow's bench-key guard treats a whitespace-only secret as blank,
+  agreeing with `run.sh` (claude-playbooks).
+- `dryrun.py` reports an UNVERIFIED-only suite without failing when run by
+  `--check`: those turns need the arena, and a check that always fails is
+  a check people learn to ignore.
+
+### Fixed
+
+- The kit README claimed the dashboard shows "the agent's own telemetry".
+  No agent CLI writes the self-report relay, so that panel is empty for an
+  agent suite; the sentence now says so (claude-playbooks).
+
+### Upgrading from 0.3.x
+
+1. Re-copy `run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh` and the
+   workflow from the `v0.4.0` kit. Do not edit them.
+2. Move your `prepare()` / `HIDE_FROM_PATH` / `SKIP_STEP_SUBSTR` into
+   `gentar/hooks.py` (start from the kit's).
+3. Write `gentar/policy.toml` (start from the kit's): the floor, whether a
+   PR may use the bench, any `[phase1] setup` toolchain.
+4. Port pins you had in the workflow become repository variables
+   `GENTAR_CLICKHOUSE_HOST_PORT` / `GENTAR_OTLP_HOST_PORT`; `GENTAR_FLOOR`
+   becomes `[phase1] floor`.
+5. Add `gentar/release-gate.sh` as the first job of your release workflow.
+6. `gentar/run.sh --check` must say `check: clean`.
+
 ## 0.3.1 — 2026-09-23
 
 Fixes only, from the first adopter's re-adaptation to 0.3.0

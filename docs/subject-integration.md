@@ -200,7 +200,7 @@ of change, and what each obliges:
 
 | What changed | What the subject does |
 |---|---|
-| the subject's code, same behaviour | nothing — the PR trigger re-runs the suites and the pass is the evidence |
+| the subject's code, same behaviour | nothing — phase 1 of the run policy checks the PR, and the pass is the evidence |
 | what the subject DOES | update the scenarios in the SAME pull request; a scenario asserts reality, so stale reality fails honestly |
 | the ENGINE | bump `GENTAR_REF` deliberately: change the pin, run every suite, commit the bump on its own |
 
