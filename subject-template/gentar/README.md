@@ -12,7 +12,7 @@ can hand to an agent to fix what failed.
 | suites | `scenarios/*.toml` — decisions + reality assertions | see below |
 | credentials | `credentials = [names]` per suite — entries are ALTERNATIVES, a list entry is an all-of group (`["KEY", ["TOKEN","BASE_URL"]]` = the key alone, or the token and its endpoint together). None present refuses (exit 2) before a bench exists | per suite |
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | see workflow |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.2.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.3.0` |
 
 ## Quickstart (local)
 
@@ -112,6 +112,40 @@ shipped executables and scripts against names the suites mention, so a
 **behaviour change inside a file a suite already names** does not show
 up. The diff is there for that.
 
+## Narrowing a pull request
+
+A PR runs every suite it can. The bench-host is one shared machine, so a
+README typo and a rewrite of the install path cost the same wall-clock —
+and when the expensive tier makes every PR slow, people stop running it
+at all. A PR can say what it needs:
+
+```
+gentar: auth-flow config-migration
+```
+
+anywhere in the **PR body**, one line. Those suites run, plus whatever
+`GENTAR_FLOOR` names, and nothing else. No line means today's behaviour:
+everything runnable.
+
+**Set `GENTAR_FLOOR`** (a repo variable) to the cheap deterministic
+suites. They run whatever a PR declares, so a too-narrow pick costs
+coverage on the slow tier and never on the fast guard rails.
+
+Two deliberate limits:
+
+- **Declared, not inferred.** A rule that reads the diff and picks for
+  you fails by silently *excluding* the suite that mattered — a green PR
+  that never tested the change, which is the one outcome this engine
+  exists to refuse. A human narrowing on purpose is visible in the PR and
+  reviewable like any other claim in it.
+- **Only a PR narrows.** Pushes to the default branch and `v*` tags
+  ignore the declaration and run everything, so nothing a PR skipped
+  stays skipped.
+
+A suite name is letters, digits, dot, dash, underscore; anything else in
+that line is refused with exit 2 before a bench is spent — a PR body is
+text a stranger can write.
+
 ## The fix loop
 
 Every terminal outcome writes `gentar/reports/report-<run_id>.md`
@@ -153,6 +187,12 @@ engine.
 gentar/dryrun.py                                   # every suite
 gentar/dryrun.py gentar/scenarios/first-suite.toml
 ```
+
+Needs **python 3.11+, or 3.9/3.10 with `tomli`** (`pip install tomli`) —
+it parses TOML on your machine, and `tomllib` only became stdlib in 3.11
+while stock macOS still ships 3.9. It re-execs under a newer interpreter
+if one is on PATH, so on most machines this is invisible. The arena is
+unaffected: the coordinator runs python 3.12 in a container.
 
 Runs a suite's steps, driver turns and assertions in a scratch home in about
 a second — no bench, no sandbox, no network. A scenario is shell inside TOML,
@@ -198,14 +238,26 @@ runner → follow the commands → when configuring, labels: `arena`.
 Secrets/vars the workflow reads:
 
 - `secrets.BENCH_SSH_KEY` — key the coordinator uses to reach the bench-host
+- `secrets.GENTAR_BENCH_HOST`, `secrets.GENTAR_BENCH_USER` — the bench-host itself; the
+  engine ships none, so without these no suite can run (secrets, because a public
+  repo's logs are public)
 - `secrets.GENTAR_CLONE_KEY` — read-only deploy key, only if the ENGINE repo is private
 - `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
 - `secrets.ANTHROPIC_API_KEY` or `secrets.ANTHROPIC_AUTH_TOKEN` + `vars.ANTHROPIC_BASE_URL` — agent suites
 - `vars.ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL` — all four, for a routed endpoint
 - `GENTAR_BUDGET_CAP` in the workflow — ceiling the budget guard enforces
 
-All are optional except the bench key; unset agent credentials simply
-leave agent suites out of the sweep, named in the log either way.
+The three bench values are required; the workflow refuses with a named error
+before staging anything if one is missing or still the placeholder. Everything
+else is optional. The workflow's sweep is `gentar/run.sh --sweep`: suites whose
+credentials are absent are skipped and named, not run into a red refusal. It
+tears down with `gentar/run.sh --down`.
+
+**Credential grouping.** `credentials` lists *alternatives*. A provider that is
+a pair must be a nested list — `[["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]`.
+Written flat, the two are either-or: the token wins alone and the URL is
+dropped. The engine warns when a declared credential is set but not forwarded,
+in the log and in the report.
 
 The workflow stages the checkout exactly like `run.sh` does, so local
 and CI run the same way.

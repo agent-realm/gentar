@@ -57,6 +57,9 @@ class RunReport:
     verdict: str = "pass"          # pass | fail | refuse
     exit_code: int = 0
     error: str = ""
+    # Things that did not change the verdict but could explain it — e.g. a
+    # declared credential that was set and still not forwarded.
+    warnings: list[str] = field(default_factory=list)
     summary: str = ""
 
     def mark(self, verdict: str, exit_code: int) -> None:
@@ -100,6 +103,13 @@ class RunReport:
         lines.append("")
         lines.append(f"Reproduce: `{self.reproduce}`")
         lines.append("")
+
+        if self.warnings:
+            lines.append("## Warnings")
+            lines.append("")
+            for w in self.warnings:
+                lines.append(f"- {w}")
+            lines.append("")
 
         if self.error:
             lines.append("## Failure")

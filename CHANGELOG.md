@@ -22,6 +22,118 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.3.0 — 2026-09-23
+
+The first real adoption. claude-playbooks adapted gentar v0.2.0 into a
+repo it actually ships, ran it in CI, and patched a dozen kit defects in
+its own copy — patches it would have had to re-apply on every engine
+bump. Every one is fixed here, and each was reproduced before it was
+fixed. Three of them could make a result lie.
+
+Also ships two changes that were reviewed as their own PRs but never
+tagged on their own: pull-request narrowing (#34) and a dry-run that
+works on the python an adopter actually has (#35).
+
+### Fixed — results that could lie
+
+- **A cancelled run reported success.** Signal traps tore down and then
+  *returned*, so bash resumed the script: the next suite started against
+  a torn-down arena and the run ended with status 0. A CI cancel is a
+  SIGTERM to the shell, so a cancelled run read as a pass. INT and TERM
+  now exit 130/143, in `bin/arena` and the kit. (Earlier signal tests
+  signalled the whole process group, where the child dies with 130 and
+  hides it.)
+- **The dry-run could modify the pilot's machine.** One scratch home was
+  shared across suites and PATH fell through to the real one, so after
+  an uninstall suite, the next suite ran the pilot's *installed* CLI —
+  which created launchers in the real `~/.local/bin`. Every suite now
+  gets a fresh home, and runs on a PATH sealed against the subject's own
+  executables: whatever `prepare()` installed is hidden automatically,
+  `HIDE_FROM_PATH` adds the rest.
+- **A declared credential was dropped silently.** A flat
+  `["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]` means *either one*;
+  the token won alone and the URL never reached the bench, surfacing as
+  "Invalid API key". Forwarding is unchanged (only the winning group
+  travels), but the engine now names a set-but-dropped credential in the
+  log and in a new report **Warnings** section.
+
+### Fixed — adoption that could not work
+
+- **No adopter's CI could have run.** The kit workflow never passed
+  `GENTAR_BENCH_HOST`/`GENTAR_BENCH_USER`, and the engine has shipped no
+  bench-host since 0.1.0. They now come from repo secrets, and the
+  workflow refuses an unset or placeholder host, or an unset
+  `BENCH_SSH_KEY`, before staging anything.
+- **A blank bench key passed every check.** `printf '%s\n'` of an unset
+  secret writes a one-byte file that passes `-r` and `-s`, then fails at
+  ssh. The key must now be non-blank.
+- **The subject name was wrong in a git worktree** — it came from the
+  directory, which a worktree names after the branch. It is now read from
+  the scenarios' `subject =` and refuses the template's `REPLACE-ME` or
+  scenarios that disagree. `GENTAR_SUBJECT` overrides.
+- **Parsing a `key` driver turn needed pexpect**, so such suites failed to
+  load in the dry-run on a host without it. The key vocabulary moved to a
+  leaf module.
+
+### Fixed — correctness and noise
+
+- The frozen version used `git describe --tags`, which returns the nearest
+  tag of any kind — the floating `arena` trigger could become the version.
+  Now `--match 'v*'`.
+- Switching `GENTAR_REPO_URL` to a fork with its own same-named tag failed
+  the fetch, reported as "GENTAR_REF not found". Now fetched with `--force`.
+- The workflow's concurrency group was per-ref while every run shares one
+  compose project and one set of ports. Now constant per repository.
+- `--review` listed every file under `cmd/` — a Go CLI's implementation,
+  27 names burying one real gap. Candidates are now files with the
+  executable bit, plus `bin/`.
+- The kit ignores `__pycache__/` and `*.pyc`; dry-run scratch homes of
+  passing suites are deleted (the old dry-run leaked one per run).
+
+### Changed — security
+
+- The kit workflow's `pull_request` job runs only PRs whose head is in the
+  same repository. On a **public** repo that is not enough on its own — a
+  fork can add its own workflow aimed at the self-hosted runner — and the
+  workflow, both kit READMEs and `AGENTS.md` now say so: require approval
+  for all external contributors, or drop the trigger.
+
+### Added
+
+- **A pull request can narrow its own arena run.** A `gentar: <suites>`
+  line in the PR body picks the suites; `GENTAR_FLOOR` (a repo variable)
+  names suites that run whatever the body says. The bench-host is one
+  shared machine, so without this a README typo and an install-path
+  rewrite cost the same wall-clock — and an expensive tier that makes
+  every PR slow is a tier people stop running.
+
+  **Declared, not inferred.** A rule that reads the diff and picks for
+  you fails by silently excluding the suite that mattered: a green PR
+  that never tested the change, which is the one outcome this engine
+  exists to refuse. A human narrowing on purpose is visible in the PR and
+  reviewable like any other claim in it. The floor means a too-narrow
+  pick costs coverage on the slow tier, never on the fast guard rails,
+  and only pull requests narrow — the default branch and `v*` tags run
+  everything, so nothing a PR skipped stays skipped.
+
+  A suite name is `[A-Za-z0-9._-]`; anything else on that line is
+  refused with exit 2 before a bench is spent. A PR body is text a
+  stranger can write, and it reaches the runner through step `env`,
+  never `${{ }}` interpolation into the script body.
+
+- The dry-run runs on python 3.9/3.10 with `tomli` (the same parser
+  as stdlib `tomllib`, under its pre-stdlib name), and says exactly what
+  to install when neither is present.
+- `gentar/run.sh --sweep` — every suite whose credentials are present,
+  decided by the engine's own grouping; the rest skipped by name.
+- `gentar/run.sh --down` — tear down this subject's arena; the project
+  name is derived in one place.
+
+`AGENTS.md` gains the credential-grouping rule, the public-repo warning
+for decision 2, the three required CI secrets, and "a local pass is not a
+CI pass". No schema or exit-code change: a suite written against 0.1.x
+runs unchanged.
+
 ## 0.2.0 — 2026-09-23
 
 Adaptation is a process, and this release adds the part that was missing:

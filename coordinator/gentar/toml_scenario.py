@@ -51,8 +51,33 @@ oracle mode is phase 2's runner.
     contains = "Version:"     # optional substring check
 """
 
-import tomllib
+# Annotations as strings: this module is imported by dryrun.py on the
+# HOST, where python may be 3.9 (stock macOS). `list[str] | None` in a
+# signature is evaluated at def time on 3.9 and raises TypeError; with
+# this it never evaluates. The coordinator image is 3.12 and does not
+# care either way.
+from __future__ import annotations
+
+try:
+    import tomllib                      # 3.11+
+except ModuleNotFoundError:             # 3.9/3.10: stock macOS, old distros
+    # tomli IS tomllib — the stdlib module was adopted from it, so this is
+    # the same parser under its pre-stdlib name, not a second
+    # implementation that could disagree about what a scenario means.
+    # Only host-side callers (dryrun.py) ever land here: the coordinator
+    # image is python:3.12-slim and always takes the import above.
+    import tomli as tomllib             # type: ignore[no-redef]
 from pathlib import Path
+import re
+
+# A credential or pass_env entry is an ENVIRONMENT VARIABLE NAME. Anything
+# else can never be set by a shell, so the suite could never be satisfied —
+# and the kit's shell-side readers (run.sh --sweep, credential forwarding)
+# rely on it: with names confined to this alphabet, no `#`, `]` or quote
+# can appear inside one, which is what lets a line-oriented awk parse the
+# array exactly as TOML does. Refusing here makes that an invariant, not a
+# hope.
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
 class ScenarioError(ValueError):
@@ -72,6 +97,32 @@ def satisfied_group(groups: list[list[str]], get) -> list[str] | None:
             return list(g)
     return None
 
+
+
+def dropped_credentials(groups: list[list[str]], get) -> list[str]:
+    """Declared names that ARE set but will NOT be forwarded, because they
+    sit outside the winning group. Forwarding only the winner is correct —
+    it is what stops a stray endpoint redirecting a key — but doing it
+    silently turns a schema mistake into a failure three layers away.
+
+    The case that made this necessary (the first real adopter,
+    claude-playbooks): `credentials = ["ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL"]` parses fine and reads like a pair, but a flat
+    list is ALTERNATIVES — so the token won alone, the set base URL was
+    dropped without a word, and the agent reported "Invalid API key" from
+    inside the bench. Written `[["ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL"]]` it is one group and both travel. Nothing is
+    dropped when no group wins: the guard refuses that run instead."""
+    won = satisfied_group(groups, get)
+    if won is None:
+        return []
+    seen, out = set(won), []
+    for g in groups:
+        for name in g:
+            if name not in seen and get(name):
+                seen.add(name)
+                out.append(name)
+    return out
 
 def credentials_satisfied(groups: list[list[str]], get) -> bool:
     """True when at least one alternative group is FULLY present — the
@@ -103,7 +154,7 @@ class TomlScenario:
         for i, entry in enumerate(self.credentials):
             names = entry if isinstance(entry, list) else [entry]
             if (not names
-                    or any(not isinstance(n, str) or not n.strip() for n in names)
+                    or any(not isinstance(n, str) or not _ENV_NAME.match(n) for n in names)
                     or any(isinstance(n, list) for n in names)):
                 raise ScenarioError(
                     f"{path}: scenario.credentials[{i}] must be an env "
@@ -114,9 +165,10 @@ class TomlScenario:
         # a legitimate "use the default", not a usage error.
         self.pass_env = list(sc.get("pass_env", []))
         for i, c in enumerate(self.pass_env):
-            if not isinstance(c, str) or not c.strip():
+            if not isinstance(c, str) or not _ENV_NAME.match(c):
                 raise ScenarioError(
-                    f"{path}: scenario.pass_env[{i}] must be an env var name")
+                    f"{path}: scenario.pass_env[{i}] must be an env var name "
+                    f"([A-Za-z_][A-Za-z0-9_]*), got {c!r}")
 
         self.steps = list((doc.get("oracle") or {}).get("steps", []))
         verify = doc.get("verify") or {}
@@ -150,7 +202,7 @@ class TomlScenario:
                 keys = t.get("keys") or ([t["key"]] if t.get("key") else [])
                 if not keys:
                     raise ScenarioError(f"{path}: driver.turns[{i}] missing key/keys")
-                from gentar.pty_driver import _KEYS
+                from gentar.keys import KEYS as _KEYS
                 bad = [k for k in keys if k not in _KEYS]
                 if bad:
                     raise ScenarioError(

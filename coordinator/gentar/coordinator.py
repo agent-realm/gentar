@@ -18,6 +18,7 @@ from gentar.report import RunReport
 from gentar.scenarios import REGISTRY, known_names
 from gentar.spans import Spans, new_run_id
 from gentar.toml_scenario import (TomlScenario, credentials_satisfied,
+                                  dropped_credentials, satisfied_group,
                                   load_dir)
 
 # Subject label for subjectless builtins/scenarios: the arena itself.
@@ -176,6 +177,24 @@ def run(name: str, cfg: Config | None = None) -> int:
             _write_report(report, cfg)
             return 2
 
+    # A declared credential that is SET but sits outside the winning group
+    # is dropped — correctly — but never silently: see dropped_credentials.
+    # Names only; a value never reaches a log line.
+    cred_warnings: list[str] = []
+    if scenario and scenario.credentials:
+        dropped = dropped_credentials(scenario.credential_groups(), os.environ.get)
+        if dropped:
+            won = satisfied_group(scenario.credential_groups(),
+                                  os.environ.get) or []
+            pair = ", ".join('"%s"' % n for n in won + dropped[:1])
+            cred_warnings.append(
+                "credential(s) %s are set but NOT forwarded to the bench: %s "
+                "won as its own alternative. If they belong together, declare "
+                "them as one group — credentials = [[%s]] — a flat list means "
+                "any ONE of, not ALL of."
+                % (", ".join(dropped), "+".join(won), pair))
+            print(f"warning: {cred_warnings[-1]}")
+
     # -- bench-config guard: refuse before any bench exists --------------
     # The bench tier this run will actually use — the scenario's `bench`
     # key, else the install default. Install-identity vars (which host,
@@ -228,7 +247,8 @@ def run(name: str, cfg: Config | None = None) -> int:
         credentials=(scenario.credential_names() if scenario else []),
         sandbox=run_id,
         started=time.strftime("%Y-%m-%d %H:%M:%S %z"),
-        reproduce=f"docker compose run --rm coordinator run {name}")
+        reproduce=f"docker compose run --rm coordinator run {name}",
+        warnings=list(cred_warnings))
 
     # Provenance is computed once, stamped on both scenario rows. The
     # template digest needs the bench-host; absent template = empty.

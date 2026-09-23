@@ -25,7 +25,8 @@ workflow:
 | 2 | **Suites** | `gentar/scenarios/*.toml` — install *decisions* + reality assertions, never scripts | `first-suite.toml`, fully commented |
 | 3 | **Credentials** | `credentials = [names]` per suite — env var NAMES; entries are alternatives, a list entry is an all-of group; none = oracle suite | none (first-suite is credential-less) |
 | 4 | **Trigger** | `.github/workflows/gentar-arena.yml` (own arena) and/or a dispatch job (central arena) | own-arena workflow: PRs, push to main, tags, dispatch |
-| 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.2.0` — a release tag, bumped deliberately |
+| 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.3.0` — a release tag, bumped deliberately |
+| 6 | **PR scope** *(optional)* | `gentar: <suites>` in a PR body narrows that run; `GENTAR_FLOOR` repo var names suites that run anyway | unset — every PR runs everything runnable |
 
 The verdict contract is the engine's, not yours: exit `0` pass · `1`
 fail · `2` usage/config refusal. Assertions read reality — files,
@@ -106,7 +107,7 @@ Clones the engine into `gentar/.arena`, checks out the pinned
 `GENTAR_REF`, and seeds the arena's `.env` from its `.env.example`. No
 Docker, no bench — this is a git operation.
 
-Observe: `engine staged: …/gentar/.arena @ v0.2.0 (<sha>)` and a path to
+Observe: `engine staged: …/gentar/.arena @ v0.3.0 (<sha>)` and a path to
 the arena env file.
 
 **The seeded `.env` holds placeholders, not a working config — edit it
@@ -235,12 +236,22 @@ Secrets and vars it reads:
 | Name | Kind | When you need it |
 |---|---|---|
 | `BENCH_SSH_KEY` | secret | always — the key the coordinator uses to reach the bench-host |
+| `GENTAR_BENCH_HOST` | secret | always — the engine ships no bench-host; unset, the workflow refuses before staging anything |
+| `GENTAR_BENCH_USER` | secret | always — the account on it |
 | `GENTAR_CLONE_KEY` | secret | only if the ENGINE repo is private (read-only deploy key on it) |
 | `GENTAR_REPO_URL` | var | only to point at a fork or mirror of the engine |
 | `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` | secret / var | only for agent-in-the-loop suites |
 
-Unset agent credentials simply leave those suites out of the sweep, with
-a line in the log saying which and why.
+The three bench-host values are **secrets rather than variables** because a
+public repo's Actions logs are public: secrets are masked, variables print.
+Unset agent credentials simply leave those suites out of the sweep, with a
+line in the log saying which and why.
+
+**On a public repo, read the workflow's `pull_request` comment before
+enabling it.** The runner is self-hosted and persistent. The job runs only
+pull requests from this repository, but a fork can add its own workflow aimed
+at the runner — set "Require approval for all external contributors", or
+remove the trigger and test PRs with a keyword tag.
 
 **Central arena** — a ~10-line dispatch job in your repo fires a
 `workflow_dispatch` at a gentar instance someone else operates, passing

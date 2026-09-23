@@ -63,20 +63,41 @@ compose() { docker compose -f docker-compose.yml -f compose.rm.yml "$@"; }
 #
 # Values never appear here: -e NAME passes the name and lets Docker read
 # the value from the environment, so nothing lands in argv or a log.
-extract_env_names() {         # scenario files... -> one name per line
+# The [scenario] table only — the one place the engine reads `subject`,
+# `credentials` and `pass_env`. Reading keys anywhere in the file let a
+# `subject` or `credentials` under another table (a review found both)
+# masquerade as the scenario's. A header is a WHOLE line holding only
+# `[name]` / `[[name]]`, so `[ -f x ]` inside a step never counts.
+scenario_table() {
   awk '
+    # Inside a multi-line string (a step written as triple-quoted text), a
+    # line reading `[scenario]` is TEXT, not a header — without this, it
+    # re-entered the table and its `subject` was read.
+    function toggles(line, delim,   n) { n = gsub(delim, "", line); return n % 2 }
+    !inml && /^[[:space:]]*\[\[?[A-Za-z_][A-Za-z0-9_.-]*\]\]?[[:space:]]*(#.*)?$/ {
+      h = $0; gsub(/[][[:space:]]|#.*/, "", h); insc = (h == "scenario"); next
+    }
+    { if (insc) print
+      if (toggles($0, "\047\047\047")) inml = !inml
+      if (toggles($0, "\"\"\"")) inml = !inml }' "$1"
+}
+
+extract_env_names() {         # scenario files... -> one name per line
+  for _f in "$@"; do scenario_table "$_f"; done | awk '
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
     inarr {
       line = $0
-      while (match(line, /"[A-Za-z_][A-Za-z0-9_]*"/)) {
+      # either TOML quote style — a 'literal' name used to forward nothing,
+      # and the coordinator then refused credentials the caller had set
+      while (match(line, /["\047][A-Za-z_][A-Za-z0-9_]*["\047]/)) {
         print substr(line, RSTART + 1, RLENGTH - 2)
         line = substr(line, RSTART + RLENGTH)
       }
       depth += gsub(/\[/, "[") - gsub(/\]/, "]")
       if (depth <= 0) inarr = 0
     }
-  ' "$@"
+  '
 }
 
 # Sets FORWARD to the -e flags for the names the given scenarios declare
@@ -109,10 +130,53 @@ require_bench_key() {
   key=$(printf '%s' "$key" | sed 's/\\"/"/g; s/\\\\/\\/g')
   [ -n "$key" ] || key="${GENTAR_BENCH_KEY_FILE:-$HOME/.ssh/id_ed25519}"
   case "$key" in "~/"*) key="$HOME/${key#\~/}" ;; esac
-  [ -r "$key" ] && return 0
+  # Never repeat a value that is not plainly a path. Setting
+  # GENTAR_BENCH_KEY_FILE to the key's CONTENTS instead of its path is an
+  # easy mistake (in CI, pointing it at the secret instead of the staged
+  # file), and the "not found at <value>" line below then printed the whole
+  # private key — to a terminal, or to a CI log where masking a multi-line
+  # secret is not something to rely on. Found in review; true since 0.1.0.
+  case "$key" in
+    *"
+"*|*BEGIN*|*PRIVATE*|*KEY-----*)
+      echo "arena: GENTAR_BENCH_KEY_FILE holds what looks like KEY MATERIAL, not a path —" \
+           "it must be the PATH to the key file (value not shown)" >&2
+      exit 2 ;;
+  esac
+  if [ "${#key}" -gt 1024 ]; then
+    echo "arena: GENTAR_BENCH_KEY_FILE is ${#key} characters — not a path (value not shown)" >&2
+    exit 2
+  fi
+  # Readable AND non-blank. CI stages the key with printf '%s\n', so an
+  # UNSET secret becomes a one-byte file holding only the newline — which
+  # passes -r and -s alike and then fails every suite at ssh, reading as a
+  # red arena rather than a missing secret (claude-playbooks). grep -q
+  # inspects without printing: the key's contents never reach a log.
+  if [ -r "$key" ] && grep -q '[^[:space:]]' "$key" 2>/dev/null; then return 0; fi
+  if [ -r "$key" ]; then
+    echo "arena: bench ssh key at $key is EMPTY — the secret that should fill it is" \
+         "probably unset (BENCH_SSH_KEY in CI)" >&2
+    exit 2
+  fi
   echo "arena: bench ssh key not found at $key — set GENTAR_BENCH_KEY_FILE" \
        "(in .env or the shell) to the key the coordinator uses to reach the bench-host" >&2
   exit 2
+}
+
+# EXIT tears down on any normal end. INT and TERM need their OWN handlers
+# that tear down AND exit. A signal trap that merely returns lets bash
+# RESUME the script after the interrupted command: the next scenario starts
+# against an arena that was just torn down, and the run finishes with the
+# worst verdict it saw — 0 if nothing had failed yet. A CI cancel is a
+# SIGTERM to this shell, so a cancelled run read as a PASS. (Found by the
+# first real adopter, claude-playbooks, with a real SIGTERM; a test that
+# signals the whole process group hides it, because the child then dies
+# with 130 and carries the failure for us.) EXIT still fires after these
+# exits and sees _torn_down, so teardown happens exactly once.
+arm_traps() {
+  trap teardown EXIT
+  trap 'teardown; exit 130' INT
+  trap 'teardown; exit 143' TERM
 }
 
 _torn_down=0
@@ -190,7 +254,7 @@ start_arena() {
 cmd_run() {
   [ $# -ge 1 ] || { echo "usage: bin/arena run <scenario> [scenario...]" >&2; exit 64; }
   require_bench_key
-  trap teardown EXIT INT TERM
+  arm_traps
   compose build coordinator
   start_arena
   local status=0 rc
@@ -218,7 +282,7 @@ cmd_sql() {
 
 cmd_dashboard() {
   require_bench_key
-  trap teardown EXIT INT TERM
+  arm_traps
   start_arena
   compose run --rm --no-deps dashboard
 }
@@ -226,7 +290,7 @@ cmd_dashboard() {
 cmd_ls() {
   # No arena needed: `ls` reads the scenario files, nothing else.
   require_bench_key
-  trap teardown EXIT INT TERM
+  arm_traps
   compose run --rm --no-deps coordinator ls
 }
 
