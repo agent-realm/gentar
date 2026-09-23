@@ -3,7 +3,7 @@
 # scenario, land the report in gentar/reports/.
 #
 #   gentar/run.sh <scenario>            # e.g. first-suite
-#   GENTAR_REF=v0.2.0 gentar/run.sh …   # run against another engine version
+#   GENTAR_REF=v0.1.1 gentar/run.sh …   # run against another engine version
 #   GENTAR_REF=main gentar/run.sh …     # …or the engine's tip, unpinned
 #
 # First run: clones gentar into gentar/.arena and copies .env.example
@@ -55,7 +55,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.2.0}
+REF=${GENTAR_REF:-v0.3.0}
 
 # --review: has this repo outgrown its suites?
 #

@@ -98,7 +98,55 @@ jobs:
               arena-*)  INPUT=${tag#arena-} ;;
             esac
           fi
+
+          # A pull request MAY narrow itself. The bench-host is one shared
+          # machine, so a README typo and an auth rewrite otherwise cost
+          # the same wall-clock, and the expensive tier is what people
+          # then start skipping entirely.
+          #
+          #     gentar: auth-flow config-migration
+          #
+          # in the PR body picks those suites. Declared, not inferred: a
+          # rule that reads the diff and decides for you fails by SILENTLY
+          # EXCLUDING the suite that mattered — a green PR that never ran
+          # the relevant test, which is the failure mode this whole engine
+          # exists to refuse. A human narrowing on purpose is visible in
+          # the PR and reviewable like any other claim in it.
+          #
+          # GENTAR_FLOOR is the safety net: those suites run whatever the
+          # body says, so a bad narrowing costs coverage on the slow tier
+          # and never on the fast guard rails. Pushes to the default
+          # branch and v* tags ignore all of this and run everything, so
+          # nothing a PR skipped stays skipped.
+          FLOOR="${GENTAR_FLOOR:-}"
+          if [ -z "$INPUT" ] && [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            picked=$(printf '%s\n' "$PR_BODY" \
+              | sed -n 's/^[[:space:]]*gentar:[[:space:]]*//p' | head -1 | tr -d '\r')
+            # A scenario name is [A-Za-z0-9._-]; anything else in a PR
+            # body is not a suite. The name check below already refuses
+            # unknown names with exit 2, so `gentar: x; rm -rf /` fails
+            # there too — but that is a validator doing a sanitiser's job,
+            # and one refactor of the loop would turn a PR body into
+            # shell. Reject the characters explicitly, where the reason
+            # is visible.
+            for w in $picked; do
+              case "$w" in
+                *[!A-Za-z0-9._-]*)
+                  echo "refusing PR-declared suite name: $w" >&2
+                  echo "a scenario name is letters, digits, dot, dash, underscore" >&2
+                  exit 2 ;;
+              esac
+            done
+            if [ -n "$picked" ]; then
+              echo "PR narrows the run to: $picked"
+              [ -n "$FLOOR" ] && echo "floor suites always included: $FLOOR"
+              INPUT="$FLOOR $picked"
+            fi
+          fi
           if [ -n "$INPUT" ]; then
+            # A floor suite the body also named would otherwise run twice,
+            # spending a bench to learn the same thing.
+            INPUT=$(printf '%s\n' $INPUT | awk '!seen[$0]++' | tr '\n' ' ')
             for s in $INPUT; do
               [ -f "gentar/scenarios/$s.toml" ] \
                 || { echo "unknown scenario: $s" >&2; exit 2; }
@@ -129,6 +177,13 @@ jobs:
           exec gentar/run.sh $suites
         env:
           SCENARIO_INPUT: ${{ github.event.inputs.scenario }}
+          # Through env, never interpolated into the script body: a PR
+          # body is attacker-controlled text and `${{ }}` would paste it
+          # straight into the shell.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          # Suites that run on a narrowed PR no matter what it declared.
+          # Name the cheap deterministic ones here, space separated.
+          GENTAR_FLOOR: ${{ vars.GENTAR_FLOOR }}
           # Empty = run.sh's own default, which is a release tag. Keep
           # the pin in ONE place: a default here would silently win over
           # the script's and drift from it.

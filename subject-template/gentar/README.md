@@ -12,7 +12,7 @@ can hand to an agent to fix what failed.
 | suites | `scenarios/*.toml` — decisions + reality assertions | see below |
 | credentials | `credentials = [names]` per suite — entries are ALTERNATIVES, a list entry is an all-of group (`["KEY", ["TOKEN","BASE_URL"]]` = the key alone, or the token and its endpoint together). None present refuses (exit 2) before a bench exists | per suite |
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | see workflow |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.2.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.3.0` |
 
 ## Quickstart (local)
 
@@ -111,6 +111,40 @@ Its blind spot, stated so you do not trust it too far: it compares
 shipped executables and scripts against names the suites mention, so a
 **behaviour change inside a file a suite already names** does not show
 up. The diff is there for that.
+
+## Narrowing a pull request
+
+A PR runs every suite it can. The bench-host is one shared machine, so a
+README typo and a rewrite of the install path cost the same wall-clock —
+and when the expensive tier makes every PR slow, people stop running it
+at all. A PR can say what it needs:
+
+```
+gentar: auth-flow config-migration
+```
+
+anywhere in the **PR body**, one line. Those suites run, plus whatever
+`GENTAR_FLOOR` names, and nothing else. No line means today's behaviour:
+everything runnable.
+
+**Set `GENTAR_FLOOR`** (a repo variable) to the cheap deterministic
+suites. They run whatever a PR declares, so a too-narrow pick costs
+coverage on the slow tier and never on the fast guard rails.
+
+Two deliberate limits:
+
+- **Declared, not inferred.** A rule that reads the diff and picks for
+  you fails by silently *excluding* the suite that mattered — a green PR
+  that never tested the change, which is the one outcome this engine
+  exists to refuse. A human narrowing on purpose is visible in the PR and
+  reviewable like any other claim in it.
+- **Only a PR narrows.** Pushes to the default branch and `v*` tags
+  ignore the declaration and run everything, so nothing a PR skipped
+  stays skipped.
+
+A suite name is letters, digits, dot, dash, underscore; anything else in
+that line is refused with exit 2 before a bench is spent — a PR body is
+text a stranger can write.
 
 ## The fix loop
 

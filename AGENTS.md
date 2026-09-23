@@ -122,6 +122,28 @@ reality and stale reality fails honestly. A change to the *engine* is a
 deliberate `GENTAR_REF` bump: bump it, run the suites, commit the bump on
 its own. `subject-template/gentar/README.md` has the full rule.
 
+## Running only what a change needs
+
+You do **not** re-adapt to test a feature or a bugfix. Adaptation happens
+once; which suites run is a per-run decision, and there are four ways to make
+it — none of them touching `gentar/`:
+
+| Want | Do |
+|---|---|
+| one suite, locally | `gentar/run.sh auth-flow` |
+| several | `gentar/run.sh auth-flow config-migration` |
+| one suite in CI, on any commit | push a tag `arena-auth-flow` |
+| narrow a pull request | a `gentar: auth-flow` line in the PR body |
+
+The last one also runs whatever `GENTAR_FLOOR` names, so a narrow pick cannot
+cost the cheap guard rails, and the default branch and `v*` tags always run
+everything regardless.
+
+When a pilot asks to "run the arena for just this PR", that is the answer —
+not a re-adaptation, and not a change to the arena, which is rebuilt from
+scratch every run either way. If the change adds behaviour no suite asserts,
+the honest move is to say so and propose a suite, not to narrow around it.
+
 ## Reviewing an adaptation
 
 If the repo is already a subject and you are asked to check, refresh or

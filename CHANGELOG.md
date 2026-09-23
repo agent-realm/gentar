@@ -22,6 +22,37 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.3.0 — 2026-09-23
+
+### Added
+
+- **A pull request can narrow its own arena run.** A `gentar: <suites>`
+  line in the PR body picks the suites; `GENTAR_FLOOR` (a repo variable)
+  names suites that run whatever the body says. The bench-host is one
+  shared machine, so without this a README typo and an install-path
+  rewrite cost the same wall-clock — and an expensive tier that makes
+  every PR slow is a tier people stop running.
+
+  **Declared, not inferred.** A rule that reads the diff and picks for
+  you fails by silently excluding the suite that mattered: a green PR
+  that never tested the change, which is the one outcome this engine
+  exists to refuse. A human narrowing on purpose is visible in the PR and
+  reviewable like any other claim in it. The floor means a too-narrow
+  pick costs coverage on the slow tier, never on the fast guard rails,
+  and only pull requests narrow — the default branch and `v*` tags run
+  everything, so nothing a PR skipped stays skipped.
+
+  A suite name is `[A-Za-z0-9._-]`; anything else on that line is
+  refused with exit 2 before a bench is spent. A PR body is text a
+  stranger can write, and it reaches the runner through step `env`,
+  never `${{ }}` interpolation into the script body.
+
+- `AGENTS.md` gains "Running only what a change needs", so an agent asked
+  to test just a PR narrows the run instead of re-adapting the repo.
+
+No schema or exit-code change: a suite written against 0.1.x or 0.2.x
+runs unchanged.
+
 ## 0.2.0 — 2026-09-23
 
 Adaptation is a process, and this release adds the part that was missing:
