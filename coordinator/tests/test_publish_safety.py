@@ -71,6 +71,20 @@ class RedactTest(unittest.TestCase):
         self.assertNotIn("bench.internal.example", out)
         self.assertIn("«redacted:GENTAR_BENCH_HOST»", out)
 
+    def test_without_compose_an_unknown_name_refuses(self):
+        # compose could not say, and a named variable is not in the env:
+        # it may hold a value the run used (set only in .env) — refuse
+        r, out = self.run_redact("host h1.example", GENTAR_REDACT_NAMES="GENTAR_BENCH_HOST",
+                                 PATH="/usr/bin:/bin")          # no docker here
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertEqual(out, "host h1.example")               # untouched, not "clean"
+
+    def test_without_compose_names_all_in_the_env_still_redact(self):
+        r, out = self.run_redact("host h1.example", GENTAR_REDACT_NAMES="GENTAR_BENCH_HOST",
+                                 GENTAR_BENCH_HOST="h1.example", PATH="/usr/bin:/bin")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(out, "host «redacted:GENTAR_BENCH_HOST»")
+
     def test_no_files_is_a_usage_error(self):
         r = subprocess.run([sys.executable, str(REDACT)], capture_output=True)
         self.assertEqual(r.returncode, 2)
@@ -99,6 +113,17 @@ class DashboardHidesTranscriptsTest(unittest.TestCase):
         self.assertIn("agent transcript, 37 chars", html)
         self.assertIn("echo hi", html)          # command output stays, as in the report
 
+
+    def test_only_this_invocations_runs_are_fetched(self):
+        # a kept arena still holds earlier runs, whose credentials the
+        # publisher cannot redact (agy review)
+        spec = importlib.util.spec_from_file_location("gen", GENERATE)
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+        seen = []
+        gen.ch_query = lambda url, user, pw, sql: seen.append(sql) or []
+        gen.fetch("http://x", "u", "p", "gentar", 500, since=1700000000)
+        self.assertIn("toUnixTimestamp(run_started) >= 1700000000", seen[0])
 
     def test_the_grid_hides_a_transcript_that_was_the_last_step(self):
         spec = importlib.util.spec_from_file_location("gen", GENERATE)

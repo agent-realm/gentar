@@ -28,8 +28,9 @@ import sys
 from pathlib import Path
 
 
-def compose_env() -> dict:
-    """The coordinator's environment as compose resolved it, or {}."""
+def compose_env():
+    """The coordinator's environment as compose resolved it, or None when
+    compose could not say."""
     engine = os.environ.get("GENTAR_ENGINE_DIR") or str(Path(__file__).resolve().parent.parent)
     try:
         out = subprocess.run(
@@ -38,11 +39,11 @@ def compose_env() -> dict:
              "config", "--format", "json"],
             capture_output=True, text=True, timeout=60)
         if out.returncode != 0:
-            return {}
+            return None
         env = json.loads(out.stdout)["services"]["coordinator"].get("environment") or {}
         return {k: v for k, v in env.items() if isinstance(v, str)}
     except (OSError, ValueError, KeyError, subprocess.SubprocessError):
-        return {}
+        return None
 
 
 def main(argv):
@@ -52,6 +53,18 @@ def main(argv):
         return 2
     names = os.environ.get("GENTAR_REDACT_NAMES", "").split()
     resolved = compose_env()
+    if resolved is None:
+        # Compose could not say, so a name missing from this environment
+        # may still hold a value the run used (set only in .env). Refuse
+        # rather than publish on a guess (agy review); the caller keeps the
+        # file unpublished.
+        unknown = [n for n in names if n not in os.environ]
+        if unknown:
+            print("redact: `docker compose config` did not answer, and "
+                  f"{len(unknown)} named variable(s) are not in the environment "
+                  "— cannot prove the file clean", file=sys.stderr)
+            return 1
+        resolved = {}
     values = set()
     for n in names:
         for v in (os.environ.get(n, ""), resolved.get(n, "")):

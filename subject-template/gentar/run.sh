@@ -839,7 +839,8 @@ render_dashboard() {
   mkdir -p "$ARENA/dashboard/out" 2>/dev/null || true
   rm -f "$out" 2>/dev/null || true
   if ! arena run --rm --no-deps dashboard \
-       python /dashboard/generate.py --out /out/dashboard.html --runs 500 >/dev/null 2>&1 \
+       python /dashboard/generate.py --out /out/dashboard.html --runs 500 \
+         --since "$RUN_T0" >/dev/null 2>&1 \
      || [ ! -s "$out" ]; then
     echo "dashboard: not rendered (the verdict is unaffected)" >&2
     return 0
@@ -855,6 +856,7 @@ render_dashboard() {
 # Run every requested scenario; report all, fail if any failed.
 mkdir -p "$HERE/reports"
 status=0
+RUN_T0=$(( $(date +%s) - 5 ))   # the dashboard shows this invocation's runs only
 for s in "$SCENARIO" "$@"; do
   # Exit code is the verdict: 0 pass · 1 fail · 2 usage/config refusal.
   MARKER=$(mktemp)
