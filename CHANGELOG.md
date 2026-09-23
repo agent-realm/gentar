@@ -22,6 +22,118 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.4.0 — 2026-09-23
+
+**The run policy.** Which suites run when is decided once, at adaptation,
+and then automated — the pilot's policy, shaped with the first adopter
+(claude-playbooks):
+
+- **Phase 1** on every pull request and every push to the default branch:
+  bench-free checks on a GitHub-hosted runner (`gentar/run.sh --check`),
+  plus a floor of cheap suites on the bench for pushes — and for PRs only
+  when the policy allows PR code on the self-hosted runner.
+- **Phase 2**, the full regression, only on a dispatch, the `arena` tag or
+  a `v*-rc*` tag, as the job `arena / phase2`.
+- **A release is gated**, not tested after: `gentar/release-gate.sh <sha>`
+  refuses unless that exact commit has a green `arena / phase2`.
+
+No change to the scenario schema or the exit-code contract. What changes is
+the kit, which is why this is a minor bump.
+
+### Added
+
+- `gentar/policy.toml` (the subject's) and `gentar/plan.py` (the kit's, its
+  only reader). `plan` maps an event to `checks` / `bench`
+  (`none`·`targeted`·`phase2`) / `suites`; an unknown key, trigger or suite
+  is refused with exit 2, never defaulted. Without a policy.toml the kit
+  behaves as 0.3.x did. `gentar/run.sh --plan` shows it for any event.
+- `gentar/run.sh --check` — stage the engine, lint the adaptation (a flat
+  credential list holding an endpoint; a kit file that differs from the
+  pinned engine's copy — the workflow and release gate may be absent, for a
+  central-dispatch subject or one that never releases), dry-run every suite.
+  Exit 0 clean · 1 a check failed · 2 a refusal (bad policy, an untrusted
+  host), a refusal winning. Usage and configuration errors across the kit
+  now exit 2 as the contract says: `run.sh` with no scenario (it exited 1
+  or 127), `release-gate.sh` without `GITHUB_REPOSITORY`, and `dryrun.py` /
+  `plan.py` without an engine or a TOML parser (they exited 1). A fork's PR, which gets no
+  secrets and so cannot stage a private engine, is a named skip.
+- `gentar/release-gate.sh` — names what it found when it refuses: a failed
+  phase 2, a cancelled one, or a run GitHub cancelled before any job
+  started. Optional `[phase2] max_age_days`, compared in seconds (a pass
+  7 days 23 hours old is refused by a 7-day limit). With
+  `release_gate = false` it always passes, even when the API cannot answer.
+- `gentar/hooks.py` — the dry-run hooks (`prepare()`, `HIDE_FROM_PATH`,
+  `SKIP_STEP_SUBSTR`) move out of `dryrun.py`, so every kit file can stay
+  byte-identical to the kit.
+
+### Changed
+
+- **The kit workflow** is built around a `plan` job on ubuntu-latest; the
+  `checks` job is GitHub-hosted too, and only the `bench` job is
+  self-hosted. It runs only when the plan asks and never for a fork's PR
+  (checked from GitHub's context, not from the PR's files). It triggers on
+  pushes to every branch, since only the planner knows which one is the
+  default (main, master, trunk…); anything else plans to nothing. Host ports and
+  the budget cap come from repository variables, so the file needs no
+  edits. So does the engine ref: `vars.GENTAR_REF` overrides `run.sh`'s pin
+  on every event, which is how an adopter proves an untagged engine in CI
+  before it is released (claude-playbooks: the pin cannot be edited without
+  failing `--check`, and a dispatch only exists once the workflow is on the
+  default branch).
+- **Arenas of one repo are serialised on the host, not by GitHub.** A
+  repository-wide concurrency group CANCELS a pending run when a newer one
+  queues, so phase 2 and keyword runs were silently dropped behind ordinary
+  main pushes (claude-playbooks, observed) — and even a per-ref group drops
+  a phase 2 dispatched on main behind the next main push. Now only a pull
+  request's runs share a group (a newer push supersedes an older one);
+  every other run has its own and is never dropped. `run.sh` takes a host lock
+  per `arena-<subject>` — flock, or a mkdir lock with stale-holder
+  detection on macOS — and a later run waits, saying for whom. Locks live
+  in a shared, non-sticky `gentar-locks/` directory, so any runner user
+  can clear a dead run's lock; one it cannot remove is named with the
+  command to remove it, never hung on. Shared means advisory between local
+  users, not a way to redirect this one's writes: a symlinked lock root or
+  lock file is refused, the lock file is created with O_EXCL, and holder
+  notes are written to a temp file and renamed into place (claude-playbooks).
+  A mkdir lock with no readable holder note that is over a minute old — a
+  run killed between creating it and writing the note — counts as stale. The
+  `--down` never tears down an
+  arena another live run holds.
+- The workflow's bench-key guard treats a whitespace-only secret as blank,
+  agreeing with `run.sh` (claude-playbooks).
+- **The dry-run describes a bench, not its host** (claude-playbooks, first
+  CI run of `--check`). `prepare()` runs only for suites with a step it
+  stands in for (a `SKIP_STEP_SUBSTR` match; a repo declaring none keeps
+  prepare-for-every-suite) — its build no longer shadows what an unrelated
+  suite installs. And a host whose system install dirs are writable (a
+  hosted runner's `/usr/local/bin`, an Intel Mac's) is warned about locally
+  and refused in CI: an install there writes outside the scratch home and
+  passes or fails for the host's reasons. The kit's `checks` job makes the
+  hosted runner bench-like (system bin dirs root-owned, 0755) first.
+- `dryrun.py` reports an UNVERIFIED-only suite without failing when run by
+  `--check`: those turns need the arena, and a check that always fails is
+  a check people learn to ignore.
+
+### Fixed
+
+- The kit README claimed the dashboard shows "the agent's own telemetry".
+  No agent CLI writes the self-report relay, so that panel is empty for an
+  agent suite; the sentence now says so (claude-playbooks).
+
+### Upgrading from 0.3.x
+
+1. Re-copy `run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh` and the
+   workflow from the `v0.4.0` kit. Do not edit them.
+2. Move your `prepare()` / `HIDE_FROM_PATH` / `SKIP_STEP_SUBSTR` into
+   `gentar/hooks.py` (start from the kit's).
+3. Write `gentar/policy.toml` (start from the kit's): the floor, whether a
+   PR may use the bench, any `[phase1] setup` toolchain.
+4. Port pins you had in the workflow become repository variables
+   `GENTAR_CLICKHOUSE_HOST_PORT` / `GENTAR_OTLP_HOST_PORT`; `GENTAR_FLOOR`
+   becomes `[phase1] floor`.
+5. Add `gentar/release-gate.sh` as the first job of your release workflow.
+6. `gentar/run.sh --check` must say `check: clean`.
+
 ## 0.3.1 — 2026-09-23
 
 Fixes only, from the first adopter's re-adaptation to 0.3.0

@@ -41,7 +41,7 @@ spans. Never what the software or an agent *claims*.
 The exit code is the verdict: `0` pass, `1` fail, `2` usage/config refusal,
 and a refusal always happens before a bench is created.
 
-## The four decisions
+## The five decisions
 
 Adaptation is decisions, not a copy. Ask the pilot about anything you cannot
 determine by reading the repo; do not guess and do not silently default.
@@ -52,6 +52,7 @@ determine by reading the repo; do not guess and do not silently default.
 | 2 | **Trigger mode** | **Own arena** (the repo runs the stack itself, needs a self-hosted runner with Docker and reach to a bench-host) or **central dispatch** (a ~10-line job fires `workflow_dispatch` at a central arena, needs `GENTAR_DISPATCH_TOKEN` and an operator who has onboarded the repo). Ask. Outside this organisation, own arena is the only self-service path. **If own arena and the repo is PUBLIC, say this before copying the workflow:** its runner is self-hosted and persistent, and a pull request runs the PR's code on it. The kit's workflow runs only same-repository PRs, but a fork can add its own workflow aimed at that runner — so a public repo needs "Require approval for all external contributors" set, or no PR trigger at all. Let the pilot choose; do not recommend the trigger without the risk. |
 | 3 | **Bench tier** | `sbx` microVM is the default and right for nearly everything. `tart` only if the repo's install is macOS-specific; `osb` / `daytona` only if the pilot already runs those. Ask before choosing anything but the default. |
 | 4 | **What the first suite asserts** | **This is the work.** Read the repo: its README's install instructions, its entry points, what it puts on disk. Propose concrete assertions — a binary that answers `--version`, a config file that appears, a service that responds — and confirm them with the pilot before writing. |
+| 5 | **Run policy** | Which suites run when, written once to `gentar/policy.toml` and then automated. The kit's shape: **phase 1** on every PR and default-branch push (bench-free checks on a GitHub-hosted runner, plus a floor of cheap suites on the bench for pushes), **phase 2** — the full regression — only on dispatch, the `arena` tag or a `v*-rc*` tag, and a release gated on a green phase 2 of its commit (`gentar/release-gate.sh` as the first job of the release workflow). Ask two things: **which suites form the floor**, and **whether a PR may run suites on the bench** (`[phase1] bench = "declared"`). The second puts PR code on the self-hosted runner — on a PUBLIC repo that is the pilot's security call; the kit's default is `"off"`. If the dry-run's `prepare()` needs a toolchain, declare it (`[phase1] setup = { go = "1.21" }`). Show the pilot `gentar/run.sh --plan` for a PR, a main push and a release tag before committing. |
 
 **If a suite needs credentials, get the grouping right** — it is the
 mistake the first real adopter's agent made while following this file.
@@ -97,10 +98,14 @@ does on a fresh machine is the entire point.
    `[[verify.*]]` assertions.
 7. **Dry-run**: `gentar/dryrun.py` — replays steps and assertions locally in
    about a second, no bench. Expect `ALL PASS`. Each suite gets its own fresh
-   scratch home, and `prepare()` runs once per suite: put the subject's
+   scratch home, and `prepare()` runs per suite — only for the suites with a
+   step it stands in for (a `SKIP_STEP_SUBSTR` match; every suite when none
+   is declared): put the subject's
    binaries in that home's `~/.local/bin`, and dryrun hides those names on
    the real `PATH` so a suite can never fall through to the pilot's own
-   installed copy. Names a suite creates itself go in `HIDE_FROM_PATH`. It needs python 3.11+, or
+   installed copy. Names a suite creates itself go in `HIDE_FROM_PATH`. Both
+   hooks live in `gentar/hooks.py`, the subject's own file; `dryrun.py` is
+   the kit's and must stay byte-identical to it. It needs python 3.11+, or
    3.9/3.10 with `tomli`; if it says so, that is a missing parser on the
    host and not a problem with the suite — the arena runs 3.12 in a
    container regardless.
@@ -112,7 +117,11 @@ does on a fresh machine is the entire point.
    bench-host, so without them every suite fails; the workflow refuses up
    front instead. CI's own sweep is `gentar/run.sh --sweep` — every suite
    whose credentials are present, the rest skipped by name — and it tears
-   down with `gentar/run.sh --down`. **A local pass is not a CI pass**: the
+   down with `gentar/run.sh --down`. Write `gentar/policy.toml` (decision 5)
+   and run `gentar/run.sh --check`: it is what every PR will run, and it
+   fails on a kit file that differs from the pinned engine's copy — adapt
+   through `hooks.py`, `policy.toml` and repository variables, never by
+   editing kit files. **A local pass is not a CI pass**: the
    first push is the first time CI's environment has run it. Report CI's
    result, not your laptop's.
 
@@ -167,9 +176,12 @@ it — none of them touching `gentar/`:
 | one suite in CI, on any commit | push a tag `arena-auth-flow` |
 | narrow a pull request | a `gentar: auth-flow` line in the PR body |
 
-The last one also runs whatever `GENTAR_FLOOR` names, so a narrow pick cannot
-cost the cheap guard rails, and the default branch and `v*` tags always run
-everything regardless.
+The last one works when the run policy lets a PR use the bench
+(`[phase1] bench = "declared"`); it also runs the policy's floor, so a narrow
+pick cannot cost the cheap guard rails. The full regression is phase 2:
+dispatch, the `arena` tag or a release candidate — and a release is gated
+on it. `gentar/run.sh --plan` answers "what would this event run?" without
+running anything.
 
 When a pilot asks to "run the arena for just this PR", that is the answer —
 not a re-adaptation, and not a change to the arena, which is rebuilt from

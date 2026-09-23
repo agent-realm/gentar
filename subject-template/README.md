@@ -21,12 +21,13 @@ workflow:
 
 | # | Declaration | Where it lives | Default the kit gives you |
 |---|---|---|---|
-| 1 | **Subject name** | `subject = "…"` in every scenario TOML; `SUBJECT` in `run.sh` | your repo's basename |
+| 1 | **Subject name** | `subject = "…"` in every scenario TOML — `run.sh` reads it from there | `REPLACE-ME`, refused until set |
 | 2 | **Suites** | `gentar/scenarios/*.toml` — install *decisions* + reality assertions, never scripts | `first-suite.toml`, fully commented |
 | 3 | **Credentials** | `credentials = [names]` per suite — env var NAMES; entries are alternatives, a list entry is an all-of group; none = oracle suite | none (first-suite is credential-less) |
-| 4 | **Trigger** | `.github/workflows/gentar-arena.yml` (own arena) and/or a dispatch job (central arena) | own-arena workflow: PRs, push to main, tags, dispatch |
-| 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.3.1` — a release tag, bumped deliberately |
-| 6 | **PR scope** *(optional)* | `gentar: <suites>` in a PR body narrows that run; `GENTAR_FLOOR` repo var names suites that run anyway | unset — every PR runs everything runnable |
+| 4 | **Trigger** | `.github/workflows/gentar-arena.yml` (own arena, kept byte-identical to the kit) and/or a dispatch job (central arena) | own-arena workflow: PRs, push to main, tags, dispatch — what each runs is the run policy's |
+| 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.4.0` — a release tag, bumped deliberately |
+| 6 | **Run policy** | `gentar/policy.toml` — phase 1 on PRs and main pushes, phase 2 (full regression) on dispatch / `arena` / `v*-rc*`, releases gated by `gentar/release-gate.sh` | PRs bench-free (`bench = "off"`), empty floor, gate on |
+| 7 | **Dry-run hooks** | `gentar/hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | no-ops |
 
 The verdict contract is the engine's, not yours: exit `0` pass · `1`
 fail · `2` usage/config refusal. Assertions read reality — files,
@@ -62,9 +63,17 @@ cp -R subject-template/gentar  /path/to/your-repo/gentar
 cp -R subject-template/.github /path/to/your-repo/.github   # merge if you have one
 ```
 
-Observe: `your-repo/gentar/` contains `run.sh`, `dryrun.py`,
+Observe: `your-repo/gentar/` contains `run.sh`, `dryrun.py`, `plan.py`,
+`release-gate.sh`, `policy.toml`, `hooks.py`,
 `scenarios/first-suite.toml`, `.gitignore`, `README.md`, and
 `your-repo/.github/workflows/gentar-arena.yml` exists.
+
+Four of those are the kit's and stay **byte-identical** to the pinned
+engine's copies: `run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh`, plus
+the workflow. `gentar/run.sh --check` fails when one differs, so an engine
+bump is a re-copy, never a merge. Everything a repo adapts lives in files
+that are its own: `scenarios/`, `policy.toml`, `hooks.py`, and repository
+variables.
 
 `gentar/.gitignore` keeps `reports/`, `.arena/` and `.env` out of git.
 Check it landed — those three carry run output, a whole engine checkout,
@@ -107,7 +116,7 @@ Clones the engine into `gentar/.arena`, checks out the pinned
 `GENTAR_REF`, and seeds the arena's `.env` from its `.env.example`. No
 Docker, no bench — this is a git operation.
 
-Observe: `engine staged: …/gentar/.arena @ v0.3.1 (<sha>)` and a path to
+Observe: `engine staged: …/gentar/.arena @ v0.4.0 (<sha>)` and a path to
 the arena env file.
 
 **The seeded `.env` holds placeholders, not a working config — edit it
@@ -247,11 +256,13 @@ public repo's Actions logs are public: secrets are masked, variables print.
 Unset agent credentials simply leave those suites out of the sweep, with a
 line in the log saying which and why.
 
-**On a public repo, read the workflow's `pull_request` comment before
-enabling it.** The runner is self-hosted and persistent. The job runs only
-pull requests from this repository, but a fork can add its own workflow aimed
-at the runner — set "Require approval for all external contributors", or
-remove the trigger and test PRs with a keyword tag.
+**Pull requests and the self-hosted runner.** The workflow always triggers on
+pull requests, but what a PR runs is the run policy's: with the kit's default
+(`[phase1] bench = "off"`) a PR runs only bench-free checks on a GitHub-hosted
+runner and never reaches the self-hosted one, and a fork's PR never does
+whatever the policy says. A fork can still add its own workflow aimed at the
+runner, so on a public repo also set "Require approval for all external
+contributors".
 
 **Central arena** — a ~10-line dispatch job in your repo fires a
 `workflow_dispatch` at a gentar instance someone else operates, passing
@@ -263,8 +274,8 @@ checkout. The exact job and both token scopes are in
 Observe either way: open a pull request touching anything, and the
 arena runs against its head commit.
 
-**Without a PR trigger** (a public repo), prove the adoption PR before it
-merges by pushing the `arena` keyword tag at its head commit. A tag push
+**Before it merges**, prove the adoption PR on the bench by pushing the
+`arena` keyword tag at its head commit. A tag push
 runs the workflow file of the *tagged* commit, even when that file is not
 on the default branch yet — which is how the first real adoption got a CI
 arena before merge.
@@ -392,8 +403,12 @@ subject-template/
   gentar/                          # → <your-repo>/gentar/
     README.md                      # subject-side doc (fill in the tables)
     scenarios/first-suite.toml     # every field, commented
-    run.sh                         # stage, run, report
+    run.sh                         # stage, run, report; --check --plan --down
     dryrun.py                      # bench-less replay (~1s)
+    plan.py                        # the run policy's only reader
+    release-gate.sh                # may this commit be released?
+    policy.toml                    # YOURS: which suites run when
+    hooks.py                       # YOURS: dry-run hooks
     .gitignore                     # reports/ .arena/ .env
   .github/workflows/gentar-arena.yml   # → your workflows dir
 ```
