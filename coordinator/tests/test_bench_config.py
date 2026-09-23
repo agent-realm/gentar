@@ -235,6 +235,22 @@ class RefusalPathCoverageTest(unittest.TestCase):
         for known in BENCH_REQUIREMENTS:
             self.assertIn(known, out)
 
+    def test_a_prefix_sbx_cannot_use_refuses_before_any_bench(self):
+        # CI embeds the GitHub job id, which may hold `_`; sbx names may
+        # not, so every create would fail. Refused (exit 2), not mapped:
+        # `a_b` and `a-b` sharing one prefix would reap each other.
+        for bad in ("gentar-gh1-a1-smoke_test0", "gentar.gh1", "-gentar"):
+            with self.subTest(prefix=bad):
+                rc, out = self.run_refusing(
+                    self.configured(GENTAR_NAME_PREFIX=bad), "smoke")
+                self.assertEqual(rc, 2)
+                self.assertIn(bad, out)
+                self.assertIn("job id", out)
+
+    def test_a_ci_shaped_prefix_is_not_refused(self):
+        cfg = self.configured(GENTAR_NAME_PREFIX="gentar-gh35854630458-a1-arena0")
+        self.assertEqual(cfg.missing_bench_env(), [])
+
     def test_unknown_scenario_refuses(self):
         # The other name-level refusal: an unknown suite must not spend
         # a bench discovering it does not exist.

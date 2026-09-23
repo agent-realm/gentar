@@ -11,7 +11,10 @@ tier, checked against the tier a run actually selects, so a tier
 nobody uses never has to be configured."""
 
 import os
+import re
 
+
+_PREFIX_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
 
 def _opt(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
@@ -169,5 +172,16 @@ class Config:
         if kind not in BENCH_REQUIREMENTS:
             known = ", ".join(sorted(BENCH_REQUIREMENTS))
             return [f"a known bench tier (got {kind!r}; known: {known})"]
+        # Every sandbox name starts with the prefix. sbx accepts letters,
+        # digits, hyphens and periods; CI builds the prefix from the GitHub
+        # job id, which may hold `_`, and sbx would then reject every
+        # create. Refused here rather than mapped: `a_b` and `a-b` mapping
+        # to one prefix would let two jobs reap each other's benches.
+        # Periods are refused too, so bin/bench-reap's rule is the same one.
+        if not _PREFIX_RE.fullmatch(self.name_prefix):
+            return [f"a GENTAR_NAME_PREFIX of letters, digits and hyphens, "
+                    f"starting with a letter or digit (got "
+                    f"{self.name_prefix!r}; in CI it embeds the job id — "
+                    f"rename a job id holding `_`)"]
         return [var for var, attr in BENCH_REQUIREMENTS[kind]
                 if not getattr(self, attr, "").strip()]

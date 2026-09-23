@@ -45,7 +45,11 @@ scenario schema or the exit-code contract; an adopter re-copies the kit.
   same-shaped decoy left untouched.
 - **`GENTAR_NAME_PREFIX` never reached the coordinator.** The compose file
   did not forward it, so the knob in `.env.example` did nothing. It is
-  forwarded now, and an empty value reads as the default.
+  forwarded now, and an empty value reads as the default. A prefix sbx
+  cannot use in a name (CI embeds the GitHub job id, which may hold `_`)
+  is refused with exit 2 before any bench exists, rather than failing
+  every create; it is not mapped, since `a_b` and `a-b` would then share
+  a prefix and reap each other's benches. (claude-playbooks.)
 - **The dashboard read the wrong ClickHouse** when an adopter had moved
   the port: it defaulted to 8123 and ignored `GENTAR_CLICKHOUSE_HOST_PORT`
   — on a host where another arena holds 8123, it rendered *that* arena.
