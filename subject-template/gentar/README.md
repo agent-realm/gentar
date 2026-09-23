@@ -238,14 +238,26 @@ runner → follow the commands → when configuring, labels: `arena`.
 Secrets/vars the workflow reads:
 
 - `secrets.BENCH_SSH_KEY` — key the coordinator uses to reach the bench-host
+- `secrets.GENTAR_BENCH_HOST`, `secrets.GENTAR_BENCH_USER` — the bench-host itself; the
+  engine ships none, so without these no suite can run (secrets, because a public
+  repo's logs are public)
 - `secrets.GENTAR_CLONE_KEY` — read-only deploy key, only if the ENGINE repo is private
 - `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
 - `secrets.ANTHROPIC_API_KEY` or `secrets.ANTHROPIC_AUTH_TOKEN` + `vars.ANTHROPIC_BASE_URL` — agent suites
 - `vars.ANTHROPIC_DEFAULT_{SONNET,OPUS,HAIKU,FABLE}_MODEL` — all four, for a routed endpoint
 - `GENTAR_BUDGET_CAP` in the workflow — ceiling the budget guard enforces
 
-All are optional except the bench key; unset agent credentials simply
-leave agent suites out of the sweep, named in the log either way.
+The three bench values are required; the workflow refuses with a named error
+before staging anything if one is missing or still the placeholder. Everything
+else is optional. The workflow's sweep is `gentar/run.sh --sweep`: suites whose
+credentials are absent are skipped and named, not run into a red refusal. It
+tears down with `gentar/run.sh --down`.
+
+**Credential grouping.** `credentials` lists *alternatives*. A provider that is
+a pair must be a nested list — `[["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]`.
+Written flat, the two are either-or: the token wins alone and the URL is
+dropped. The engine warns when a declared credential is set but not forwarded,
+in the log and in the report.
 
 The workflow stages the checkout exactly like `run.sh` does, so local
 and CI run the same way.

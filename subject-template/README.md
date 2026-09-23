@@ -236,12 +236,22 @@ Secrets and vars it reads:
 | Name | Kind | When you need it |
 |---|---|---|
 | `BENCH_SSH_KEY` | secret | always — the key the coordinator uses to reach the bench-host |
+| `GENTAR_BENCH_HOST` | secret | always — the engine ships no bench-host; unset, the workflow refuses before staging anything |
+| `GENTAR_BENCH_USER` | secret | always — the account on it |
 | `GENTAR_CLONE_KEY` | secret | only if the ENGINE repo is private (read-only deploy key on it) |
 | `GENTAR_REPO_URL` | var | only to point at a fork or mirror of the engine |
 | `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` | secret / var | only for agent-in-the-loop suites |
 
-Unset agent credentials simply leave those suites out of the sweep, with
-a line in the log saying which and why.
+The three bench-host values are **secrets rather than variables** because a
+public repo's Actions logs are public: secrets are masked, variables print.
+Unset agent credentials simply leave those suites out of the sweep, with a
+line in the log saying which and why.
+
+**On a public repo, read the workflow's `pull_request` comment before
+enabling it.** The runner is self-hosted and persistent. The job runs only
+pull requests from this repository, but a fork can add its own workflow aimed
+at the runner — set "Require approval for all external contributors", or
+remove the trigger and test PRs with a keyword tag.
 
 **Central arena** — a ~10-line dispatch job in your repo fires a
 `workflow_dispatch` at a gentar instance someone else operates, passing

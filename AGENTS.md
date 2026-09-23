@@ -48,10 +48,27 @@ determine by reading the repo; do not guess and do not silently default.
 
 | # | Decision | How to answer it |
 |---|---|---|
-| 1 | **Subject name** | The repo's directory basename. It must match `subject = "…"` in every scenario and `SUBJECT` in `run.sh`. Safe to infer; state what you chose. |
-| 2 | **Trigger mode** | **Own arena** (the repo runs the stack itself, needs a self-hosted runner with Docker and reach to a bench-host) or **central dispatch** (a ~10-line job fires `workflow_dispatch` at a central arena, needs `GENTAR_DISPATCH_TOKEN` and an operator who has onboarded the repo). Ask. Outside this organisation, own arena is the only self-service path. |
+| 1 | **Subject name** | The repo's name — **not** necessarily its directory: in a git worktree the directory is named after the branch. Write it as `subject = "…"` in every scenario; `run.sh` reads it from there and refuses `REPLACE-ME`, a bad name, or scenarios that disagree. Safe to infer; state what you chose. |
+| 2 | **Trigger mode** | **Own arena** (the repo runs the stack itself, needs a self-hosted runner with Docker and reach to a bench-host) or **central dispatch** (a ~10-line job fires `workflow_dispatch` at a central arena, needs `GENTAR_DISPATCH_TOKEN` and an operator who has onboarded the repo). Ask. Outside this organisation, own arena is the only self-service path. **If own arena and the repo is PUBLIC, say this before copying the workflow:** its runner is self-hosted and persistent, and a pull request runs the PR's code on it. The kit's workflow runs only same-repository PRs, but a fork can add its own workflow aimed at that runner — so a public repo needs "Require approval for all external contributors" set, or no PR trigger at all. Let the pilot choose; do not recommend the trigger without the risk. |
 | 3 | **Bench tier** | `sbx` microVM is the default and right for nearly everything. `tart` only if the repo's install is macOS-specific; `osb` / `daytona` only if the pilot already runs those. Ask before choosing anything but the default. |
 | 4 | **What the first suite asserts** | **This is the work.** Read the repo: its README's install instructions, its entry points, what it puts on disk. Propose concrete assertions — a binary that answers `--version`, a config file that appears, a service that responds — and confirm them with the pilot before writing. |
+
+**If a suite needs credentials, get the grouping right** — it is the
+mistake the first real adopter's agent made while following this file.
+`credentials` lists **alternatives**; a provider that is a *pair* is a nested
+list:
+
+```toml
+credentials = ["ANTHROPIC_API_KEY",                            # this alone, OR
+               ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]] # both of these
+```
+
+`["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]` flat parses fine and reads
+like a pair, but means *either one*: the token wins alone, the base URL is
+dropped, and the agent in the bench reports "Invalid API key". The engine now
+prints a warning naming a declared credential that was set and not forwarded
+— if you see one, fix the grouping; do not work around it. Validating that a
+scenario *parses* is not validating that it means what you intended.
 
 Decision 4 is where you earn your keep. The template suite asserts a
 throwaway `probe.txt` so it runs green on day one; leaving it that way ships
@@ -79,13 +96,25 @@ does on a fresh machine is the entire point.
 6. **Write the real suite** (decision 4), replacing `[oracle].steps` and the
    `[[verify.*]]` assertions.
 7. **Dry-run**: `gentar/dryrun.py` — replays steps and assertions locally in
-   about a second, no bench. Expect `ALL PASS`. It needs python 3.11+, or
+   about a second, no bench. Expect `ALL PASS`. Each suite gets its own fresh
+   scratch home, and `prepare()` runs once per suite: put the subject's
+   binaries in that home's `~/.local/bin`, and dryrun hides those names on
+   the real `PATH` so a suite can never fall through to the pilot's own
+   installed copy. Names a suite creates itself go in `HIDE_FROM_PATH`. It needs python 3.11+, or
    3.9/3.10 with `tomli`; if it says so, that is a missing parser on the
    host and not a problem with the suite — the arena runs 3.12 in a
    container regardless.
 8. **Run for real**: `gentar/run.sh <suite>`. Exit code is the verdict; a
    report lands in `gentar/reports/`.
-9. **Wire CI** (decision 2) and commit.
+9. **Wire CI** (decision 2) and commit. Own arena needs three repo secrets:
+   `BENCH_SSH_KEY`, `GENTAR_BENCH_HOST`, `GENTAR_BENCH_USER` (secrets, not
+   variables: a public repo's logs are public). The engine ships no
+   bench-host, so without them every suite fails; the workflow refuses up
+   front instead. CI's own sweep is `gentar/run.sh --sweep` — every suite
+   whose credentials are present, the rest skipped by name — and it tears
+   down with `gentar/run.sh --down`. **A local pass is not a CI pass**: the
+   first push is the first time CI's environment has run it. Report CI's
+   result, not your laptop's.
 
 ## Stop and ask, do not improvise
 
