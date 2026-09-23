@@ -51,7 +51,22 @@ oracle mode is phase 2's runner.
     contains = "Version:"     # optional substring check
 """
 
-import tomllib
+# Annotations as strings: this module is imported by dryrun.py on the
+# HOST, where python may be 3.9 (stock macOS). `list[str] | None` in a
+# signature is evaluated at def time on 3.9 and raises TypeError; with
+# this it never evaluates. The coordinator image is 3.12 and does not
+# care either way.
+from __future__ import annotations
+
+try:
+    import tomllib                      # 3.11+
+except ModuleNotFoundError:             # 3.9/3.10: stock macOS, old distros
+    # tomli IS tomllib — the stdlib module was adopted from it, so this is
+    # the same parser under its pre-stdlib name, not a second
+    # implementation that could disagree about what a scenario means.
+    # Only host-side callers (dryrun.py) ever land here: the coordinator
+    # image is python:3.12-slim and always takes the import above.
+    import tomli as tomllib             # type: ignore[no-redef]
 from pathlib import Path
 
 

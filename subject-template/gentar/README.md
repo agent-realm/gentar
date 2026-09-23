@@ -154,6 +154,12 @@ gentar/dryrun.py                                   # every suite
 gentar/dryrun.py gentar/scenarios/first-suite.toml
 ```
 
+Needs **python 3.11+, or 3.9/3.10 with `tomli`** (`pip install tomli`) —
+it parses TOML on your machine, and `tomllib` only became stdlib in 3.11
+while stock macOS still ships 3.9. It re-execs under a newer interpreter
+if one is on PATH, so on most machines this is invisible. The arena is
+unaffected: the coordinator runs python 3.12 in a container.
+
 Runs a suite's steps, driver turns and assertions in a scratch home in about
 a second — no bench, no sandbox, no network. A scenario is shell inside TOML,
 three levels of quoting deep, and the arena was the only thing that ever ran
