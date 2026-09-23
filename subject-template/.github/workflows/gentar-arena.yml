@@ -98,11 +98,14 @@ jobs:
       # Names every bench sandbox this job creates, so the teardown step
       # can remove the ones a CANCELLED job strands — and only those: the
       # bench-host is shared, and bin/bench-reap matches whole names.
-      # Unique per run and per attempt (a re-run's attempt 2 never reaps
-      # attempt 1's leftovers; attempt 1's own teardown already did).
-      # sbx names allow letters, digits and hyphens here: renaming this
-      # job to an id holding `_` makes the engine refuse (exit 2).
-      GENTAR_NAME_PREFIX: gentar-gh${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
+      # Unique per repository (GitHub promises run ids unique only within
+      # one, and every adopter's job is called `arena`), per run and per
+      # attempt (a re-run's attempt 2 never reaps attempt 1's leftovers;
+      # attempt 1's own teardown already did). sbx names allow letters,
+      # digits and hyphens here and cap at 64 characters, 23 of them the
+      # run id: a job id holding `_`, or one long enough to push this past
+      # 41, makes the engine refuse (exit 2).
+      GENTAR_NAME_PREFIX: g${{ github.repository_id }}-${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
     steps:
       - uses: actions/checkout@v4
         with:

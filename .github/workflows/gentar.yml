@@ -110,10 +110,12 @@ jobs:
       COMPOSE_PROJECT_NAME: gentar-ci
       # Names every sandbox this JOB creates, so teardown can remove the
       # ones a cancelled job stranded and nothing else on the shared
-      # bench-host (bin/bench-reap). Unique per run, per attempt (attempt
-      # N reaps only its own; each attempt runs its own teardown), and
-      # per job: matrix jobs share a run id and attempt.
-      GENTAR_NAME_PREFIX: gentar-gh${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
+      # bench-host (bin/bench-reap). Unique per repository (GitHub
+      # promises run ids unique only WITHIN one), per run, per attempt
+      # (attempt N reaps only its own; each attempt runs its own
+      # teardown), and per job: matrix jobs share a run id and attempt.
+      # Compact on purpose: sbx caps a name at 64 and the run id takes 23.
+      GENTAR_NAME_PREFIX: g${{ github.repository_id }}-${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
       GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
       GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
       SCENARIO: ${{ matrix.scenario }}
@@ -166,10 +168,12 @@ jobs:
       COMPOSE_PROJECT_NAME: gentar-nightly
       # Names every sandbox this JOB creates, so teardown can remove the
       # ones a cancelled job stranded and nothing else on the shared
-      # bench-host (bin/bench-reap). Unique per run, per attempt (attempt
-      # N reaps only its own; each attempt runs its own teardown), and
-      # per job: matrix jobs share a run id and attempt.
-      GENTAR_NAME_PREFIX: gentar-gh${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
+      # bench-host (bin/bench-reap). Unique per repository (GitHub
+      # promises run ids unique only WITHIN one), per run, per attempt
+      # (attempt N reaps only its own; each attempt runs its own
+      # teardown), and per job: matrix jobs share a run id and attempt.
+      # Compact on purpose: sbx caps a name at 64 and the run id takes 23.
+      GENTAR_NAME_PREFIX: g${{ github.repository_id }}-${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
       GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
       GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
       GENTAR_BUDGET_CAP: "50000"
@@ -301,10 +305,12 @@ jobs:
       COMPOSE_PROJECT_NAME: gentar-dispatch
       # Names every sandbox this JOB creates, so teardown can remove the
       # ones a cancelled job stranded and nothing else on the shared
-      # bench-host (bin/bench-reap). Unique per run, per attempt (attempt
-      # N reaps only its own; each attempt runs its own teardown), and
-      # per job: matrix jobs share a run id and attempt.
-      GENTAR_NAME_PREFIX: gentar-gh${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
+      # bench-host (bin/bench-reap). Unique per repository (GitHub
+      # promises run ids unique only WITHIN one), per run, per attempt
+      # (attempt N reaps only its own; each attempt runs its own
+      # teardown), and per job: matrix jobs share a run id and attempt.
+      # Compact on purpose: sbx caps a name at 64 and the run id takes 23.
+      GENTAR_NAME_PREFIX: g${{ github.repository_id }}-${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
       GENTAR_BENCH_HOST: ${{ vars.GENTAR_BENCH_HOST }}
       GENTAR_BENCH_USER: ${{ vars.GENTAR_BENCH_USER }}
       GENTAR_BENCH_KEY_FILE: /tmp/gentar_ci_bench_key

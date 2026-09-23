@@ -15,6 +15,9 @@ import re
 
 
 _PREFIX_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
+# sbx name limit (64) minus what spans.new_run_id appends:
+# "-YYYYmmdd-HHMMSS-xxxxxx" = 23 characters.
+PREFIX_MAX = 64 - 23
 
 def _opt(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
@@ -183,5 +186,12 @@ class Config:
                     f"starting with a letter or digit (got "
                     f"{self.name_prefix!r}; in CI it embeds the job id — "
                     f"rename a job id holding `_`)"]
+        # sbx refuses a name over 64 characters (measured on sbx 0.39; its
+        # help does not say), and the run id appends 23. Refused here, or
+        # every create fails with "failed to run sandbox container".
+        if len(self.name_prefix) > PREFIX_MAX:
+            return [f"a GENTAR_NAME_PREFIX of at most {PREFIX_MAX} characters "
+                    f"(got {len(self.name_prefix)}: {self.name_prefix!r}; in "
+                    f"CI it embeds the job id — shorten it)"]
         return [var for var, attr in BENCH_REQUIREMENTS[kind]
                 if not getattr(self, attr, "").strip()]

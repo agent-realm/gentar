@@ -369,8 +369,8 @@ Two things worth checking against any bench-host:
   a guarantee that the previous one was reaped.
 
   **Bench side fixed in 0.3.1.** CI now names each job's sandboxes with a
-  per-job `GENTAR_NAME_PREFIX` (`gentar-gh<run_id>-a<attempt>-<job><index>`), and
-  teardown runs `bin/bench-reap`, which removes the sandboxes and workspaces whose
+  per-job `GENTAR_NAME_PREFIX` (`g<repository_id>-<run_id>-a<attempt>-<job><index>`),
+  and teardown runs `bin/bench-reap`, which removes the sandboxes and workspaces whose
   WHOLE name matches that prefix plus the coordinator's run-id shape — never another
   run's. Still uncovered: a runner that dies outright never runs its teardown step.
 

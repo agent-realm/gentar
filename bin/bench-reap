@@ -26,7 +26,13 @@
 #
 # Reads the same variables the coordinator does: GENTAR_BENCH_HOST,
 # GENTAR_BENCH_USER, GENTAR_BENCH_KEY_FILE, GENTAR_BENCH_JUMP (optional),
-# GENTAR_SBX_BIN, GENTAR_BENCH_WORKSPACE_ROOT.
+# GENTAR_SBX_BIN, GENTAR_BENCH_WORKSPACE_ROOT — from the shell first, then
+# from the arena's .env (the file compose hands the coordinator), so an
+# install configured only in .env is reaped where it actually runs.
+#
+# A workspace is reaped even when its sandbox is absent: the sbx tier
+# pushes the workspace BEFORE `sbx create`, so a job cancelled in between
+# leaves a workspace with no sandbox to list.
 #
 # Exit: 0 done (including "nothing to reap") · 1 the bench-host could not
 # be listed or a removal failed · 2 refused (no/unscoped prefix, no host).
@@ -53,6 +59,34 @@ case "$PREFIX" in
     echo "bench-reap: bad prefix '$PREFIX' (letters, digits, dash; no leading dash)" >&2
     exit 2 ;;
 esac
+# Same bounds as the engine's config guard: a longer prefix never named a
+# sandbox (sbx caps names at 64; the run id appends 23).
+if [ "${#PREFIX}" -gt 41 ]; then
+  echo "bench-reap: prefix '$PREFIX' is over 41 characters; no sandbox can carry it" >&2
+  exit 2
+fi
+
+# Fill the bench settings the shell did not set from the arena's .env.
+# Read, never sourced: it is a compose env file, not shell, and sourcing
+# would run whatever is in it. Shell wins, as it does for compose.
+ENV_FILE=${GENTAR_ENV_FILE:-$(cd "$(dirname "$0")/.." && pwd)/.env}
+from_env_file() {
+  local v
+  [ -f "$ENV_FILE" ] || return 0
+  v=$(grep -E "^[[:space:]]*$1=" "$ENV_FILE" | tail -1 | sed -E "s/^[^=]*=//; s/^[[:space:]]+//; s/[[:space:]]+\$//") || true
+  case "$v" in
+    \"*\") v=${v#\"}; v=${v%\"} ;;
+    \'*\') v=${v#\'}; v=${v%\'} ;;
+  esac
+  printf '%s' "$v"
+}
+for var in GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_KEY_FILE \
+           GENTAR_BENCH_JUMP GENTAR_SBX_BIN GENTAR_BENCH_WORKSPACE_ROOT; do
+  if [ -z "${!var:-}" ]; then
+    val=$(from_env_file "$var")
+    [ -n "$val" ] && export "$var=$val"
+  fi
+done
 
 HOST=${GENTAR_BENCH_HOST:-}
 USER_=${GENTAR_BENCH_USER:-}
@@ -73,6 +107,10 @@ listing=$("${SSH[@]}" "$SBX ls --json") || {
   echo "bench-reap: could not list sandboxes on $HOST" >&2
   exit 1
 }
+workspaces=$("${SSH[@]}" "$(printf 'ls -1 %q 2>/dev/null || true' "$WSROOT")") || {
+  echo "bench-reap: could not list workspaces on $HOST" >&2
+  exit 1
+}
 
 # Names out of `{"sandboxes":[{"name":"…",…},…]}` without a JSON parser
 # (this runs on a stock CI runner). A name holding a quote cannot match
@@ -85,22 +123,31 @@ names=$(printf '%s\n' "$listing" \
 # into an ERE unescaped.
 shape="^${PREFIX}-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}\$"
 mine=$(printf '%s\n' "$names" | grep -E "$shape" || true)
+mine_ws=$(printf '%s\n' "$workspaces" | grep -E "$shape" || true)
+all=$(printf '%s\n%s\n' "$mine" "$mine_ws" | grep -v '^$' | sort -u || true)
 
-if [ -z "$mine" ]; then
+if [ -z "$all" ]; then
   echo "bench-reap: no sandboxes of $PREFIX on $HOST"
   exit 0
 fi
 
 rc=0
-for name in $mine; do
+for name in $all; do
+  if printf '%s\n' "$mine" | grep -qxF "$name"; then
+    what="sandbox"
+    remote=$(printf '%q rm %q --force && rm -rf %q' "$SBX" "$name" "$WSROOT/$name")
+  else
+    what="workspace"          # pushed, but the sandbox was never created
+    remote=$(printf 'rm -rf %q' "$WSROOT/$name")
+  fi
   if [ "$LIST_ONLY" = 1 ]; then
-    echo "would reap: $name"
+    echo "would reap $what: $name"
     continue
   fi
-  if "${SSH[@]}" "$(printf '%q rm %q --force && rm -rf %q' "$SBX" "$name" "$WSROOT/$name")"; then
-    echo "reaped: $name"
+  if "${SSH[@]}" "$remote"; then
+    echo "reaped $what: $name"
   else
-    echo "bench-reap: failed to remove $name" >&2
+    echo "bench-reap: failed to remove $what $name" >&2
     rc=1
   fi
 done

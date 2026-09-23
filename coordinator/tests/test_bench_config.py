@@ -248,8 +248,23 @@ class RefusalPathCoverageTest(unittest.TestCase):
                 self.assertIn("job id", out)
 
     def test_a_ci_shaped_prefix_is_not_refused(self):
-        cfg = self.configured(GENTAR_NAME_PREFIX="gentar-gh35854630458-a1-arena0")
+        # g<repository_id>-<run_id>-a<attempt>-<job><index>, real magnitudes
+        cfg = self.configured(GENTAR_NAME_PREFIX="g1043567890-35854630458-a1-arena0")
         self.assertEqual(cfg.missing_bench_env(), [])
+
+    def test_a_prefix_too_long_for_an_sbx_name_refuses(self):
+        # sbx rejects names over 64 (measured); the run id appends 23
+        self.assertEqual(self.configured(GENTAR_NAME_PREFIX="p" * 41)
+                         .missing_bench_env(), [])
+        rc, out = self.run_refusing(
+            self.configured(GENTAR_NAME_PREFIX="p" * 42), "smoke")
+        self.assertEqual(rc, 2)
+        self.assertIn("at most 41", out)
+
+    def test_the_prefix_bound_is_the_sbx_limit_minus_the_run_id(self):
+        from gentar.config import PREFIX_MAX
+        from gentar.spans import new_run_id
+        self.assertEqual(PREFIX_MAX + len(new_run_id("")), 64)
 
     def test_unknown_scenario_refuses(self):
         # The other name-level refusal: an unknown suite must not spend
