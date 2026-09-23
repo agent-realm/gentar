@@ -50,7 +50,9 @@ the kit, which is why this is a minor bump.
 - `gentar/run.sh --check` — stage the engine, lint the adaptation (a flat
   credential list holding an endpoint; a kit file that differs from the
   pinned engine's copy — the workflow and release gate may be absent, for a
-  central-dispatch subject or one that never releases), dry-run every suite. A fork's PR, which gets no
+  central-dispatch subject or one that never releases), dry-run every suite.
+  Exit 0 clean · 1 a check failed · 2 a refusal (bad policy, an untrusted
+  host), a refusal winning. A fork's PR, which gets no
   secrets and so cannot stage a private engine, is a named skip.
 - `gentar/release-gate.sh` — names what it found when it refuses: a failed
   phase 2, a cancelled one, or a run GitHub cancelled before any job
@@ -78,7 +80,10 @@ the kit, which is why this is a minor bump.
 - **Arenas of one repo are serialised on the host, not by GitHub.** A
   repository-wide concurrency group CANCELS a pending run when a newer one
   queues, so phase 2 and keyword runs were silently dropped behind ordinary
-  main pushes (claude-playbooks, observed). `run.sh` now takes a host lock
+  main pushes (claude-playbooks, observed) — and even a per-ref group drops
+  a phase 2 dispatched on main behind the next main push. Now only a pull
+  request's runs share a group (a newer push supersedes an older one);
+  every other run has its own and is never dropped. `run.sh` takes a host lock
   per `arena-<subject>` — flock, or a mkdir lock with stale-holder
   detection on macOS — and a later run waits, saying for whom. Locks live
   in a shared, non-sticky `gentar-locks/` directory, so any runner user
@@ -89,7 +94,7 @@ the kit, which is why this is a minor bump.
   notes are written to a temp file and renamed into place (claude-playbooks).
   A mkdir lock with no readable holder note that is over a minute old — a
   run killed between creating it and writing the note — counts as stale. The
-  workflow's group is per-ref, for dedup only. `--down` never tears down an
+  `--down` never tears down an
   arena another live run holds.
 - The workflow's bench-key guard treats a whitespace-only secret as blank,
   agreeing with `run.sh` (claude-playbooks).

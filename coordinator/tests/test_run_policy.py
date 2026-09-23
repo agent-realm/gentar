@@ -301,9 +301,16 @@ class WorkflowInvariantTest(unittest.TestCase):
         self.assertIn("branches: ['**']", text)
         self.assertNotIn("branches: [main]", text)
 
-    def test_the_concurrency_group_is_per_ref(self):
-        # a repository-wide group evicts pending runs (claude-playbooks)
-        self.assertIn("group: gentar-arena-${{ github.ref }}", WORKFLOW.read_text())
+    def test_only_pull_requests_share_a_concurrency_group(self):
+        # a shared group evicts the PENDING run when a newer one queues:
+        # repository-wide it dropped keyword and phase 2 runs (claude-
+        # playbooks); per-ref it still dropped a phase 2 dispatched on main
+        # behind the next main push (Codex). Only a PR's pushes may replace
+        # each other; everything else gets a group of its own.
+        text = WORKFLOW.read_text()
+        self.assertIn("group: gentar-arena-${{ github.event_name == 'pull_request' "
+                      "&& github.ref || github.run_id }}", text)
+        self.assertNotIn("group: gentar-arena-${{ github.ref }}", text)
 
 
 if __name__ == "__main__":
