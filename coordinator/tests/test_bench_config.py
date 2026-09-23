@@ -247,6 +247,15 @@ class RefusalPathCoverageTest(unittest.TestCase):
                 self.assertIn(bad, out)
                 self.assertIn("job id", out)
 
+    def test_sbx_naming_rules_do_not_refuse_other_tiers(self):
+        # osb carries the run id as metadata and a quoted path; sbx's
+        # name rules must not break a prefix it has always accepted
+        for bad in ("team_build", "p" * 42):
+            with self.subTest(prefix=bad):
+                cfg = self.configured(GENTAR_NAME_PREFIX=bad)
+                self.assertEqual(cfg.missing_bench_env("osb"), [])
+                self.assertNotEqual(cfg.missing_bench_env("sbx"), [])
+
     def test_a_ci_shaped_prefix_is_not_refused(self):
         # g<repository_id>-<run_id>-a<attempt>-<job><index>, real magnitudes
         cfg = self.configured(GENTAR_NAME_PREFIX="g1043567890-35854630458-a1-arena0")

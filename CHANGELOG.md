@@ -50,7 +50,8 @@ scenario schema or the exit-code contract; an adopter re-copies the kit.
   same-shaped decoy left untouched.
 - **`GENTAR_NAME_PREFIX` never reached the coordinator.** The compose file
   did not forward it, so the knob in `.env.example` did nothing. It is
-  forwarded now, and an empty value reads as the default. A prefix sbx
+  forwarded now, and an empty value reads as the default. On the sbx
+  tier (the only one whose sandbox NAME starts with it), a prefix sbx
   cannot use in a name (CI embeds the GitHub job id, which may hold `_`)
   is refused with exit 2 before any bench exists, rather than failing
   every create; it is not mapped, since `a_b` and `a-b` would then share

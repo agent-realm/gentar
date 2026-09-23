@@ -175,13 +175,18 @@ class Config:
         if kind not in BENCH_REQUIREMENTS:
             known = ", ".join(sorted(BENCH_REQUIREMENTS))
             return [f"a known bench tier (got {kind!r}; known: {known})"]
-        # Every sandbox name starts with the prefix. sbx accepts letters,
-        # digits, hyphens and periods; CI builds the prefix from the GitHub
-        # job id, which may hold `_`, and sbx would then reject every
-        # create. Refused here rather than mapped: `a_b` and `a-b` mapping
-        # to one prefix would let two jobs reap each other's benches.
-        # Periods are refused too, so bin/bench-reap's rule is the same one.
-        if not _PREFIX_RE.fullmatch(self.name_prefix):
+        # sbx tier only: there the prefix starts every sandbox NAME. The
+        # other tiers carry the run id as metadata or a quoted path and
+        # have their own naming (daytona prepends its own), so sbx's rules
+        # must not refuse a prefix they have always accepted.
+        #
+        # sbx accepts letters, digits, hyphens and periods; CI builds the
+        # prefix from the GitHub job id, which may hold `_`, and sbx would
+        # then reject every create. Refused here rather than mapped: `a_b`
+        # and `a-b` mapping to one prefix would let two jobs reap each
+        # other's benches. Periods are refused too, so bin/bench-reap's
+        # rule is the same one.
+        if kind == "sbx" and not _PREFIX_RE.fullmatch(self.name_prefix):
             return [f"a GENTAR_NAME_PREFIX of letters, digits and hyphens, "
                     f"starting with a letter or digit (got "
                     f"{self.name_prefix!r}; in CI it embeds the job id — "
@@ -189,7 +194,7 @@ class Config:
         # sbx refuses a name over 64 characters (measured on sbx 0.39; its
         # help does not say), and the run id appends 23. Refused here, or
         # every create fails with "failed to run sandbox container".
-        if len(self.name_prefix) > PREFIX_MAX:
+        if kind == "sbx" and len(self.name_prefix) > PREFIX_MAX:
             return [f"a GENTAR_NAME_PREFIX of at most {PREFIX_MAX} characters "
                     f"(got {len(self.name_prefix)}: {self.name_prefix!r}; in "
                     f"CI it embeds the job id — shorten it)"]
