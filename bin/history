@@ -35,10 +35,12 @@ TARGET="$USER_@$HOST"
 
 reader_query() {        # SQL on stdin -> TSV, as gentar_reader, via the tunnel
   : "${GENTAR_HISTORY_READER_PASSWORD:?run under with-secret GENTAR_HISTORY_READER_PASSWORD=keychain:pilot/gentar-history-reader}"
-  python3 - "$PORT" <<'PY'
+  # The SQL arrives on this function's stdin; the heredoc below is python's
+  # own stdin, so the SQL travels in the environment.
+  HISTORY_SQL=$(cat) python3 - "$PORT" <<'PY'
 import os, sys, urllib.request
 req = urllib.request.Request(f"http://127.0.0.1:{sys.argv[1]}/?default_format=TSVWithNames",
-    data=sys.stdin.read().encode(),
+    data=os.environ["HISTORY_SQL"].encode(),
     headers={"X-ClickHouse-User": "gentar_reader",
              "X-ClickHouse-Key": os.environ["GENTAR_HISTORY_READER_PASSWORD"]})
 print(urllib.request.urlopen(req, timeout=20).read().decode(), end="")
@@ -47,7 +49,8 @@ PY
 
 case "${1:-}" in
   deploy)
-    tar -C "$HERE/history" --exclude=secrets --exclude=users.d -cf - . \
+    COPYFILE_DISABLE=1 tar -C "$HERE/history" --exclude=secrets --exclude=users.d \
+        --exclude='._*' -cf - . \
       | "${SSH[@]}" "$TARGET" "mkdir -p $REMOTE_DIR && tar -C $REMOTE_DIR -xf - && GENTAR_HISTORY_PORT=$PORT $REMOTE_DIR/deploy.sh"
     ;;
   tunnel)

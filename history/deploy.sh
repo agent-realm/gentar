@@ -37,21 +37,27 @@ cat > users.d/gentar.xml <<XML
   </users>
 </clickhouse>
 XML
-chmod 644 users.d/gentar.xml       # the server reads it; hashes only
+# The server (uid 101 in the container) must read these: hashes only.
+chmod 755 users.d; chmod 644 users.d/gentar.xml
 docker compose -f compose.yml up -d --wait
 # schema over HTTP, credentials from a header FILE (not argv)
 hdr=$(mktemp); trap 'rm -f "$hdr"' EXIT
 { echo "X-ClickHouse-User: gentar_admin"; printf 'X-ClickHouse-Key: %s\n' "$(cat secrets/admin.pass)"; } > "$hdr"
 python3 - "$hdr" <<'PY'
-import sys, urllib.request
+import sys, urllib.error, urllib.request
 hdrs = dict(l.rstrip("\n").split(": ", 1) for l in open(sys.argv[1]) if ": " in l)
-for stmt in [s.strip() for s in open("schema.sql").read().split(";")]:
-    body = "\n".join(l for l in stmt.splitlines() if not l.strip().startswith("--")).strip()
+sql = "\n".join(l for l in open("schema.sql").read().splitlines()
+                if not l.strip().startswith("--"))
+for stmt in sql.split(";"):
+    body = stmt.strip()
     if not body:
         continue
     req = urllib.request.Request("http://127.0.0.1:" + __import__("os").environ.get("GENTAR_HISTORY_PORT", "18199") + "/",
                                  data=body.encode(), headers=hdrs)
-    urllib.request.urlopen(req, timeout=30).read()
+    try:
+        urllib.request.urlopen(req, timeout=30).read()
+    except urllib.error.HTTPError as e:
+        sys.exit(f"schema: {body.splitlines()[0][:80]} -> {e.code}: {e.read().decode()[:400]}")
 print("schema applied")
 PY
 echo "gentar-history up on 127.0.0.1:${GENTAR_HISTORY_PORT:-18199} (docker network gentar-history)"
