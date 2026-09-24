@@ -57,6 +57,17 @@ class RedactTest(unittest.TestCase):
             self.assertNotIn(form, out)
         self.assertEqual(out.count("«redacted:TOKEN»"), 5, out)
 
+    def test_a_truncated_value_loses_its_surviving_head(self):
+        # a report's command column cuts a value; the head must not survive
+        # (claude-playbooks, scanning its public artifacts)
+        v = "sk-ant-api03-ABCDEFGHIJKLMNOP"
+        r, out = self.run_redact("| `ANTHROPIC_AUTH_TOKEN=sk-ant-api03-ABC` |",
+                                 GENTAR_REDACT_NAMES="ANTHROPIC_AUTH_TOKEN",
+                                 ANTHROPIC_AUTH_TOKEN=v)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("sk-ant-api03-ABC", out)
+        self.assertIn("«redacted:ANTHROPIC_AUTH_TOKEN»`", out)
+
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",
                                  GENTAR_REDACT_NAMES="SHORT LONG",
