@@ -61,6 +61,9 @@ class RunReport:
     # declared credential that was set and still not forwarded.
     warnings: list[str] = field(default_factory=list)
     summary: str = ""
+    # Numbers derived from the agent's session transcript(s), if any ran
+    # (gentar.agentstats) — counts only, never transcript text.
+    agent_stats: dict = field(default_factory=dict)
 
     def mark(self, verdict: str, exit_code: int) -> None:
         self.verdict = verdict
@@ -153,6 +156,17 @@ class RunReport:
             lines.append("```")
             lines.append(_tail(self.transcript, 4000))
             lines.append("```")
+            lines.append("")
+
+        if self.agent_stats.get("turns"):
+            a = self.agent_stats
+            lines.append("## Agent (from its session transcript — numbers only)")
+            lines.append("")
+            lines.append("| sessions | turns | input tokens | output tokens | cache read | cache write | tool calls | tool errors |")
+            lines.append("|---|---|---|---|---|---|---|---|")
+            lines.append(f"| {a['sessions']} | {a['turns']} | {a['input_tokens']} | "
+                         f"{a['output_tokens']} | {a['cache_read_tokens']} | "
+                         f"{a['cache_creation_tokens']} | {a['tool_calls']} | {a['tool_errors']} |")
             lines.append("")
 
         if self.summary:
