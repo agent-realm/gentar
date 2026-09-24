@@ -291,6 +291,38 @@ adding another CLI is a turn script, not engine work.
 
 ---
 
+## History — runs that outlive their stack
+
+An arena's ClickHouse dies with the arena. The **history store** is one
+persistent ClickHouse on the arena host (`history/`) that every run can ALSO
+write to, so runs, suites and subjects can be compared over time: pass rate
+per suite, median durations, and the agent's numbers — tokens, turns, tool
+calls — taken from its session transcript.
+
+What reaches it is decided before a row leaves the coordinator:
+
+- the bench-host settings and every credential a suite declares are
+  scrubbed, in every encoding and any 8+ character prefix;
+- an agent's transcript is never stored — only numbers derived from it,
+  with tool names reduced to Claude Code's built-ins, `mcp` or `other`;
+- three identities: an admin for the schema, a **writer** that can only
+  insert, a **reader** that can only select. Bound to `127.0.0.1` on the
+  host; arenas reach it over the `gentar-history` docker network.
+
+```bash
+bin/history deploy                  # on the arena host: passwords generated there, never shown
+bin/history writer-secret owner/repo # a repo's CI may write (piped into its Actions secret)
+bin/history reader-keychain         # this Mac may read (keychain:pilot/gentar-history-reader)
+bin/history tunnel &                # 127.0.0.1:18199 -> the host
+with-secret GENTAR_HISTORY_READER_PASSWORD=keychain:pilot/gentar-history-reader \
+  -- bin/history dashboard          # dashboard/out/history.html, with trends
+```
+
+A repo turns it on with two variables — `GENTAR_HISTORY_URL=http://gentar-history:8123`,
+`GENTAR_HISTORY_NETWORK=gentar-history` — and the secret
+`GENTAR_HISTORY_WRITER_PASSWORD`. Unset, nothing is written; a failed write
+never changes a verdict.
+
 ## Scenario inventory
 
 22 suites: 20 TOML files in `coordinator/scenarios/`, plus two Python
@@ -532,7 +564,9 @@ is short-lived.
 | `coordinator/gentar/` | the engine — bench tiers, oracle runner, pty driver, assertions, spans, reports |
 | `coordinator/scenarios/` | the suites |
 | `bench-template/` | deterministic bench template builder; `VERSION` pins the agent CLI |
-| `dashboard/generate.py` | stateless HTML renderer over the spans table |
+| `dashboard/generate.py` | stateless HTML renderer over the spans table (`--history`: trends) |
+| `history/`, `bin/history` | the persistent history store and its operator tool |
+| `bin/redact`, `bin/bench-reap` | publish-time redaction; stranded-sandbox cleanup |
 | `subject-template/` | the copyable adoption kit |
 | `docs/design.md` | the design of record, with every decision and why |
 | `docs/subject-integration.md` | the adoption contract |

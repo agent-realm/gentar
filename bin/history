@@ -24,9 +24,16 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOST=${GENTAR_BENCH_HOST:?set GENTAR_BENCH_HOST (the arena host that runs the store)}
-USER_=${GENTAR_BENCH_USER:?set GENTAR_BENCH_USER}
 PORT=${GENTAR_HISTORY_PORT:-18199}
+# The host is needed only by the subcommands that ssh (deploy, tunnel,
+# writer-secret, reader-keychain); status and dashboard use the tunnel.
+case "${1:-}" in
+  deploy|tunnel|writer-secret|reader-keychain)
+    : "${GENTAR_BENCH_HOST:?set GENTAR_BENCH_HOST (the arena host that runs the store)}"
+    : "${GENTAR_BENCH_USER:?set GENTAR_BENCH_USER}" ;;
+esac
+HOST=${GENTAR_BENCH_HOST:-}
+USER_=${GENTAR_BENCH_USER:-}
 REMOTE_DIR='~/gentar-history'
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10)
 [ -n "${GENTAR_BENCH_KEY_FILE:-}" ] && SSH+=(-i "$GENTAR_BENCH_KEY_FILE")
