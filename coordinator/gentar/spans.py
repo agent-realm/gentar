@@ -156,9 +156,13 @@ class History:
     def insert(self, table: str, columns: list, rows: list) -> None:
         if self.client is None or not rows:
             return
+        # Every text column, not only detail/attrs: names and CI metadata
+        # come from files and environments too (agy review). Numbers pass.
+        clean = [[self.scrub(v) if isinstance(v, str) else v for v in r + self.ci]
+                 for r in rows]
         try:
             self.client.insert(f"{self.cfg.history_db}.{table}",
-                               [r + self.ci for r in rows],
+                               clean,
                                column_names=columns + CI_COLUMNS)
         except Exception as exc:
             self.failed += len(rows)

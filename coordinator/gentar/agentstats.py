@@ -17,8 +17,8 @@ and can hold a credential verbatim (a tool call that prints the environment).
 The history store is shared and the dashboard can be a public artifact, so
 only numbers and a closed set of labels come out:
 
-  - model ids are kept only when they look like a model id (letters,
-    digits, dots, dashes; bounded length), else "other";
+  - model ids are kept only when they start with a known model family
+    (claude, glm, gpt, gemini, deepseek, …) and stay short, else "other";
   - tool names are kept only from Claude Code's own built-in set; an MCP
     tool (`mcp__server__tool`, whose parts come from a subject's config)
     becomes "mcp", anything else "other".
@@ -40,7 +40,12 @@ BUILTIN_TOOLS = frozenset({
     "ToolSearch", "WebFetch", "WebSearch", "Write", "Skill", "Monitor",
     "SendMessage", "ListAgents", "TaskStop", "PushNotification",
 })
-_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9.\-]{0,63}")
+# A model id must LOOK like one: a known family prefix, then a short tail.
+# An open pattern would store any token-shaped string a transcript put in
+# the model field (agy review) — a hex API key matches [A-Za-z0-9.-]+.
+_MODEL = re.compile(
+    r"(claude|glm|gpt|o[0-9]|gemini|deepseek|qwen|kimi|llama|mistral|grok|minimax)"
+    r"[A-Za-z0-9.\-]{0,40}")
 
 
 def tool_class(name) -> str:

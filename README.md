@@ -309,6 +309,11 @@ What reaches it is decided before a row leaves the coordinator:
   insert, a **reader** that can only select. Bound to `127.0.0.1` on the
   host; arenas reach it over the `gentar-history` docker network.
 
+The identities guard the network edge; they do not keep out code that runs
+on the arena host itself (CI runners there share the user and the docker
+group). That boundary is the run policy's: only trusted code reaches the
+self-hosted runner — the same trust the bench SSH key already relies on.
+
 ```bash
 bin/history deploy                  # on the arena host: passwords generated there, never shown
 bin/history writer-secret owner/repo # a repo's CI may write (piped into its Actions secret)

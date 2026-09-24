@@ -10,8 +10,15 @@
 #     as http://gentar-history:8123 (compose.history.yml joins them);
 #   - three identities, passwords generated on the host by deploy.sh and
 #     never printed: gentar_admin (schema), gentar_writer (insert only),
-#     gentar_reader (select only). Not trusting localhost: a public repo's
-#     CI job on this host can reach it too.
+#     gentar_reader (select only).
+#
+# What the identities do NOT do: keep out code that runs ON this host. The
+# CI runners here run as the user that owns secrets/ and are in the docker
+# group, so a job can read those files or `docker exec` into the store. The
+# boundary for that is the run policy — only trusted code reaches the
+# self-hosted runner (PR code stays off it; fork runs need approval) — the
+# same boundary that already guards the bench SSH key during a job. The
+# identities guard the network edge and keep a writer from reading.
 #
 # Deploy / update:  bin/history deploy   (from an engine checkout)
 name: gentar-history

@@ -62,6 +62,13 @@ class HistoryWriteTest(unittest.TestCase):
         self.assertEqual(row["ci_run_id"], "42")
         self.assertEqual(set(row) - {"_table"}, set(COLUMNS + CI_COLUMNS))
 
+    def test_every_text_column_is_scrubbed_including_ci(self):
+        s, fake = spans_with_history(cfg_with(GITHUB_REF=f"refs/heads/{TOKEN}"))
+        s.history.redact_values([("ANTHROPIC_AUTH_TOKEN", TOKEN)])
+        s.emit("sub", "run1", f"suite-{TOKEN}", "step.0")
+        blob = json.dumps(fake.rows, default=str)
+        self.assertNotIn(TOKEN, blob)
+
     def test_a_transcript_step_keeps_only_its_length(self):
         s, fake = spans_with_history(cfg_with())
         s.emit("sub", "run1", "suite", "driver.transcript", detail="the agent typed THIS")

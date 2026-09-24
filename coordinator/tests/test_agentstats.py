@@ -102,6 +102,11 @@ class ExtractTest(unittest.TestCase):
         self.assertEqual(tool_class(None), "other")
         self.assertEqual(model_label("claude-sonnet-5"), "claude-sonnet-5")
         self.assertEqual(model_label("a" * 80), "other")
+        # token-shaped strings are not model ids (agy review)
+        self.assertEqual(model_label("9f86d081884c7d659a2feaa0c55ad015"), "other")
+        self.assertEqual(model_label("sk-ant-api03-abcdef"), "other")
+        self.assertEqual(model_label("glm-5.3"), "glm-5.3")
+        self.assertEqual(model_label("deepseek-v4-pro"), "deepseek-v4-pro")
 
     def test_empty_and_garbage_input_yields_zeroes(self):
         turns, tools, totals = extract(["", "garbage\n{}\n[1,2]"])

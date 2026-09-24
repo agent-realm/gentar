@@ -33,7 +33,10 @@ agent suite finally says what the agent did.
   ClickHouse per arena host, bound to 127.0.0.1 and reached by arenas over
   the `gentar-history` docker network. Admin / insert-only writer /
   select-only reader, passwords generated on the host and moved only by
-  pipe (into a repo's Actions secret, or this Mac's Keychain). Every run
+  pipe (into a repo's Actions secret, or this Mac's Keychain). The
+  identities guard the network edge, not code running on the arena host
+  (runners share its user and docker group); that trust is the run
+  policy's, as for the bench key. Every run
   also writes its spans there when `GENTAR_HISTORY_URL` is set — scrubbed
   of the bench-host settings and declared credentials, transcripts never
   kept, CI identity attached. Best-effort: a failed write never changes a
