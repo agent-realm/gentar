@@ -150,6 +150,21 @@ class DashboardHidesTranscriptsTest(unittest.TestCase):
         gen.fetch("http://x", "u", "p", "gentar", 500, since=1700000000)
         self.assertIn("toUnixTimestamp(run_started) >= 1700000000", seen[0])
 
+    def test_step_output_cannot_break_out_of_the_page(self):
+        # the page can be a public artifact someone opens: output that holds
+        # `</script>` must not end the data block, and text is escaped
+        spec = importlib.util.spec_from_file_location("gen", GENERATE)
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+        evil = '</script><img src=x onerror=alert(1)><!--'
+        events = [{"subject": "s", "run_id": "r", "scenario": "a", "step": "step.0",
+                   "status": "fail", "ts_start": "", "ts_end": "", "duration_ms": 1,
+                   "detail": evil, "span_id": "1"}]
+        html = gen.render([], [], events, [], "gentar", False)
+        self.assertNotIn("</script><img", html)
+        self.assertEqual(html.count("</script>"), 1)      # only the page's own
+        self.assertIn("function esc(", html)
+
     def test_the_grid_hides_a_transcript_that_was_the_last_step(self):
         spec = importlib.util.spec_from_file_location("gen", GENERATE)
         gen = importlib.util.module_from_spec(spec)

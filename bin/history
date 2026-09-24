@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# history — operate gentar's persistent history store (see history/compose.yml).
+#
+#   bin/history deploy               copy history/ to the arena host and (re)deploy
+#   bin/history status               is it up; row counts (as the reader)
+#   bin/history tunnel               forward 127.0.0.1:18199 here to the host's store
+#   bin/history dashboard [--watch]  render dashboard/out/history.html (needs the tunnel)
+#   bin/history writer-secret <owner/repo>
+#                                    set that repo's GENTAR_HISTORY_WRITER_PASSWORD
+#                                    Actions secret from the host's file
+#   bin/history reader-keychain      store the reader password in this Mac's Keychain
+#                                    as keychain:pilot/gentar-history-reader
+#
+# The arena host is GENTAR_BENCH_HOST / GENTAR_BENCH_USER (the runners and
+# the store share it); GENTAR_HISTORY_PORT defaults to 18199.
+#
+# Passwords live in the host's ~/gentar-history/secrets/*.pass (0600) and
+# move only by pipe — ssh stdout into `gh secret set` or `security -i` on
+# stdin. None is ever printed, put on a command line, or written here.
+# `dashboard` and `status` take the reader password from
+# GENTAR_HISTORY_READER_PASSWORD; run them under with-secret:
+#   with-secret GENTAR_HISTORY_READER_PASSWORD=keychain:pilot/gentar-history-reader \
+#     -- bin/history dashboard
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HOST=${GENTAR_BENCH_HOST:?set GENTAR_BENCH_HOST (the arena host that runs the store)}
+USER_=${GENTAR_BENCH_USER:?set GENTAR_BENCH_USER}
+PORT=${GENTAR_HISTORY_PORT:-18199}
+REMOTE_DIR='~/gentar-history'
+SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10)
+[ -n "${GENTAR_BENCH_KEY_FILE:-}" ] && SSH+=(-i "$GENTAR_BENCH_KEY_FILE")
+[ -n "${GENTAR_BENCH_JUMP:-}" ] && SSH+=(-J "$GENTAR_BENCH_JUMP")
+TARGET="$USER_@$HOST"
+
+reader_query() {        # SQL on stdin -> TSV, as gentar_reader, via the tunnel
+  : "${GENTAR_HISTORY_READER_PASSWORD:?run under with-secret GENTAR_HISTORY_READER_PASSWORD=keychain:pilot/gentar-history-reader}"
+  python3 - "$PORT" <<'PY'
+import os, sys, urllib.request
+req = urllib.request.Request(f"http://127.0.0.1:{sys.argv[1]}/?default_format=TSVWithNames",
+    data=sys.stdin.read().encode(),
+    headers={"X-ClickHouse-User": "gentar_reader",
+             "X-ClickHouse-Key": os.environ["GENTAR_HISTORY_READER_PASSWORD"]})
+print(urllib.request.urlopen(req, timeout=20).read().decode(), end="")
+PY
+}
+
+case "${1:-}" in
+  deploy)
+    tar -C "$HERE/history" --exclude=secrets --exclude=users.d -cf - . \
+      | "${SSH[@]}" "$TARGET" "mkdir -p $REMOTE_DIR && tar -C $REMOTE_DIR -xf - && GENTAR_HISTORY_PORT=$PORT $REMOTE_DIR/deploy.sh"
+    ;;
+  tunnel)
+    echo "history: 127.0.0.1:$PORT -> $HOST:127.0.0.1:$PORT (ctrl-c to close)"
+    exec "${SSH[@]}" -N -L "$PORT:127.0.0.1:$PORT" "$TARGET"
+    ;;
+  status)
+    reader_query <<'SQL'
+SELECT 'spans' AS t, count() AS rows, uniqExact(run_id) AS runs, uniqExact(subject) AS subjects FROM gentar_history.spans
+UNION ALL SELECT 'agent_turns', count(), uniqExact(run_id), uniqExact(subject) FROM gentar_history.agent_turns
+UNION ALL SELECT 'agent_tools', count(), uniqExact(run_id), uniqExact(subject) FROM gentar_history.agent_tools
+SQL
+    ;;
+  dashboard)
+    shift
+    : "${GENTAR_HISTORY_READER_PASSWORD:?run under with-secret GENTAR_HISTORY_READER_PASSWORD=keychain:pilot/gentar-history-reader}"
+    GENTAR_CLICKHOUSE_URL="http://127.0.0.1:$PORT" GENTAR_CLICKHOUSE_USER=gentar_reader \
+    GENTAR_CLICKHOUSE_PASSWORD="$GENTAR_HISTORY_READER_PASSWORD" GENTAR_CLICKHOUSE_DB=gentar_history \
+      exec python3 "$HERE/dashboard/generate.py" --history --runs 200 \
+        --out "$HERE/dashboard/out/history.html" "$@"
+    ;;
+  writer-secret)
+    repo=${2:?usage: bin/history writer-secret <owner/repo>}
+    "${SSH[@]}" "$TARGET" "cat $REMOTE_DIR/secrets/writer.pass" \
+      | tr -d '\n' | gh secret set GENTAR_HISTORY_WRITER_PASSWORD --repo "$repo"
+    echo "history: $repo GENTAR_HISTORY_WRITER_PASSWORD set (value not shown)"
+    ;;
+  reader-keychain)
+    # `security -i` reads its command from stdin: the value never reaches
+    # an argv `ps` could show. Same naming as `with-secret --store`.
+    "${SSH[@]}" "$TARGET" "cat $REMOTE_DIR/secrets/reader.pass" \
+      | awk -v u="${USER:-$(id -un)}" 'NF{printf "add-generic-password -U -A -s pilot/gentar-history-reader -a %s -w %s\n", u, $0}' \
+      | security -i >/dev/null
+    echo "history: stored as keychain:pilot/gentar-history-reader (value not shown)"
+    ;;
+  *)
+    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2 ;;
+esac

@@ -125,17 +125,15 @@ def fetch(url, user, pw, db, n_runs, since=0):
         WHERE (subject, run_id) IN ({pairs})
         ORDER BY subject, run_id, scenario, ts_start
     """)
-    # Agent self-report (OTLP via otelcol): spans emitted from inside
-    # benches, joined to harness runs on the gentar.run_id RESOURCE
-    # attribute (OTel-correct: run identity is resource-level).
+    # Agent numbers, derived by the coordinator from the agent's session
+    # transcript (gentar.agentstats) — counts only. Absent tables (an older
+    # arena) simply yield none.
     agent = ch_query(url, user, pw, f"""
-        SELECT ResourceAttributes['gentar.run_id'] AS run_id,
-               count() AS agent_spans
-        FROM {db}.otel_traces
-        WHERE ResourceAttributes['gentar.run_id'] IN (
-            SELECT DISTINCT run_id FROM {db}.spans
-            WHERE (subject, run_id) IN ({pairs})
-        )
+        SELECT run_id, count() AS turns,
+               sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens,
+               sum(cache_read_tokens) AS cache_read_tokens, sum(tool_calls) AS tool_calls
+        FROM {db}.agent_turns
+        WHERE (subject, run_id) IN ({pairs})
         GROUP BY run_id
     """)
     return runs, grid, events, agent
@@ -162,6 +160,41 @@ def public_grid(grid):
     is a transcript, the same rule applies (agy review)."""
     return [{**r, "last_detail": _hidden(r.get("last_detail"))}
             if r.get("current_step") in PRIVATE_DETAIL_STEPS else r for r in grid]
+
+
+def fetch_trends(url, user, pw, db, days=30):
+    """Per (subject, scenario) over the last `days`: runs, passes, fails,
+    last status, median scenario duration, and agent tokens. For the
+    history store, where runs span CI jobs and subjects."""
+    rows = ch_query(url, user, pw, f"""
+        SELECT subject, scenario, count() AS runs,
+               countIf(status = 'pass') AS n_pass, countIf(status = 'fail') AS n_fail,
+               argMax(status, last_event) AS last_status,
+               toString(max(last_event)) AS last_run
+        FROM {db}.latest_scenario_status
+        WHERE last_event > now() - INTERVAL {int(days)} DAY
+        GROUP BY subject, scenario ORDER BY subject, scenario
+    """)
+    dur = ch_query(url, user, pw, f"""
+        SELECT subject, scenario, quantile(0.5)(duration_ms) AS median_ms
+        FROM {db}.spans
+        WHERE step = 'scenario' AND status IN ('pass', 'fail')
+          AND ts_start > now() - INTERVAL {int(days)} DAY
+        GROUP BY subject, scenario
+    """)
+    tok = ch_query(url, user, pw, f"""
+        SELECT subject, scenario, sum(input_tokens + output_tokens) AS tokens,
+               sum(tool_calls) AS tool_calls
+        FROM {db}.agent_turns
+        GROUP BY subject, scenario
+    """)
+    extra = {}
+    for r in dur:
+        extra.setdefault((r["subject"], r["scenario"]), {})["median_ms"] = r["median_ms"]
+    for r in tok:
+        extra.setdefault((r["subject"], r["scenario"]), {}).update(
+            tokens=r["tokens"], tool_calls=r["tool_calls"])
+    return [{**r, **extra.get((r["subject"], r["scenario"]), {})} for r in rows]
 
 
 def badge(status: str) -> str:
@@ -214,8 +247,17 @@ PAGE_TEMPLATE = """<title>gentar dashboard</title>
   .empty {{ color: var(--muted); padding: 20px 0; }}
   code {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: color-mix(in srgb, var(--ink) 6%, transparent); padding: 1px 5px; border-radius: 4px; }}
 </style>
-<h1>gentar -- telemetry</h1>
-<div class="sub">{db} on the arena's ClickHouse -- generated {generated_at}{watch_note}</div>
+<h1>gentar -- {title}</h1>
+<div class="sub">{db} on {where} -- generated {generated_at}{watch_note}</div>
+
+<div id="trends-wrap" style="display:none">
+  <h2 style="font-size:15px;margin:8px 0">Trends (last 30 days)</h2>
+  <div class="container"><table>
+    <thead><tr><th style="width:18%">Subject</th><th style="width:22%">Suite</th><th>Runs</th><th>Pass rate</th><th>Last</th><th>Median</th><th>Agent tokens</th><th>Tool calls</th></tr></thead>
+    <tbody id="trends-body"></tbody>
+  </table></div>
+  <h2 style="font-size:15px;margin:22px 0 8px">Runs</h2>
+</div>
 
 <div class="toolbar">
   <label for="run-select">Run:</label>
@@ -237,6 +279,15 @@ const RUNS = {runs_json};
 const GRID = {grid_json};
 const EVENTS = {events_json};
 const AGENT = {agent_json};
+const TRENDS = {trends_json};
+
+// Everything below comes from runs — command output included — and this
+// page can be a PUBLIC artifact that someone opens: text goes in escaped.
+function esc(s) {{
+  return String(s === null || s === undefined ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}}
 
 function fmtDur(ms) {{
   if (ms === null || ms === undefined) return "-";
@@ -250,7 +301,7 @@ function statusTextColor(s) {{
   return {{pass:"#fff",running:"#141400",fail:"#fff",error:"#141400",skip:"#fff"}}[s] || "#fff";
 }}
 function badge(s) {{
-  return `<span class="badge" style="background:${{statusColor(s)}};color:${{statusTextColor(s)}}">${{(s||"?").toUpperCase()}}</span>`;
+  return `<span class="badge" style="background:${{statusColor(s)}};color:${{statusTextColor(s)}}">${{esc((s||"?").toUpperCase())}}</span>`;
 }}
 
 const select = document.getElementById("run-select");
@@ -274,7 +325,11 @@ function renderRun(runIdx) {{
     ["pass", run.n_pass], ["fail", run.n_fail],
     ["running", run.n_running], ["skip", run.n_skip], ["error", run.n_error],
   ];
-  if (agent) stats.push(["agent spans", agent.agent_spans]);
+  if (agent) {{
+    stats.push(["agent turns", agent.turns]);
+    stats.push(["tokens in", agent.input_tokens], ["tokens out", agent.output_tokens]);
+    stats.push(["tool calls", agent.tool_calls]);
+  }}
   totals.innerHTML = stats.map(([l, n]) => `<div class="stat"><div class="n">${{n}}</div><div class="l">${{l}}</div></div>`).join("");
 
   const tbody = document.getElementById("grid-body");
@@ -284,11 +339,11 @@ function renderRun(runIdx) {{
     tr.className = "scenario-row";
     tr.onclick = () => toggleTimeline(i);
     tr.innerHTML = `
-      <td>${{row.scenario}}</td>
+      <td>${{esc(row.scenario)}}</td>
       <td>${{badge(row.status)}}</td>
       <td>${{fmtDur(row.last_duration_ms)}}</td>
-      <td><code>${{row.current_step || "-"}}</code></td>
-      <td class="detail" title="${{(row.last_detail||"").replace(/"/g,'&quot;')}}">${{row.last_detail || ""}}</td>`;
+      <td><code>${{esc(row.current_step || "-")}}</code></td>
+      <td class="detail" title="${{esc(row.last_detail)}}">${{esc(row.last_detail)}}</td>`;
     tbody.appendChild(tr);
 
     const tlTr = document.createElement("tr");
@@ -296,7 +351,7 @@ function renderRun(runIdx) {{
     tlTr.id = `tl-${{i}}`;
     const steps = EVENTS.filter(e => e.subject === run.subject && e.run_id === run.run_id && e.scenario === row.scenario);
     const stepsHtml = steps.length
-      ? steps.map(s => `<div class="tl-step">${{badge(s.status)}}<span class="name">${{s.step}}</span><span class="dur">${{fmtDur(s.duration_ms)}}</span><span class="detail">${{s.detail || ""}}</span></div>`).join("")
+      ? steps.map(s => `<div class="tl-step">${{badge(s.status)}}<span class="name">${{esc(s.step)}}</span><span class="dur">${{fmtDur(s.duration_ms)}}</span><span class="detail" title="${{esc(s.detail)}}">${{esc(s.detail)}}</span></div>`).join("")
       : '<span class="detail">no step events recorded</span>';
     tlTr.innerHTML = `<td colspan="5">${{stepsHtml}}</td>`;
     tbody.appendChild(tlTr);
@@ -305,6 +360,17 @@ function renderRun(runIdx) {{
 
 function toggleTimeline(i) {{
   document.getElementById(`tl-${{i}}`).classList.toggle("open");
+}}
+
+if (TRENDS.length > 0) {{
+  document.getElementById("trends-wrap").style.display = "block";
+  document.getElementById("trends-body").innerHTML = TRENDS.map(t => {{
+    const rate = t.runs ? Math.round(100 * t.n_pass / t.runs) + "%" : "-";
+    return `<tr><td>${{esc(t.subject)}}</td><td>${{esc(t.scenario)}}</td><td>${{t.runs}}</td>` +
+      `<td>${{rate}} <span class="detail">(${{t.n_fail}} fail)</span></td>` +
+      `<td>${{badge(t.last_status)}} <span class="detail">${{esc(t.last_run)}}</span></td>` +
+      `<td>${{fmtDur(t.median_ms)}}</td><td>${{t.tokens ?? "-"}}</td><td>${{t.tool_calls ?? "-"}}</td></tr>`;
+  }}).join("");
 }}
 
 if (RUNS.length > 0) {{
@@ -317,16 +383,26 @@ if (RUNS.length > 0) {{
 """
 
 
-def render(runs, grid, events, agent, db: str, watch: bool) -> str:
+def _script_json(value) -> str:
+    """JSON safe to embed in a <script> block: `</` would end the block and
+    let a step's output inject markup into a page someone opens."""
+    return json.dumps(value, default=str).replace("</", "<\\/").replace("<!--", "<\\!--")
+
+
+def render(runs, grid, events, agent, db: str, watch: bool, trends=None,
+           history: bool = False) -> str:
     watch_note = " -- auto-refreshing every 5s" if watch else ""
     return PAGE_TEMPLATE.format(
+        title="history" if history else "telemetry",
+        where="the history store" if history else "the arena's ClickHouse",
+        trends_json=_script_json(trends or []),
         db=html.escape(db),
         generated_at=time.strftime("%Y-%m-%d %H:%M:%S %Z"),
         watch_note=watch_note,
-        runs_json=json.dumps(runs),
-        grid_json=json.dumps(grid),
-        events_json=json.dumps(events),
-        agent_json=json.dumps(agent),
+        runs_json=_script_json(runs),
+        grid_json=_script_json(grid),
+        events_json=_script_json(events),
+        agent_json=_script_json(agent),
     )
 
 
@@ -347,6 +423,8 @@ def main(argv):
     # A published dashboard shows only its own invocation's runs: a kept
     # arena's ClickHouse still holds earlier ones, whose credentials the
     # publisher does not know to redact (agy review).
+    ap.add_argument("--history", action="store_true",
+                    help="the history store: add trends across runs and subjects")
     ap.add_argument("--since", type=int, default=0,
                     help="only runs started at or after this Unix time")
     args = ap.parse_args(argv)
@@ -355,7 +433,9 @@ def main(argv):
 
     def once():
         runs, grid, events, agent = fetch(url, user, pw, db, args.runs, args.since)
-        html_body = render(runs, public_grid(grid), public_events(events), agent, db, args.watch)
+        trends = fetch_trends(url, user, pw, db) if args.history else []
+        html_body = render(runs, public_grid(grid), public_events(events), agent, db,
+                           args.watch, trends=trends, history=args.history)
         write_html(args.out, html_body, args.watch)
         print(f"dashboard: {args.out}  ({len(runs)} runs, {len(grid)} scenario rows, {len(events)} events, {len(agent)} runs with agent spans)")
 
