@@ -49,6 +49,22 @@ class FailedStepStderrTest(unittest.TestCase):
         report, _, _ = self.run_step(Bench(0, "ok\n", "a warning on stderr"))
         self.assertNotIn("warning", report.steps[0].output)
 
+    def test_a_tail_window_that_starts_inside_a_secret_keeps_none_of_it(self):
+        # cockpit#31: the failure message keeps the output's LAST 600 chars;
+        # when that window starts inside a secret, only its end survives,
+        # and the prefix rule never matches an end
+        from gentar.redaction import scrubber
+        secret = "sk-ant-api03-" + "Q7x9Lm2Pz4Rt8Vw1Ny6Ks3Hd5Fg0Jb"
+        err = "token=" + secret + "\n" + "x" * 590
+        _, _, error = self.run_step(Bench(1, "", err))
+        cut = error[error.index("\n") + 1:]          # the output window
+        self.assertNotIn(secret, cut)                 # the window starts inside it
+        survivor = cut.split("\n")[0]
+        self.assertTrue(secret.endswith(survivor) and len(survivor) >= 8, survivor)
+        scrubbed = scrubber([("ANTHROPIC_AUTH_TOKEN", secret)])(error)
+        self.assertNotIn(survivor, scrubbed)
+        self.assertIn("«redacted:ANTHROPIC_AUTH_TOKEN»", scrubbed)
+
 
 if __name__ == "__main__":
     unittest.main()

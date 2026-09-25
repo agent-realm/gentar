@@ -9,7 +9,9 @@ from review are built in:
   - a value can be CUT: a report's command column or a span's detail cap
     truncates it, and a whole-value match misses the surviving prefix
     (claude-playbooks). Any prefix of 8+ characters of a value is replaced
-    too, so a truncated secret loses what survived.
+    too, so a truncated secret loses what survived — and any 8+ character
+    SUFFIX: a tail window (a failed step's last lines, a report's `…` tail)
+    can start inside a secret and keep only its end (cockpit#31).
 
 Values shorter than 4 characters are left alone: replacing them would shred
 the text and they are not credentials worth that. Longest forms first, so a
@@ -180,9 +182,10 @@ def scrubber(named_values):
         for f in _forms(value):
             if len(f) >= MIN_VALUE:
                 full.append((len(f), f, mark))
-                # every surviving head of a cut value, longest first
+                # every surviving head — and tail — of a cut value
                 for n in range(len(f) - 1, MIN_PREFIX - 1, -1):
                     prefixes.append((n, f[:n], mark))
+                    prefixes.append((n, f[-n:], mark))
     full.sort(key=lambda p: -p[0])
     prefixes.sort(key=lambda p: -p[0])
 
