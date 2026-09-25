@@ -52,6 +52,17 @@ class CheckExitTest(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stderr)
         self.assertIn("usage:", r.stderr)
 
+    def test_half_a_telemetry_destination_is_a_refusal(self):
+        # an endpoint without its key (or the reverse) would silently send
+        # nothing anywhere; refuse before any container starts
+        env = dict(os.environ, GENTAR_REPO_URL=str(ROOT), GENTAR_REF=self.head,
+                   GENTAR_OTLP_EXPORT="http://collector.example:4318")
+        env.pop("GENTAR_OTLP_KEY", None)
+        r = subprocess.run(["/bin/bash", "gentar/run.sh", "first-suite"], cwd=self.repo,
+                           env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2, r.stderr[-400:])
+        self.assertIn("BOTH GENTAR_OTLP_EXPORT and GENTAR_OTLP_KEY", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

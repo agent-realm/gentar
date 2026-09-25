@@ -22,6 +22,35 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.6.0 — 2026-09-25
+
+**Every run leaves the arena as a trace.** A repo declares a telemetry
+destination and the arena forwards everything to it — the organisation's
+ClickStack on arf first.
+
+### Added
+
+- **Telemetry destination** (AGENTS.md decision 6): `GENTAR_OTLP_EXPORT` +
+  `GENTAR_OTLP_KEY`, both or neither. Set, `compose.export.yml` gives the
+  arena's collector an `otlphttp` exporter for traces, logs and metrics
+  (queued and retried), and the coordinator sends each run as one OTLP
+  trace rooted at `scenario` with every step as a child span and the CI
+  identity on the resource. Scrubbed by the history store's scrubber before
+  it leaves; transcripts only by length; best-effort, never the verdict.
+  The kit's `run.sh` refuses one without the other (exit 2) and redacts
+  both from published files; `bin/arena` and CI layer the file when the URL
+  is set. The kit workflow passes both from repository secrets.
+- **The agent as spans**: `agent.session` → `agent.turn` → `agent.tool`
+  with real start/end times from the Claude Code transcript and numbers
+  only (`gentar.agent.*`) — HyperDX shows where the agent's time went
+  without a word of what it said. `agentstats` turns and tools now carry
+  timestamps, and tools the turn that called them.
+
+### Changed
+
+- Kit pin `v0.6.0`. Nothing is sent anywhere unless a repo sets both
+  settings; an adopter that moves the pin and sets nothing sees no change.
+
 ## 0.5.0 — 2026-09-24
 
 **History, and the agent's own numbers.** Runs outlive their stack, and an

@@ -353,6 +353,9 @@ def run(name: str, cfg: Config | None = None) -> int:
                        status, t0_ms, parent="", attrs=attrs,
                        detail=summary if verdict == 0 else "")
         _write_report(report, cfg)
+        # The run's trace, as OTLP, to the arena's collector (which forwards
+        # it when a telemetry destination is declared). Best-effort.
+        spans.otlp.flush()
         # The scenario owns a sandbox named run_id; rm is idempotent and
         # warns instead of raising so teardown never masks the verdict.
         # GENTAR_KEEP_BENCH=1 preserves it for post-mortem (debugging).

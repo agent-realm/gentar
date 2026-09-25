@@ -73,6 +73,11 @@ def _ts(value):
         return None
 
 
+def _ns(ts):
+    """A datetime as Unix nanoseconds, or 0 when unknown."""
+    return int(ts.timestamp() * 1_000_000_000) if ts else 0
+
+
 def _int(v) -> int:
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
 
@@ -105,9 +110,11 @@ def extract(transcripts):
             if entry.get("type") == "assistant":
                 mid = msg.get("id") or entry.get("uuid") or f"line{len(order)}"
                 if mid not in messages:
-                    messages[mid] = {"tool_calls": 0, "ts": when}
+                    messages[mid] = {"tool_calls": 0, "ts": when, "end": when}
                     order.append(mid)
                 m = messages[mid]
+                if when and (m["end"] is None or when > m["end"]):
+                    m["end"] = when
                 m["model"] = model_label(msg.get("model"))
                 usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
                 m["input_tokens"] = _int(usage.get("input_tokens"))
@@ -119,7 +126,7 @@ def extract(transcripts):
                         m["tool_calls"] += 1
                         tid = it.get("id")
                         if isinstance(tid, str) and tid not in uses:
-                            uses[tid] = (tool_class(it.get("name")), when)
+                            uses[tid] = (tool_class(it.get("name")), when, len(order) - 1)
             elif entry.get("type") == "user":
                 for it in items:
                     if isinstance(it, dict) and it.get("type") == "tool_result":
@@ -136,15 +143,18 @@ def extract(transcripts):
                 "cache_read_tokens": m.get("cache_read_tokens", 0),
                 "cache_creation_tokens": m.get("cache_creation_tokens", 0),
                 "tool_calls": m["tool_calls"],
+                # timestamps (Unix ns) so a turn can be a span; numbers only
+                "start_ns": _ns(m.get("ts")), "end_ns": _ns(m.get("end")),
             })
-        for tid, (cls, started) in uses.items():
+        for tid, (cls, started, turn_index) in uses.items():
             finished, is_error = results.get(tid, (None, False))
             duration = None
             if started and finished and finished >= started:
                 duration = int((finished - started).total_seconds() * 1000)
             tools.append({"session": session_index, "tool": cls,
                           "duration_ms": duration, "is_error": is_error,
-                          "completed": tid in results})
+                          "completed": tid in results, "turn": turn_index,
+                          "start_ns": _ns(started), "end_ns": _ns(finished)})
     totals = {
         "sessions": len({t["session"] for t in turns}),
         "turns": len(turns),

@@ -45,6 +45,8 @@ compose() {
   local extra=()
   # History store on this host's docker network (history/): join it.
   [ -n "${GENTAR_HISTORY_NETWORK:-}" ] && extra=(-f compose.history.yml)
+  # Telemetry destination: forward everything (otelcol/export.yaml).
+  [ -n "${GENTAR_OTLP_EXPORT:-}" ] && extra+=(-f compose.export.yml)
   docker compose -f docker-compose.yml -f compose.rm.yml ${extra[@]+"${extra[@]}"} "$@"
 }
 

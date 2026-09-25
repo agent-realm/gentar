@@ -1,0 +1,44 @@
+# Layered on config.yaml (compose.export.yml) when the adopting repo
+# declared a telemetry destination: GENTAR_OTLP_EXPORT (the collector's
+# OTLP/HTTP base URL) + GENTAR_OTLP_KEY (its ingestion key, sent as the
+# `authorization` header — ClickStack's convention).
+#
+# The local ClickHouse copy stays (the per-run dashboard reads it); every
+# signal is ALSO forwarded. The coordinator scrubs before anything reaches
+# this collector, so what leaves is what the report would show.
+#
+# The run never waits on the destination: a bounded retry queue absorbs a
+# slow or down collector, and a verdict never depends on delivery.
+exporters:
+  otlphttp/export:
+    endpoint: ${env:GENTAR_OTLP_EXPORT}
+    headers:
+      authorization: ${env:GENTAR_OTLP_KEY}
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 2s
+      max_interval: 30s
+      max_elapsed_time: 120s
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+
+processors:
+  batch/export:
+    timeout: 2s
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch/export]
+      exporters: [clickhouse, otlphttp/export]
+    logs:
+      receivers: [otlp]
+      processors: [batch/export]
+      exporters: [otlphttp/export]
+    metrics:
+      receivers: [otlp]
+      processors: [batch/export]
+      exporters: [otlphttp/export]

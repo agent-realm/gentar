@@ -328,6 +328,42 @@ A repo turns it on with two variables — `GENTAR_HISTORY_URL=http://gentar-hist
 `GENTAR_HISTORY_WRITER_PASSWORD`. Unset, nothing is written; a failed write
 never changes a verdict.
 
+## Telemetry destination — every run into ClickStack
+
+The history store keeps rows; a **telemetry destination** keeps traces. When
+`GENTAR_OTLP_EXPORT` (a collector's OTLP/HTTP base URL) and `GENTAR_OTLP_KEY`
+(its ingestion key, sent as the `authorization` header) are both set, the
+arena's own collector forwards everything it receives there, and the
+coordinator sends each run as one trace:
+
+- `scenario` is the root; every step (`bench.create`, `subject.push`,
+  `oracle.step.N`, `assert`, `run.*`) is its child, with duration, status and
+  scrubbed output;
+- the agent's session becomes `agent.session` → `agent.turn` → `agent.tool`
+  with real start and end times and numbers only (`gentar.agent.*`: model,
+  tokens, tool class, error);
+- the resource names the subject (`service.name`) and the CI run
+  (`gentar.ci_repo`, `gentar.ci_run_id`, …) and the engine sha.
+
+Scrubbing is the history store's, applied before a span leaves the
+coordinator; a driver transcript is sent only as its length. Export is
+best-effort — a collector that is down is warned about once and never
+changes a verdict. The arena keeps its local copy as before.
+
+The organisation's destination is ClickStack on arf (VM 149,
+`http://10.10.10.58:4318`, HyperDX on `:8080`, retention forever). For this
+repository both settings are Actions secrets; locally:
+
+```bash
+GENTAR_OTLP_EXPORT=http://10.10.10.58:4318 \
+  with-secret GENTAR_OTLP_KEY=keychain:pilot/clickstack-ingest -- bin/arena up
+```
+
+`compose.export.yml` is what wires it (layered by `bin/arena`, the kit's
+`run.sh` and CI when the URL is set); one setting without the other is
+refused by the kit, and compose itself refuses the file with either unset.
+Once ClickStack is proven in CI the v0.5.0 history store is retired.
+
 ## Scenario inventory
 
 22 suites: 20 TOML files in `coordinator/scenarios/`, plus two Python

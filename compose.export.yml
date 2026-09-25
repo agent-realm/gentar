@@ -1,0 +1,11 @@
+# Layered when GENTAR_OTLP_EXPORT is set (kit run.sh, bin/arena): the
+# arena's collector also forwards everything to that destination with
+# GENTAR_OTLP_KEY. See otelcol/export.yaml.
+services:
+  otelcol:
+    command: ["--config=/etc/otelcol/config.yaml", "--config=/etc/otelcol/export.yaml"]
+    environment:
+      GENTAR_OTLP_EXPORT: ${GENTAR_OTLP_EXPORT:?GENTAR_OTLP_EXPORT is required when compose.export.yml is layered}
+      GENTAR_OTLP_KEY: ${GENTAR_OTLP_KEY:?GENTAR_OTLP_KEY is required with GENTAR_OTLP_EXPORT}
+    volumes:
+      - ./otelcol/export.yaml:/etc/otelcol/export.yaml:ro

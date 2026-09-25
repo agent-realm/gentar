@@ -14,7 +14,7 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.5.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.6.0` |
 
 ## Quickstart (local)
 
@@ -101,6 +101,25 @@ that cannot be redacted is not published.
 `bin/history writer-secret owner/repo`, never by hand). Every run then also
 lands in the store — redacted, agent numbers only, never a transcript — for
 trends across runs. Unset, nothing changes.
+
+**Sending telemetry to a collector.** To have every run land in your
+organisation's ClickStack (or any OTLP/HTTP collector), set two repository
+**secrets** — whoever operates the collector gives you both:
+`GENTAR_OTLP_EXPORT` (its base URL, e.g. `http://collector.example.internal:4318`) and
+`GENTAR_OTLP_KEY` (its ingestion key). Each run is then one trace, rooted at
+the scenario, with every step and the agent's session → turns → tool calls
+as child spans, and the run's CI identity on the resource. It is scrubbed
+exactly as the dashboard is — nothing a report would hide leaves — and a
+collector that is down never changes a verdict. Locally, lend the key for
+one run instead of writing it anywhere:
+
+```bash
+GENTAR_OTLP_EXPORT=http://collector.example.internal:4318 \
+  with-secret GENTAR_OTLP_KEY=<key-reference> -- gentar/run.sh first-suite
+```
+
+Both or neither: one without the other is refused (exit 2) before any
+bench exists.
 
 To watch a run live instead, keep the stack up with `GENTAR_KEEP_ARENA=1` and,
 from a second shell (use your own port if you moved it):
