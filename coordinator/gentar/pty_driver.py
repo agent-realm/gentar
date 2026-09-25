@@ -44,6 +44,7 @@ class PtyDriver:
         self.columns, self.lines = columns, lines
         self.child = None
         self.transcript = ""   # full evidence; spans carry the tail
+        self.aborted = False   # the danger gate fired: never type again
 
     # -- lifecycle -------------------------------------------------------
 
@@ -60,8 +61,15 @@ class PtyDriver:
 
     def close(self) -> None:
         if self.child is not None:
+            # After the danger gate fired, the dangerous prompt may still be
+            # live (abort()'s ctrl-c not yet delivered on a loaded host), and
+            # `exit` + Enter would ANSWER it — the gate refused, then its own
+            # teardown typed into the prompt (scripted-danger, v0.6.1 tag
+            # run). So after an abort: no input at all; wait for EOF, then
+            # force-close (which hangs up the transport).
             try:
-                self.child.sendline("exit")
+                if not self.aborted:
+                    self.child.sendline("exit")
                 self.child.expect(pexpect.EOF, timeout=5)
             except Exception:
                 pass
@@ -113,6 +121,7 @@ class PtyDriver:
 
     def abort(self, why: str) -> None:
         print(f"DRIVE ABORT: {why}")
+        self.aborted = True
         for key, delay in (("escape", 1.0), ("ctrl-c", 1.0), ("ctrl-c", 0.5)):
             try:
                 self.send_key(key)
