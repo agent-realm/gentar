@@ -22,6 +22,20 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.6.2 — 2026-09-25
+
+### Fixed
+
+- **After the danger gate fired, the driver's teardown typed into the
+  refused prompt.** `abort()` sends Esc and ctrl-c to stop the command, and
+  `close()` then sent `exit` + Enter to leave the shell — without knowing
+  whether the ctrl-c had landed. On a loaded bench host it had not, and the
+  line answered the still-live dangerous prompt: the gate refused, its own
+  teardown replied (scripted-danger, v0.6.1 tag run). After an abort the
+  driver now sends nothing; it waits for EOF and force-closes the
+  transport, which hangs the command up. Pre-existing since the scripted
+  driver; 2 of the last 40 gate runs.
+
 ## 0.6.1 — 2026-09-25
 
 ### Fixed
