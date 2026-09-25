@@ -69,7 +69,11 @@ def _locator_parts(name: str, value: str):
                 return None
         except ValueError:
             return None
-        return {value, value.lower(), u.netloc, u.netloc.lower(), u.hostname}
+        # urlsplit lowercases .hostname; keep the spelling the text may use too
+        host = u.netloc.rpartition("@")[2]
+        if u.port is not None:
+            host = host.rsplit(":", 1)[0]
+        return {value, value.lower(), u.netloc, u.netloc.lower(), host, u.hostname}
     if _HOSTLIKE.match(value):
         return {value}
     return None

@@ -110,6 +110,14 @@ class RedactTest(unittest.TestCase):
                                      HOOK_URL=v)
             self.assertNotIn(cut, out, v)
 
+    def test_a_mixed_case_host_is_caught_as_written(self):
+        # Codex: urlsplit lowercases the hostname, so a standalone
+        # Collector.Corp survived when only collector.corp was added
+        _, out = self.run_redact("dns Collector.Corp and collector.corp",
+                                 GENTAR_REDACT_NAMES="GENTAR_OTLP_EXPORT",
+                                 GENTAR_OTLP_EXPORT="https://Collector.Corp:4318")
+        self.assertNotIn("collector.corp", out.lower(), out)
+
     def test_a_value_is_caught_url_encoded(self):
         # agy: an application that URL-encodes a value (a query parameter)
         # emits polat%40bench.corp, which no raw/JSON/HTML form matches
