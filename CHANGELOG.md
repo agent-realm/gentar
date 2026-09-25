@@ -30,9 +30,12 @@ Adopters pin a release tag, not a branch.
   catches what survives when a window keeps a value's beginning; a TAIL
   window — a failed step's last lines (0.6.3), a report's `…` tail — can
   start inside a secret and keep only its end, which nothing matched
-  (cockpit#31). Credentials now also lose every 8+ character suffix, in
-  every form. One rule in the scrubber, so every truncation site is
-  covered, including report tails that `bin/redact` only sees rendered.
+  (cockpit#31) — and a value longer than a window, cut at both ends, keeps
+  its middle. Credentials now lose ANY 8+ character piece — head, tail or
+  middle — in every form, found in one pass over the text (the value's
+  8-grams are indexed and each hit extended along it). One rule in the
+  scrubber, so every truncation site is covered, including report tails
+  that `bin/redact` only sees rendered.
 
 ### Removed
 
