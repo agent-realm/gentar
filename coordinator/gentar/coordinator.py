@@ -17,7 +17,7 @@ from gentar.oracle import run_oracle
 from gentar.provenance import run_attrs
 from gentar.report import RunReport
 from gentar.scenarios import REGISTRY, known_names
-from gentar.spans import Spans, agent_rows, flush_all, new_run_id
+from gentar.spans import Spans, agent_rows, exporting, new_run_id
 from gentar.toml_scenario import (TomlScenario, credentials_satisfied,
                                   dropped_credentials, satisfied_group,
                                   load_dir)
@@ -140,10 +140,8 @@ def _relay_agent_spans(bench: BenchHost, run_id: str, spans: Spans,
 def run(name: str, cfg: Config | None = None) -> int:
     """Run one scenario; every terminal path — pass, fail, refusal,
     quarantine — then flushes its trace (best-effort, never the verdict)."""
-    try:
+    with exporting():
         return _run(name, cfg)
-    finally:
-        flush_all()
 
 
 def _run(name: str, cfg: Config | None = None) -> int:

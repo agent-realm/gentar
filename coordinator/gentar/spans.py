@@ -16,6 +16,8 @@ Shape ported from agent-gauntlet lib/events.sh:
   per-component queries read contiguous parts.
 """
 
+import contextlib
+import contextvars
 import datetime
 import hashlib
 import json
@@ -182,15 +184,28 @@ def _kv(key: str, value) -> dict:
     return {"key": key, "value": {"stringValue": str(value)}}
 
 
-_OPEN: list = []       # every Otlp of this process, until flush_all()
+# The exporters made inside the current `exporting()` block — per context,
+# so one run (or thread, or test) never flushes another's.
+_OPEN: contextvars.ContextVar = contextvars.ContextVar("gentar_otlp_open", default=None)
 
 
-def flush_all() -> None:
-    """Flush every exporter this process made — the coordinator's run()
-    calls it on EVERY terminal path (refusals and quarantine included), so
-    a run that never reached a bench still leaves its trace."""
-    while _OPEN:
-        _OPEN.pop().flush()
+@contextlib.contextmanager
+def exporting():
+    """Flush every exporter made inside the block when it exits, however it
+    exits. The coordinator's run() wraps EVERY terminal path in it
+    (refusals and quarantine included), so a run that never reached a bench
+    still leaves its trace — and a flush can never replace the verdict."""
+    opened: list = []
+    token = _OPEN.set(opened)
+    try:
+        yield
+    finally:
+        _OPEN.reset(token)
+        for o in opened:
+            try:
+                o.flush()
+            except Exception:
+                pass
 
 
 class Otlp:
@@ -218,7 +233,9 @@ class Otlp:
         self.failed = False
         # A refusal has no run id yet: its span is a one-span trace of its own.
         self.loose_trace = secrets.token_hex(16)
-        _OPEN.append(self)
+        opened = _OPEN.get()
+        if opened is not None:
+            opened.append(self)
 
     def root(self, subject, run_id, span_id):
         self.roots[(subject, run_id)] = span_id
@@ -266,9 +283,13 @@ class Otlp:
     def flush(self) -> None:
         if not self.buf or not self.cfg.otlp_scrubbed_endpoint:
             return
-        body = json.dumps(self.payload()).encode()
+        try:
+            body = json.dumps(self.payload()).encode()
+        except Exception:
+            body = None
         self.buf = {}
-        self._post(body)
+        if body is not None:
+            self._post(body)
 
     def relay(self, subject, run_id, raw: str) -> None:
         """A bench's self-report (OTLP/HTTP JSON), through the scrubbed door.
@@ -460,9 +481,10 @@ def _agent_spans(spans: "Spans", subject, run_id, scenario, turns, tools) -> Non
         # last assistant message — else a tool span outlives its parent.
         tool_end: dict = {}
         for u in us:
-            if u.get("end_ns"):
-                tool_end[u.get("turn")] = max(tool_end.get(u.get("turn"), 0), u["end_ns"])
-        ts = [dict(t, end_ns=max(t.get("end_ns") or 0, tool_end.get(t.get("turn"), 0)))
+            if u.get("end_ns") and u.get("turn") is not None:
+                tool_end[u["turn"]] = max(tool_end.get(u["turn"], 0), u["end_ns"])
+        ts = [dict(t, end_ns=max(t.get("end_ns") or 0,
+                                 tool_end.get(t["turn"], 0) if t.get("turn") is not None else 0))
               for t in ts]
         starts = [x["start_ns"] for x in ts + us if x.get("start_ns")]
         ends = [x["end_ns"] for x in ts + us if x.get("end_ns")]

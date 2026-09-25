@@ -272,6 +272,29 @@ class EveryTerminalPathTest(unittest.TestCase):
         names = [sp["name"] for b in sent.bodies for _, sp in all_spans(b[1])]
         self.assertEqual(names, ["run"])
 
+    def test_a_run_flushes_only_its_own_exporters(self):
+        from gentar import coordinator
+        stray = spans(cfg_with())                 # made outside any run
+        stray.emit("other", "r0", "s", "step.0")
+        sent = Sent()
+        with mock.patch("gentar.spans.clickhouse_connect.get_client",
+                        side_effect=Exception("no clickhouse")), \
+                mock.patch("urllib.request.urlopen", sent):
+            coordinator.run("flaky", cfg_with(GENTAR_QUARANTINE="flaky"))
+        subjects = {a["value"]["stringValue"] for b in sent.bodies
+                    for rs in b[1]["resourceSpans"] for a in rs["resource"]["attributes"]
+                    if a["key"] == "service.name"}
+        self.assertIn("arena", subjects)          # the run's own trace did go
+        self.assertNotIn("other", subjects)
+        self.assertTrue(stray.otlp.buf)           # untouched, still its own
+
+    def test_a_flush_that_breaks_never_changes_the_verdict(self):
+        from gentar import coordinator
+        with mock.patch("gentar.spans.clickhouse_connect.get_client",
+                        side_effect=Exception("no clickhouse")), \
+                mock.patch("gentar.spans.Otlp.payload", side_effect=TypeError("boom")):
+            self.assertEqual(coordinator.run("flaky", cfg_with(GENTAR_QUARANTINE="flaky")), 0)
+
     def test_refusals_without_a_run_id_are_separate_traces(self):
         a, b = spans(cfg_with()), spans(cfg_with())
         a.emit("arena", "", "s1", "budget.refuse", "error")
