@@ -22,6 +22,21 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+Not a release (release freeze, 2026-09-26): main only; adopters stay on
+their pinned tag.
+
+### Removed
+
+- **The v0.5.0 history store** — superseded by the telemetry destination
+  (0.6.0), proven in CI. Gone: `history/`, `bin/history`,
+  `compose.history.yml`, the coordinator's history writer and its
+  `GENTAR_HISTORY_*` settings, the dashboard's `--history` trends mode. The
+  kit (`subject-template/`) is deliberately left byte-identical to v0.6.3:
+  it pins that tag and `--check` compares against it, so its inert history
+  wiring goes with the next release (Codex). The scrubber the writer carried stays, as the
+  run's `Redactor`, for everything the export sends. Its data (1,323 spans,
+  2 agent turns, 1 tool call) was dumped before removal.
+
 ## 0.6.3 — 2026-09-25
 
 ### Fixed

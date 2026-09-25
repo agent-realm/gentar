@@ -81,7 +81,7 @@ _TRANSCRIPTS = ("find \"$HOME\" -maxdepth 7 -path '*/projects/*' -name '*.jsonl'
 def _collect_agent_stats(bench: BenchHost, run_id: str, spans: Spans,
                          subject: str, name: str, report) -> None:
     """Numbers from the agent's session transcript(s), if an agent ran:
-    tokens, turns, tool calls — into the arena, history and the report.
+    tokens, turns, tool calls — into the arena, the export and the report.
     The transcript text is read into memory here and dropped; agentstats
     returns numbers and labels only. Best-effort, never the verdict."""
     try:
@@ -313,9 +313,9 @@ def _run(name: str, cfg: Config | None = None) -> int:
         _write_report(report, cfg)
         return 2
     spans = Spans(cfg)
-    # History keeps this run; scrub the values of what it declared.
+    # Scrub the values of what this run declared from everything it exports.
     if scenario:
-        spans.history.redact_values(
+        spans.redactor.redact_values(
             [(n, os.environ.get(n, "")) for n in scenario.credential_names()])
     run_id = new_run_id(cfg.name_prefix)
     report = RunReport(

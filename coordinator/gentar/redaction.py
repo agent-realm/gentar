@@ -1,7 +1,7 @@
 """Replace secret VALUES in text that leaves a run — one implementation.
 
 Used by bin/redact (the kit's published reports and dashboard) and by the
-coordinator's history writer (the shared, persistent store). Two lessons
+coordinator's Redactor (everything the OTLP export sends). Two lessons
 from review are built in:
 
   - a value appears in more than its raw form: JSON-escaped (ASCII and

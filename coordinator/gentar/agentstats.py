@@ -14,7 +14,7 @@ The rule, agreed with the first adopter and pinned by a test that plants a
 fake secret in a fixture: NOTHING textual leaves this module. A transcript
 is the whole conversation — prompts, reasoning, every tool input and output —
 and can hold a credential verbatim (a tool call that prints the environment).
-The history store is shared and the dashboard can be a public artifact, so
+Telemetry is exported and the dashboard can be a public artifact, so
 only numbers and a closed set of labels come out:
 
   - model ids are kept only when they start with a known model family

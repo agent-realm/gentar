@@ -43,8 +43,6 @@ cd "$HERE"
 # still works exactly as the README and CI describe it.
 compose() {
   local extra=()
-  # History store on this host's docker network (history/): join it.
-  [ -n "${GENTAR_HISTORY_NETWORK:-}" ] && extra=(-f compose.history.yml)
   # Telemetry destination (otelcol/export.yaml); require_destination has
   # already refused half of one for every command that starts an arena.
   if [ -n "${GENTAR_OTLP_EXPORT:-}" ] && [ -n "${GENTAR_OTLP_KEY:-}" ]; then
