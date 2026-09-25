@@ -142,6 +142,16 @@ class RedactTest(unittest.TestCase):
         self.assertIn("connect to «redacted:GENTAR_BENCH_HOST».", out)   # sentence end
         self.assertIn("user «redacted:GENTAR_BENCH_USER».", out)
 
+    def test_a_locator_after_an_escape_sequence_is_still_redacted(self):
+        # the dashboard embeds text as JSON: a newline is `\n`, a LETTER
+        # right before the host — the boundary must not let it survive
+        import json as _json
+        text = _json.dumps({"detail": "ssh failed\n10.10.10.5 port 22\tpolaté10.10.10.5"})
+        _, out = self.run_redact(text, GENTAR_REDACT_NAMES="GENTAR_BENCH_USER GENTAR_BENCH_HOST",
+                                 GENTAR_BENCH_USER="polat", GENTAR_BENCH_HOST="10.10.10.5")
+        self.assertNotIn("10.10.10.5", out)
+        self.assertNotIn("polat", out)
+
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",
                                  GENTAR_REDACT_NAMES="SHORT LONG",

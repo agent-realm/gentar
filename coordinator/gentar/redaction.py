@@ -98,7 +98,11 @@ def _forms(value: str):
     return out
 
 
-_BEFORE = r"(?<![A-Za-z0-9_-])(?<![A-Za-z0-9_-]\.)"
+# A JSON/escaped context puts a LETTER before the value — `\n10.10.10.52`
+# in the dashboard's embedded data — and that letter is an escape, not part
+# of a longer name: an escape sequence before the value is a boundary too.
+_ESCAPE_BEFORE = r"(?<=\\[nrtbf])|(?<=\\u[0-9a-fA-F]{4})"
+_BEFORE = rf"(?:{_ESCAPE_BEFORE}|(?<![A-Za-z0-9_-])(?<![A-Za-z0-9_-]\.))"
 _AFTER = r"(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9_-])"
 
 
