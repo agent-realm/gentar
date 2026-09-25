@@ -259,16 +259,17 @@ class Otlp:
         """A bench's self-report (OTLP/HTTP JSON), through the scrubbed door.
 
         The raw file still goes to the collector's local-only receiver; this
-        copy is the one that may leave. Scrubbed as text first, then it must
-        parse — a scrub that cut through JSON, or anything that is not
-        OTLP JSON, is not sent (it stays local). Its spans join the run's
+        copy is the one that may leave. It must parse as OTLP JSON (anything
+        else stays local), and then every decoded string — keys and values —
+        is scrubbed: scrubbing the text before parsing would miss a value
+        written with JSON escapes, which parsing turns back into the value. Its spans join the run's
         trace (parentless ones under the scenario root) and its resource
         names the subject when it named no service. Best-effort.
         """
         if not self.cfg.otlp_scrubbed_endpoint or not (raw or "").strip():
             return
         try:
-            doc = json.loads(self.scrub(raw))
+            doc = self._scrub_tree(json.loads(raw))
             groups = doc.get("resourceSpans") if isinstance(doc, dict) else None
             if not isinstance(groups, list):
                 return
@@ -289,6 +290,15 @@ class Otlp:
         except Exception:
             return
         self._post(body)
+
+    def _scrub_tree(self, node):
+        if isinstance(node, str):
+            return self.scrub(node)
+        if isinstance(node, list):
+            return [self._scrub_tree(x) for x in node]
+        if isinstance(node, dict):
+            return {self.scrub(k): self._scrub_tree(v) for k, v in node.items()}
+        return node
 
     def _post(self, body: bytes) -> None:
         try:

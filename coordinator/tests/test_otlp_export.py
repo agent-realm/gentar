@@ -150,6 +150,17 @@ class RelayTest(unittest.TestCase):
         self.assertEqual(keys["service.name"], {"stringValue": "sub"})
         self.assertEqual(keys["gentar.run_id"], {"stringValue": "run1"})
 
+    def test_an_escaped_secret_is_scrubbed_after_decoding(self):
+        # \u-escapes the raw-text scrub cannot see; json.loads undoes them
+        esc = "".join(f"\\u{ord(c):04x}" for c in TOKEN)
+        raw = self.report().replace(
+            "benchuser@bench.internal.example", esc)
+        _, sent = self.relay(cfg_with(), raw)
+        (_, body), = sent.bodies
+        blob = json.dumps(body, ensure_ascii=False)
+        self.assertNotIn(TOKEN, blob)
+        self.assertNotIn(TOKEN[:14], blob)
+
     def test_its_own_service_and_parents_are_kept(self):
         raw = json.loads(self.report(parentSpanId="ef" * 8))
         raw["resourceSpans"][0]["resource"]["attributes"] = [
