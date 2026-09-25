@@ -127,6 +127,21 @@ class RedactTest(unittest.TestCase):
                                      **{name: v})
             self.assertNotIn(enc, out, (name, out))
 
+    def test_a_locator_matches_only_as_a_whole_token(self):
+        # claude-playbooks: bench user polat redacted the middle of
+        # github.com/ramazanpolat/...; cockpit: host 10.10.10.5 the head of .52
+        text = ("repo github.com/ramazanpolat/claude-playbooks polatx\n"
+                "ssh polat@10.10.10.5 ; /Users/polat/x ; other 10.10.10.52 and 110.10.10.5\n"
+                "connect to 10.10.10.5.\nuser polat.\n")
+        _, out = self.run_redact(text, GENTAR_REDACT_NAMES="GENTAR_BENCH_USER GENTAR_BENCH_HOST",
+                                 GENTAR_BENCH_USER="polat", GENTAR_BENCH_HOST="10.10.10.5")
+        for kept in ("ramazanpolat", "polatx", "10.10.10.52", "110.10.10.5"):
+            self.assertIn(kept, out)
+        self.assertIn("«redacted:GENTAR_BENCH_USER»@«redacted:GENTAR_BENCH_HOST»", out)
+        self.assertIn("/Users/«redacted:GENTAR_BENCH_USER»/x", out)
+        self.assertIn("connect to «redacted:GENTAR_BENCH_HOST».", out)   # sentence end
+        self.assertIn("user «redacted:GENTAR_BENCH_USER».", out)
+
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",
                                  GENTAR_REDACT_NAMES="SHORT LONG",

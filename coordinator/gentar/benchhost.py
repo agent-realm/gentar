@@ -111,6 +111,11 @@ class BenchHost:
     def template_digest(self, tag: str) -> str:
         return ""
 
+    # stderr of the last exec(): exec returns stdout alone (assertions match
+    # on it), but a FAILED step's cause is usually on stderr, and a report
+    # that shows only the command and rc=1 cannot explain a red suite.
+    last_stderr: str = ""
+
     def exec(self, name: str, command: str, timeout: int = 300,
              env: dict[str, str] | None = None) -> tuple[int, str]:
         raise NotImplementedError
@@ -233,6 +238,7 @@ class SbxBenchHost(BenchHost):
             timeout=timeout,
             strict=False,
         )
+        self.last_stderr = proc.stderr or ""
         return proc.returncode, proc.stdout
 
     def push_dir(self, local_dir: str, remote_dir: str) -> None:
@@ -366,6 +372,7 @@ class TartBenchHost(BenchHost):
             self._vm_ssh(name),
             _env_exports(merged) + command,
             timeout=timeout, strict=False)
+        self.last_stderr = proc.stderr or ""
         return proc.returncode, proc.stdout
 
     def push_dir(self, local_dir: str, remote_dir: str) -> None:
@@ -626,6 +633,7 @@ class DaytonaBenchHost(BenchHost):
             self._sb_ssh(name),
             _env_exports(merged) + command,
             timeout=timeout, strict=False)
+        self.last_stderr = proc.stderr or ""
         return proc.returncode, proc.stdout
 
     def push_dir(self, local_dir: str, remote_dir: str) -> None:

@@ -27,6 +27,15 @@ its subnet (cockpit, reproduced with this scrubber). The trade-off, stated:
 a locator cut mid-value keeps its surviving head (a partial address), which
 is not a credential. Either test failing — name or shape — means the value
 is treated as a credential: the stricter rule is the default.
+
+A locator matches only as a whole token: not inside a longer name or
+address. Without that, bench user `polat` redacted the middle of
+`github.com/ramazanpolat/…`, and host 10.10.10.5 the head of 10.10.10.52
+(claude-playbooks, cockpit). The boundary is a character that cannot
+continue a host, user or URL — [A-Za-z0-9_-], or a `.` followed by one —
+so `connect to 10.10.10.52.` at the end of a sentence is still replaced.
+Credentials keep plain substring matching: a token inside a longer string
+is still that token.
 """
 
 import html
@@ -89,9 +98,17 @@ def _forms(value: str):
     return out
 
 
+_BEFORE = r"(?<![A-Za-z0-9_-])(?<![A-Za-z0-9_-]\.)"
+_AFTER = r"(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9_-])"
+
+
+def _bounded(form: str):
+    return re.compile(_BEFORE + re.escape(form) + _AFTER)
+
+
 def scrubber(named_values):
     """named_values: iterable of (name, value). Returns scrub(text) -> text."""
-    full, prefixes = [], []
+    full, prefixes = [], []          # (length, str | compiled locator, mark)
     for name, value in named_values:
         if not isinstance(value, str) or len(value) < MIN_VALUE:
             continue
@@ -101,24 +118,27 @@ def scrubber(named_values):
             for part in parts:
                 for f in _forms(part):
                     if len(f) >= MIN_VALUE:
-                        full.append((f, mark))
+                        full.append((len(f), _bounded(f), mark))
             continue
         for f in _forms(value):
             if len(f) >= MIN_VALUE:
-                full.append((f, mark))
+                full.append((len(f), f, mark))
                 # every surviving head of a cut value, longest first
                 for n in range(len(f) - 1, MIN_PREFIX - 1, -1):
-                    prefixes.append((f[:n], mark))
-    full.sort(key=lambda p: -len(p[0]))
-    prefixes.sort(key=lambda p: -len(p[0]))
+                    prefixes.append((n, f[:n], mark))
+    full.sort(key=lambda p: -p[0])
+    prefixes.sort(key=lambda p: -p[0])
 
     def scrub(text: str) -> str:
         if not text:
             return text
-        for f, mark in full:
-            if f in text:
-                text = text.replace(f, mark)
-        for p, mark in prefixes:
+        for _, f, mark in full:
+            if isinstance(f, str):
+                if f in text:
+                    text = text.replace(f, mark)
+            else:
+                text = f.sub(lambda _m, mark=mark: mark, text)
+        for _, p, mark in prefixes:
             if p in text:
                 text = text.replace(p, mark)
         return text

@@ -14,6 +14,9 @@ from gentar.spans import Spans
 from gentar.toml_scenario import TomlScenario, satisfied_group
 
 
+_ERR_LINES = 40
+
+
 def _step(bench: BenchHost, subject: str, run_id: str, scenario_name: str,
           spans: Spans, index: int, command: str,
           env: dict[str, str] | None = None,
@@ -22,17 +25,25 @@ def _step(bench: BenchHost, subject: str, run_id: str, scenario_name: str,
     span = spans.step_start(subject, run_id, scenario_name,
                             f"oracle.step.{index}")
     t0 = int(time.time() * 1000)  # epoch ms — span columns are wall-clock
+    bench.last_stderr = ""
     rc, out = bench.exec(run_id, command, env=env)
+    if rc != 0:
+        # A failed step keeps its stderr tail — the cause of a red suite
+        # (claude-playbooks: a report showing only `rc=1`). Redacted where
+        # every report and span is.
+        err = "\n".join((getattr(bench, "last_stderr", "") or "").strip().splitlines()[-_ERR_LINES:])
+        if err:
+            out = f"{out.rstrip()}\n--- stderr (last {_ERR_LINES} lines) ---\n{err}\n"
     spans.step_end(subject, run_id, scenario_name, span, f"oracle.step.{index}",
                    "pass" if rc == 0 else "fail", t0,
                    attrs={"exit_code": str(rc)},
-                   detail=f"$ {command}\n{out.strip()[:2000]}")
+                   detail=f"$ {command}\n{out.strip()[-2000:] if rc else out.strip()[:2000]}")
     if report is not None:
         report.steps.append(
             StepRecord(index=index, command=command, exit_code=rc, output=out))
     if rc != 0:
         raise AssertionError(
-            f"oracle step {index} failed rc={rc}: {command}\n{out.strip()[:400]}")
+            f"oracle step {index} failed rc={rc}: {command}\n{out.strip()[-600:]}")
 
 
 def cred_env(scenario: TomlScenario) -> dict[str, str]:
