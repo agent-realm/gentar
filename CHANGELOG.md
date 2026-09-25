@@ -22,6 +22,26 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.6.3 — 2026-09-25
+
+### Fixed
+
+- **A failed step now says why.** `BenchHost.exec` returns stdout only
+  (assertions match on it), so a failing build's error — on stderr — never
+  reached the report: a red suite showed its command and `rc=1` and nothing
+  else (claude-playbooks). A failed oracle step now carries the last 40
+  lines of its stderr into the report, the span and the failure message,
+  redacted like everything else. Passing steps are unchanged.
+- **A redacted host or user matches only as a whole token.** Bench user
+  `polat` redacted the middle of `github.com/ramazanpolat/…` in live
+  reports (claude-playbooks), and a host `10.10.10.5` would have taken the
+  head of `10.10.10.52` (cockpit). A locator is now replaced only where no
+  host/user character (`[A-Za-z0-9-]`, or a `.` followed by one) continues
+  it on either side — a sentence-final `.` still ends it, `_` ends it, and
+  so does any escape right before it (terminal colour codes, `\n`/`\x0a`/
+  `\012`/`\u00e9`, `%2F`, `&quot`), which would otherwise hide the value
+  behind a letter or digit. Credentials keep plain substring matching.
+
 ## 0.6.2 — 2026-09-25
 
 ### Fixed

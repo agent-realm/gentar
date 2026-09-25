@@ -127,6 +127,43 @@ class RedactTest(unittest.TestCase):
                                      **{name: v})
             self.assertNotIn(enc, out, (name, out))
 
+    def test_a_locator_matches_only_as_a_whole_token(self):
+        # claude-playbooks: bench user polat redacted the middle of
+        # github.com/ramazanpolat/...; cockpit: host 10.10.10.5 the head of .52
+        text = ("repo github.com/ramazanpolat/claude-playbooks polatx\n"
+                "ssh polat@10.10.10.5 ; /Users/polat/x ; other 10.10.10.52 and 110.10.10.5\n"
+                "connect to 10.10.10.5.\nuser polat.\n")
+        _, out = self.run_redact(text, GENTAR_REDACT_NAMES="GENTAR_BENCH_USER GENTAR_BENCH_HOST",
+                                 GENTAR_BENCH_USER="polat", GENTAR_BENCH_HOST="10.10.10.5")
+        for kept in ("ramazanpolat", "polatx", "10.10.10.52", "110.10.10.5"):
+            self.assertIn(kept, out)
+        self.assertIn("«redacted:GENTAR_BENCH_USER»@«redacted:GENTAR_BENCH_HOST»", out)
+        self.assertIn("/Users/«redacted:GENTAR_BENCH_USER»/x", out)
+        self.assertIn("connect to «redacted:GENTAR_BENCH_HOST».", out)   # sentence end
+        self.assertIn("user «redacted:GENTAR_BENCH_USER».", out)
+
+    def test_a_locator_after_an_escape_sequence_is_still_redacted(self):
+        # the dashboard embeds text as JSON: a newline is `\n`, a LETTER
+        # right before the host — the boundary must not let it survive
+        import json as _json
+        text = _json.dumps({"detail": "ssh failed\n10.10.10.5 port 22\tpolaté10.10.10.5"})
+        _, out = self.run_redact(text, GENTAR_REDACT_NAMES="GENTAR_BENCH_USER GENTAR_BENCH_HOST",
+                                 GENTAR_BENCH_USER="polat", GENTAR_BENCH_HOST="10.10.10.5")
+        self.assertNotIn("10.10.10.5", out)
+        self.assertNotIn("polat", out)
+
+    def test_a_locator_after_any_escape_or_underscore_is_redacted(self):
+        # agy review of the whole-token rule: each of these hid the value
+        # behind a letter or digit that is not part of its token
+        for text in ("url=%2F10.10.10.5", "user=%40polat", "\x1b[31m10.10.10.5\x1b[0m",
+                     "\x1b[1;38;5;208mpolat", "user_polat", "polat_ssh",
+                     "\\x0a10.10.10.5", "\\01210.10.10.5", "&quot10.10.10.5", "&#39;polat",
+                     "ramazan%2Fpolat%2Frepo", "ssh%3A%2F%2Fuser%4010.10.10.5%2Fx"):  # Codex
+            _, out = self.run_redact(text, GENTAR_REDACT_NAMES="GENTAR_BENCH_USER GENTAR_BENCH_HOST",
+                                     GENTAR_BENCH_USER="polat", GENTAR_BENCH_HOST="10.10.10.5")
+            self.assertNotIn("10.10.10.5", out, text)
+            self.assertNotIn("polat", out, text)
+
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",
                                  GENTAR_REDACT_NAMES="SHORT LONG",
