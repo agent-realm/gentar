@@ -45,6 +45,11 @@ compose() {
   local extra=()
   # History store on this host's docker network (history/): join it.
   [ -n "${GENTAR_HISTORY_NETWORK:-}" ] && extra=(-f compose.history.yml)
+  # Telemetry destination (otelcol/export.yaml); require_destination has
+  # already refused half of one for every command that starts an arena.
+  if [ -n "${GENTAR_OTLP_EXPORT:-}" ] && [ -n "${GENTAR_OTLP_KEY:-}" ]; then
+    extra+=(-f compose.export.yml)
+  fi
   docker compose -f docker-compose.yml -f compose.rm.yml ${extra[@]+"${extra[@]}"} "$@"
 }
 
@@ -383,6 +388,19 @@ cmd_gc() {
     echo "arena gc: removed $p"
   done
 }
+
+# Both or neither, as the kit's run.sh: half a destination is a refusal, not
+# a run whose telemetry silently goes nowhere. Checked here, at top level —
+# inside compose() it would fire in a $(...) whose stderr is discarded and
+# exit silently. down and gc never need it, so teardown is never blocked.
+require_destination() {
+  if { [ -n "${GENTAR_OTLP_EXPORT:-}" ] || [ -n "${GENTAR_OTLP_KEY:-}" ]; } &&
+     { [ -z "${GENTAR_OTLP_EXPORT:-}" ] || [ -z "${GENTAR_OTLP_KEY:-}" ]; }; then
+    echo "arena: telemetry destination needs BOTH GENTAR_OTLP_EXPORT and GENTAR_OTLP_KEY (one is unset)" >&2
+    exit 2
+  fi
+}
+case "${1:-}" in run|sql|dashboard|ls) require_destination ;; esac
 
 case "${1:-}" in
   run)       shift; cmd_run "$@" ;;

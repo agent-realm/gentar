@@ -16,6 +16,8 @@ Shape ported from agent-gauntlet lib/events.sh:
   per-component queries read contiguous parts.
 """
 
+import contextlib
+import contextvars
 import datetime
 import hashlib
 import json
@@ -171,10 +173,189 @@ class History:
                       f"{type(exc).__name__}")
 
 
+_OTLP_STATUS = {"pass": 1, "fail": 2, "error": 2}      # OK, ERROR; else UNSET
+
+
+def _kv(key: str, value) -> dict:
+    if isinstance(value, bool):
+        return {"key": key, "value": {"boolValue": value}}
+    if isinstance(value, int):
+        return {"key": key, "value": {"intValue": str(value)}}
+    return {"key": key, "value": {"stringValue": str(value)}}
+
+
+# The exporters made inside the current `exporting()` block — per context,
+# so one run (or thread, or test) never flushes another's.
+_OPEN: contextvars.ContextVar = contextvars.ContextVar("gentar_otlp_open", default=None)
+
+
+@contextlib.contextmanager
+def exporting():
+    """Flush every exporter made inside the block when it exits, however it
+    exits. The coordinator's run() wraps EVERY terminal path in it
+    (refusals and quarantine included), so a run that never reached a bench
+    still leaves its trace — and a flush can never replace the verdict."""
+    opened: list = []
+    token = _OPEN.set(opened)
+    try:
+        yield
+    finally:
+        _OPEN.reset(token)
+        for o in opened:
+            try:
+                o.flush()
+            except Exception:
+                pass
+
+
+class Otlp:
+    """Every finished span, as OTLP/HTTP JSON, to the ARENA's collector.
+
+    Only when the adopting repo declared a telemetry destination
+    (GENTAR_OTLP_EXPORT, compose.export.yml): spans go to that collector's
+    `otlp/scrubbed` receiver, the only input its export pipeline reads. So
+    this class never talks to anything outside the arena; the destination
+    and its key live only in the collector.
+
+    One trace per run: the `scenario` span is the root, every other span of
+    the run hangs under it, and the agent's session -> turns -> tool calls
+    come from its transcript as numbers only. Text is the history scrubber's
+    (declared credentials, bench-host settings, every encoding, 8+ char
+    prefixes) and a transcript step keeps only its length. Buffered, flushed
+    at the end of the run; best-effort — never the verdict.
+    """
+
+    def __init__(self, cfg: Config, scrub) -> None:
+        self.cfg = cfg
+        self.scrub = scrub
+        self.buf: dict = {}          # subject -> [span, ...]
+        self.roots: dict = {}        # (subject, run_id) -> root span id
+        self.failed = False
+        # A refusal has no run id yet: its span is a one-span trace of its own.
+        self.loose_trace = secrets.token_hex(16)
+        opened = _OPEN.get()
+        if opened is not None:
+            opened.append(self)
+
+    def root(self, subject, run_id, span_id):
+        self.roots[(subject, run_id)] = span_id
+
+    def span(self, subject, run_id, scenario, span_id, parent, name, status,
+             start_ns, end_ns, attrs=None, detail="") -> None:
+        if not self.cfg.otlp_scrubbed_endpoint:
+            return
+        if not parent and name != "scenario":
+            parent = self.roots.get((subject, run_id), "")
+        text = (f"(agent transcript, {len(detail or '')} chars — not exported)"
+                if name in PRIVATE_DETAIL_STEPS else self.scrub(detail or ""))
+        a = [_kv("gentar.run_id", run_id), _kv("gentar.scenario", scenario),
+             _kv("gentar.status", status)]
+        for k, v in sorted((attrs or {}).items()):
+            a.append(_kv(f"gentar.{k}", self.scrub(v) if isinstance(v, str) else v))
+        if text:
+            a.append(_kv("gentar.detail", text))
+        sp = {"traceId": trace_id(subject, run_id) if run_id else self.loose_trace,
+              "spanId": span_id,
+              "name": name, "kind": 1,
+              "startTimeUnixNano": str(start_ns), "endTimeUnixNano": str(end_ns),
+              "attributes": a,
+              "status": {"code": _OTLP_STATUS.get(status, 0)}}
+        if parent:
+            sp["parentSpanId"] = parent
+        if sp["status"]["code"] == 2 and text:
+            sp["status"]["message"] = text[:200]
+        self.buf.setdefault(subject, []).append(sp)
+        if sum(len(v) for v in self.buf.values()) >= 200:
+            self.flush()
+
+    def resource(self, subject) -> list:
+        ci = [(c, self.cfg.ci.get(c) or ("local" if c == "ci_repo" else ""))
+              for c in CI_COLUMNS[:-1]]
+        return ([_kv("service.name", subject), _kv("gentar.engine", self.cfg.engine_sha)]
+                + [_kv(f"gentar.{c}", self.scrub(v)) for c, v in ci if v])
+
+    def payload(self) -> dict:
+        return {"resourceSpans": [{
+            "resource": {"attributes": self.resource(subject)},
+            "scopeSpans": [{"scope": {"name": "gentar"}, "spans": spans}]}
+            for subject, spans in self.buf.items() if spans]}
+
+    def flush(self) -> None:
+        if not self.buf or not self.cfg.otlp_scrubbed_endpoint:
+            return
+        try:
+            body = json.dumps(self.payload()).encode()
+        except Exception:
+            body = None
+        self.buf = {}
+        if body is not None:
+            self._post(body)
+
+    def relay(self, subject, run_id, raw: str) -> None:
+        """A bench's self-report (OTLP/HTTP JSON), through the scrubbed door.
+
+        The raw file still goes to the collector's local-only receiver; this
+        copy is the one that may leave. It must parse as OTLP JSON (anything
+        else stays local), and then every decoded string — keys and values —
+        is scrubbed: scrubbing the text before parsing would miss a value
+        written with JSON escapes, which parsing turns back into the value. Its spans join the run's
+        trace (parentless ones under the scenario root) and its resource
+        names the subject when it named no service. Best-effort.
+        """
+        if not self.cfg.otlp_scrubbed_endpoint or not (raw or "").strip():
+            return
+        try:
+            doc = self._scrub_tree(json.loads(raw))
+            groups = doc.get("resourceSpans") if isinstance(doc, dict) else None
+            if not isinstance(groups, list):
+                return
+            tid, root = trace_id(subject, run_id), self.roots.get((subject, run_id), "")
+            ours = {a["key"]: a for a in self.resource(subject)}
+            for rs in groups:
+                attrs = rs.setdefault("resource", {}).setdefault("attributes", [])
+                have = {a.get("key") for a in attrs if isinstance(a, dict)}
+                attrs.extend(a for k, a in ours.items() if k not in have)
+                if "gentar.run_id" not in have:
+                    attrs.append(_kv("gentar.run_id", run_id))
+                for ss in rs.get("scopeSpans") or []:
+                    for sp in ss.get("spans") or []:
+                        sp["traceId"] = tid
+                        if not sp.get("parentSpanId") and root:
+                            sp["parentSpanId"] = root
+            body = json.dumps({"resourceSpans": groups}).encode()
+        except Exception:
+            return
+        self._post(body)
+
+    def _scrub_tree(self, node):
+        if isinstance(node, str):
+            return self.scrub(node)
+        if isinstance(node, list):
+            return [self._scrub_tree(x) for x in node]
+        if isinstance(node, dict):
+            return {self.scrub(k): self._scrub_tree(v) for k, v in node.items()}
+        return node
+
+    def _post(self, body: bytes) -> None:
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                f"{self.cfg.otlp_scrubbed_endpoint.rstrip('/')}/v1/traces", data=body,
+                method="POST", headers={"content-type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                resp.read()
+        except Exception as exc:
+            if not self.failed:
+                print(f"warn: OTLP export to the arena collector failed "
+                      f"(the run is unaffected): {type(exc).__name__}")
+            self.failed = True
+
+
 class Spans:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self.history = History(cfg)
+        self.otlp = Otlp(cfg, self.history.scrub)
         self.client = None
         try:
             self.client = clickhouse_connect.get_client(
@@ -239,6 +420,11 @@ class Spans:
             json.dumps(attrs or {}, sort_keys=True),
             detail,
         ]
+        if status != "running":        # a finished span: export it once
+            end_ns = (t1_ms if t1_ms is not None else t0_ms) * 1_000_000
+            start_ns = end_ns - (duration_ms or 0) * 1_000_000
+            self.otlp.span(subject, run_id, scenario, span_id, parent, step,
+                           status, start_ns, end_ns, attrs, detail)
         h = self.history
         hdetail = (f"(agent transcript, {len(detail or '')} chars — not kept)"
                    if step in PRIVATE_DETAIL_STEPS else h.scrub(detail))
@@ -258,6 +444,8 @@ class Spans:
                    attrs: dict | None = None) -> str:
         """Open a two-row span; returns its span_id."""
         span_id = secrets.token_hex(8)
+        if step == "scenario" and not parent:
+            self.otlp.root(subject, run_id, span_id)
         self._insert(subject, run_id, span_id, parent, scenario, step,
                      "running", _now_ms(), None, None, attrs, "")
         return span_id
@@ -281,6 +469,54 @@ class Spans:
                      step, status, now, now, 0, attrs, detail)
 
 
+def _agent_spans(spans: "Spans", subject, run_id, scenario, turns, tools) -> None:
+    """The agent's session -> turns -> tool calls as OTLP spans under the
+    run's root, with real timestamps. Numbers and labels only (agentstats
+    guarantees it); nothing to scrub."""
+    o = spans.otlp
+    for session in sorted({t["session"] for t in turns}):
+        ts = [t for t in turns if t["session"] == session]
+        us = [u for u in tools if u["session"] == session]
+        # A turn lasts until its tools' results arrive, not only until its
+        # last assistant message — else a tool span outlives its parent.
+        tool_end: dict = {}
+        for u in us:
+            if u.get("end_ns") and u.get("turn") is not None:
+                tool_end[u["turn"]] = max(tool_end.get(u["turn"], 0), u["end_ns"])
+        ts = [dict(t, end_ns=max(t.get("end_ns") or 0,
+                                 tool_end.get(t["turn"], 0) if t.get("turn") is not None else 0))
+              for t in ts]
+        starts = [x["start_ns"] for x in ts + us if x.get("start_ns")]
+        ends = [x["end_ns"] for x in ts + us if x.get("end_ns")]
+        if not starts:
+            continue
+        sid = secrets.token_hex(8)
+        o.span(subject, run_id, scenario, sid, "", "agent.session", "pass",
+               min(starts), max(ends + starts),
+               attrs={"agent.turns": len(ts), "agent.tool_calls": len(us),
+                      "agent.input_tokens": sum(t["input_tokens"] for t in ts),
+                      "agent.output_tokens": sum(t["output_tokens"] for t in ts)})
+        turn_ids = {}
+        for t in ts:
+            tid = turn_ids[t["turn"]] = secrets.token_hex(8)
+            o.span(subject, run_id, scenario, tid, sid, "agent.turn", "pass",
+                   t["start_ns"], t["end_ns"] or t["start_ns"],
+                   attrs={"agent.model": t["model"],
+                          "agent.input_tokens": t["input_tokens"],
+                          "agent.output_tokens": t["output_tokens"],
+                          "agent.cache_read_tokens": t["cache_read_tokens"],
+                          "agent.cache_creation_tokens": t["cache_creation_tokens"],
+                          "agent.tool_calls": t["tool_calls"]})
+        for u in us:
+            if not u.get("start_ns"):
+                continue
+            o.span(subject, run_id, scenario, secrets.token_hex(8),
+                   turn_ids.get(u.get("turn"), sid), "agent.tool",
+                   "error" if u["is_error"] else "pass",
+                   u["start_ns"], u["end_ns"] or u["start_ns"],
+                   attrs={"agent.tool": u["tool"], "agent.completed": u["completed"]})
+
+
 def agent_rows(spans: "Spans", subject: str, run_id: str, scenario: str,
                turns: list, tools: list) -> None:
     """agentstats rows into the arena's tables and history. Numbers and
@@ -290,6 +526,7 @@ def agent_rows(spans: "Spans", subject: str, run_id: str, scenario: str,
                t["cache_creation_tokens"], t["tool_calls"]] for t in turns]
     u_rows = [[subject, run_id, scenario, t["session"], t["tool"],
                t["duration_ms"], t["is_error"], t["completed"]] for t in tools]
+    _agent_spans(spans, subject, run_id, scenario, turns, tools)
     for table, cols, rows in (("agent_turns", AGENT_TURN_COLUMNS, t_rows),
                               ("agent_tools", AGENT_TOOL_COLUMNS, u_rows)):
         if not rows:

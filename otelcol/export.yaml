@@ -1,0 +1,46 @@
+# Layered on config.yaml (compose.export.yml) when the adopting repo
+# declared a telemetry destination: GENTAR_OTLP_EXPORT (the collector's
+# OTLP/HTTP base URL) + GENTAR_OTLP_KEY (its ingestion key, sent as the
+# `authorization` header — ClickStack's convention).
+#
+# Only SCRUBBED telemetry leaves. The destination is fed by one receiver,
+# `otlp/scrubbed`, that only the coordinator posts to (compose network,
+# never published): its own spans after the history scrubber, and a
+# bench's self-report after the same scrubber. The base `otlp` receiver
+# (:4318, the raw relay and anything else that reaches it) keeps feeding
+# the local ClickHouse only — no export pipeline may read from it, and a
+# test holds that line.
+#
+# The run never waits on the destination: a bounded retry queue absorbs a
+# slow or down collector, and a verdict never depends on delivery.
+receivers:
+  otlp/scrubbed:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:14318
+
+exporters:
+  otlphttp/export:
+    endpoint: ${env:GENTAR_OTLP_EXPORT}
+    headers:
+      authorization: ${env:GENTAR_OTLP_KEY}
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 2s
+      max_interval: 30s
+      max_elapsed_time: 120s
+    sending_queue:
+      enabled: true
+      queue_size: 5000
+
+processors:
+  batch/export:
+    timeout: 2s
+
+service:
+  pipelines:
+    traces/export:
+      receivers: [otlp/scrubbed]
+      processors: [batch/export]
+      exporters: [otlphttp/export]

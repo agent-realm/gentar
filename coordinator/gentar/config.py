@@ -170,6 +170,11 @@ class Config:
         # coordinator relays it here.
         self.otlp_endpoint = _opt("GENTAR_OTLP_ENDPOINT", "http://otelcol:4318")
 
+        # The collector's SCRUBBED door (compose.export.yml sets it when the
+        # repo declared a telemetry destination): the only input its export
+        # pipeline reads. Empty = no destination, and nothing is sent to it.
+        self.otlp_scrubbed_endpoint = _opt("GENTAR_OTLP_SCRUBBED_ENDPOINT", "")
+
         # Run reports: every run writes a markdown report here (bind
         # ./out:/out in compose). Empty string disables reporting.
         self.report_dir = _opt("GENTAR_REPORT_DIR", "/out")
