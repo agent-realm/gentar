@@ -14,13 +14,50 @@ from review are built in:
 Values shorter than 4 characters are left alone: replacing them would shred
 the text and they are not credentials worth that. Longest forms first, so a
 value containing another is replaced whole.
+
+The prefix rule is for CREDENTIALS. A LOCATOR — a host, user, URL or
+endpoint setting (by name) whose value is shaped like one — gets every form
+of its exact value instead, and a URL also its host:port and host, so the
+address cannot survive inside another URL. A locator's 8-char heads are
+shared with innocent text: `http://1` of an export URL redacted every
+http://1… address in a report, and `10.10.10` of a bench host every host on
+its subnet (cockpit, reproduced with this scrubber). The trade-off, stated:
+a locator cut mid-value keeps its surviving head (a partial address), which
+is not a credential. Either test failing — name or shape — means the value
+is treated as a credential: the stricter rule is the default.
 """
 
 import html
 import json
+import re
+from urllib.parse import urlsplit
 
 MIN_VALUE = 4
 MIN_PREFIX = 8
+
+_LOCATOR_NAME = re.compile(r"_(HOST|USER|URL|ENDPOINT|EXPORT|JUMP)$")
+_URL = re.compile(r"^[a-z][a-z0-9+.-]*://[^\s]+$", re.I)
+_HOSTLIKE = re.compile(r"^(?:[A-Za-z0-9_.-]+@)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*(?::\d{1,5})?$")
+
+
+def _locator_parts(name: str, value: str):
+    """The exact strings to replace for a locator, or None for a credential."""
+    if not _LOCATOR_NAME.search(name or ""):
+        return None
+    if _URL.match(value):
+        parts = {value}
+        try:
+            u = urlsplit(value)
+            if u.netloc:
+                parts.add(u.netloc)
+            if u.hostname:
+                parts.add(u.hostname)
+        except ValueError:
+            return None
+        return parts
+    if _HOSTLIKE.match(value):
+        return {value}
+    return None
 
 
 def _forms(value: str):
@@ -39,6 +76,13 @@ def scrubber(named_values):
         if not isinstance(value, str) or len(value) < MIN_VALUE:
             continue
         mark = f"«redacted:{name}»"
+        parts = _locator_parts(name, value)
+        if parts is not None:
+            for part in parts:
+                for f in _forms(part):
+                    if len(f) >= MIN_VALUE:
+                        full.append((f, mark))
+            continue
         for f in _forms(value):
             if len(f) >= MIN_VALUE:
                 full.append((f, mark))

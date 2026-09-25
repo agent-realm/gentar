@@ -68,6 +68,36 @@ class RedactTest(unittest.TestCase):
         self.assertNotIn("sk-ant-api03-ABC", out)
         self.assertIn("«redacted:ANTHROPIC_AUTH_TOKEN»`", out)
 
+    def test_a_locator_does_not_redact_unrelated_addresses(self):
+        # cockpit#29: the 8-char head `http://1` of the export URL redacted
+        # every http://1… URL; `10.10.10` of the bench host its whole subnet
+        text = ("export http://10.10.10.58:4318/v1/traces\n"
+                "provider http://10.10.10.100:20128/v1 local http://127.0.0.1:8123\n"
+                "bench ssh polat@10.10.10.52 ; peer 10.10.10.58:4318 ; other 10.10.10.60\n")
+        r, out = self.run_redact(
+            text, GENTAR_REDACT_NAMES="GENTAR_OTLP_EXPORT GENTAR_BENCH_HOST",
+            GENTAR_OTLP_EXPORT="http://10.10.10.58:4318", GENTAR_BENCH_HOST="10.10.10.52")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for kept in ("http://10.10.10.100:20128/v1", "http://127.0.0.1:8123", "10.10.10.60"):
+            self.assertIn(kept, out)
+        for gone in ("10.10.10.58", "10.10.10.52"):   # exact value, host:port and host
+            self.assertNotIn(gone, out)
+
+    def test_an_https_locator_leaves_other_https_urls_alone(self):
+        r, out = self.run_redact("see https://docs.example.org and https://collector.corp:4318",
+                                 GENTAR_REDACT_NAMES="GENTAR_OTLP_EXPORT",
+                                 GENTAR_OTLP_EXPORT="https://collector.corp:4318")
+        self.assertIn("https://docs.example.org", out)
+        self.assertNotIn("collector.corp", out)
+
+    def test_a_credential_behind_a_locator_name_keeps_the_prefix_rule(self):
+        # the name alone does not make a locator: a token-shaped value in a
+        # *_URL / *_USER setting is still cut-safe
+        v = "sk-ant-api03-ABCDEFGHIJKLMNOP token"
+        r, out = self.run_redact("| `X=sk-ant-api03-ABC` |",
+                                 GENTAR_REDACT_NAMES="WEIRD_URL", WEIRD_URL=v)
+        self.assertNotIn("sk-ant-api03-ABC", out)
+
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",
                                  GENTAR_REDACT_NAMES="SHORT LONG",

@@ -22,6 +22,24 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.6.1 — 2026-09-25
+
+### Fixed
+
+- **Redaction no longer mistakes every URL for the collector.** The prefix
+  rule (any 8+ character head of a value) is for credentials. Applied to
+  `GENTAR_OTLP_EXPORT`, its head `http://1` redacted every `http://1…`
+  address in a report — a provider route, `127.0.0.1` — and an `https://`
+  destination would have redacted every https URL; a bench host's head
+  `10.10.10` did the same to its whole subnet. Reports looked like they
+  leaked the collector when they had not (cockpit#29, reproduced with the
+  engine's scrubber). A **locator** — a `*_HOST`, `*_USER`, `*_URL`,
+  `*_ENDPOINT`, `*_EXPORT` or `*_JUMP` setting whose value is shaped like a
+  URL or host — is now replaced in every form of its exact value, and a URL
+  also by its host:port and host. Everything else, including a token-shaped
+  value behind such a name, keeps the prefix rule. Trade-off: a locator cut
+  mid-value keeps its surviving head, a partial address.
+
 ## 0.6.0 — 2026-09-25
 
 **Every run leaves the arena as a trace.** A repo declares a telemetry
