@@ -36,8 +36,10 @@ Adopters pin a release tag, not a branch.
   engine's scrubber). A **locator** — a `*_HOST`, `*_USER`, `*_URL`,
   `*_ENDPOINT`, `*_EXPORT` or `*_JUMP` setting whose value is shaped like a
   URL or host — is now replaced in every form of its exact value, and a URL
-  also by its host:port and host. Everything else, including a token-shaped
-  value behind such a name, keeps the prefix rule. Trade-off: a locator cut
+  also by its host:port and host. Everything else keeps the prefix rule —
+  a token-shaped value behind such a name, and a URL that carries a
+  credential (user:pass@, a query, a fragment, or a path segment over 12
+  characters, as in webhook URLs). Trade-off: a locator cut
   mid-value keeps its surviving head, a partial address.
 
 ## 0.6.0 — 2026-09-25

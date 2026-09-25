@@ -98,6 +98,15 @@ class RedactTest(unittest.TestCase):
                                  GENTAR_REDACT_NAMES="WEIRD_URL", WEIRD_URL=v)
         self.assertNotIn("sk-ant-api03-ABC", out)
 
+    def test_a_url_that_carries_a_credential_keeps_the_prefix_rule(self):
+        for v in ("https://user:hunter2hunter2@collector.corp:4318",
+                  "https://collector.corp:4318/v1?key=abcdef0123456789",
+                  "https://hooks.slack.com/services/T0000/B0000/XXXXXXXXXXXXXXXXXXXXXXXX"):
+            cut = v[:len(v) - 6]                      # a report column cut it
+            _, out = self.run_redact(f"| `{cut}` |", GENTAR_REDACT_NAMES="HOOK_URL",
+                                     HOOK_URL=v)
+            self.assertNotIn(cut, out, v)
+
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",
                                  GENTAR_REDACT_NAMES="SHORT LONG",

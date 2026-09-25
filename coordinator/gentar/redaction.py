@@ -18,7 +18,9 @@ value containing another is replaced whole.
 The prefix rule is for CREDENTIALS. A LOCATOR — a host, user, URL or
 endpoint setting (by name) whose value is shaped like one — gets every form
 of its exact value instead, and a URL also its host:port and host, so the
-address cannot survive inside another URL. A locator's 8-char heads are
+address cannot survive inside another URL. A URL is a locator only when
+it carries nothing credential-shaped: no user:pass@, query, fragment, or
+path segment longer than 12 characters. A locator's 8-char heads are
 shared with innocent text: `http://1` of an export URL redacted every
 http://1… address in a report, and `10.10.10` of a bench host every host on
 its subnet (cockpit, reproduced with this scrubber). The trade-off, stated:
@@ -35,6 +37,7 @@ from urllib.parse import urlsplit
 MIN_VALUE = 4
 MIN_PREFIX = 8
 
+_MAX_PATH_SEGMENT = 12       # /v1, /api/otlp: fine; a 24-char token segment: not
 _LOCATOR_NAME = re.compile(r"_(HOST|USER|URL|ENDPOINT|EXPORT|JUMP)$")
 _URL = re.compile(r"^[a-z][a-z0-9+.-]*://[^\s]+$", re.I)
 _HOSTLIKE = re.compile(r"^(?:[A-Za-z0-9_.-]+@)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*(?::\d{1,5})?$")
@@ -45,16 +48,18 @@ def _locator_parts(name: str, value: str):
     if not _LOCATOR_NAME.search(name or ""):
         return None
     if _URL.match(value):
-        parts = {value}
         try:
             u = urlsplit(value)
-            if u.netloc:
-                parts.add(u.netloc)
-            if u.hostname:
-                parts.add(u.hostname)
+            # A URL can CARRY a credential — user:pass@, a ?key= query, a
+            # #fragment, or a token as a path segment (webhook URLs). Any of
+            # those, and it is a credential: the prefix rule stays.
+            if (u.username is not None or u.password is not None or u.query
+                    or u.fragment or not u.hostname
+                    or any(len(seg) > _MAX_PATH_SEGMENT for seg in u.path.split("/"))):
+                return None
         except ValueError:
             return None
-        return parts
+        return {value, u.netloc, u.hostname}
     if _HOSTLIKE.match(value):
         return {value}
     return None
