@@ -257,5 +257,79 @@ class AgentSpansTest(unittest.TestCase):
                 self.assertLessEqual(int(child["endTimeUnixNano"]),
                                      int(session["endTimeUnixNano"]), child["name"])
 
+
+class EveryTerminalPathTest(unittest.TestCase):
+    """Refusals and quarantine leave a trace too (Codex, PR #42)."""
+
+    def test_a_quarantined_run_is_flushed(self):
+        from gentar import coordinator
+        cfg = cfg_with(GENTAR_QUARANTINE="flaky")
+        sent = Sent()
+        with mock.patch("gentar.spans.clickhouse_connect.get_client",
+                        side_effect=Exception("no clickhouse")), \
+                mock.patch("urllib.request.urlopen", sent):
+            self.assertEqual(coordinator.run("flaky", cfg), 0)
+        names = [sp["name"] for b in sent.bodies for _, sp in all_spans(b[1])]
+        self.assertEqual(names, ["run"])
+
+    def test_refusals_without_a_run_id_are_separate_traces(self):
+        a, b = spans(cfg_with()), spans(cfg_with())
+        a.emit("arena", "", "s1", "budget.refuse", "error")
+        b.emit("arena", "", "s2", "credential.refuse", "error")
+        ta = a.otlp.buf["arena"][0]["traceId"]
+        tb = b.otlp.buf["arena"][0]["traceId"]
+        self.assertNotEqual(ta, tb)
+        self.assertNotIn("parentSpanId", a.otlp.buf["arena"][0])
+
+
+class TurnCoversItsToolsTest(unittest.TestCase):
+
+    def test_a_turn_ends_no_earlier_than_its_tool_results(self):
+        lines = [
+            {"type": "assistant", "timestamp": "2026-09-25T10:00:00Z",
+             "message": {"id": "m1", "model": "claude-sonnet-5",
+                         "usage": {"input_tokens": 1, "output_tokens": 1},
+                         "content": [{"type": "tool_use", "id": "t1", "name": "Bash",
+                                      "input": {}}]}},
+            {"type": "user", "timestamp": "2026-09-25T10:00:07Z",
+             "message": {"content": [{"type": "tool_result", "tool_use_id": "t1",
+                                      "content": "ok"}]}},
+        ]
+        turns, tools, _ = extract(["\n".join(json.dumps(x) for x in lines)])
+        s = spans(cfg_with())
+        s.step_start("sub", "run1", "suite", "scenario")
+        agent_rows(s, "sub", "run1", "suite", turns, tools)
+        sent = Sent()
+        with mock.patch("urllib.request.urlopen", sent):
+            s.otlp.flush()
+        by = {sp["name"]: sp for _, sp in all_spans(sent.bodies[0][1])}
+        self.assertGreaterEqual(int(by["agent.turn"]["endTimeUnixNano"]),
+                                int(by["agent.tool"]["endTimeUnixNano"]))
+
+
+@unittest.skipUnless((ROOT / "bin" / "arena").exists(), "bin/ is not in the image build context")
+class ArenaHalfDestinationTest(unittest.TestCase):
+
+    def test_bin_arena_refuses_half_a_destination(self):
+        import subprocess
+        import tempfile
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        key = tmp / "key"
+        key.write_text("not-a-real-key\n")
+        fake = tmp / "bin"
+        fake.mkdir()
+        (fake / "docker").write_text("#!/bin/sh\necho DOCKER-RAN; exit 42\n")
+        (fake / "docker").chmod(0o755)
+        for half in ({"GENTAR_OTLP_KEY": "k"}, {"GENTAR_OTLP_EXPORT": "http://x:4318"}):
+            env = {k: v for k, v in os.environ.items()
+                   if k not in ("GENTAR_OTLP_KEY", "GENTAR_OTLP_EXPORT")}
+            env.update(half, GENTAR_BENCH_KEY_FILE=str(key),
+                       PATH=f"{fake}:{os.environ.get('PATH', '')}")
+            r = subprocess.run([str(ROOT / "bin" / "arena"), "ls"], cwd=ROOT, env=env,
+                               capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 2, (half, r.stdout, r.stderr))
+            self.assertIn("needs BOTH", r.stderr)
+            self.assertNotIn("DOCKER-RAN", r.stdout + r.stderr)
+
 if __name__ == "__main__":
     unittest.main()

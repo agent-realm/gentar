@@ -182,6 +182,17 @@ def _kv(key: str, value) -> dict:
     return {"key": key, "value": {"stringValue": str(value)}}
 
 
+_OPEN: list = []       # every Otlp of this process, until flush_all()
+
+
+def flush_all() -> None:
+    """Flush every exporter this process made — the coordinator's run()
+    calls it on EVERY terminal path (refusals and quarantine included), so
+    a run that never reached a bench still leaves its trace."""
+    while _OPEN:
+        _OPEN.pop().flush()
+
+
 class Otlp:
     """Every finished span, as OTLP/HTTP JSON, to the ARENA's collector.
 
@@ -205,6 +216,9 @@ class Otlp:
         self.buf: dict = {}          # subject -> [span, ...]
         self.roots: dict = {}        # (subject, run_id) -> root span id
         self.failed = False
+        # A refusal has no run id yet: its span is a one-span trace of its own.
+        self.loose_trace = secrets.token_hex(16)
+        _OPEN.append(self)
 
     def root(self, subject, run_id, span_id):
         self.roots[(subject, run_id)] = span_id
@@ -223,7 +237,8 @@ class Otlp:
             a.append(_kv(f"gentar.{k}", self.scrub(v) if isinstance(v, str) else v))
         if text:
             a.append(_kv("gentar.detail", text))
-        sp = {"traceId": trace_id(subject, run_id), "spanId": span_id,
+        sp = {"traceId": trace_id(subject, run_id) if run_id else self.loose_trace,
+              "spanId": span_id,
               "name": name, "kind": 1,
               "startTimeUnixNano": str(start_ns), "endTimeUnixNano": str(end_ns),
               "attributes": a,
@@ -441,6 +456,14 @@ def _agent_spans(spans: "Spans", subject, run_id, scenario, turns, tools) -> Non
     for session in sorted({t["session"] for t in turns}):
         ts = [t for t in turns if t["session"] == session]
         us = [u for u in tools if u["session"] == session]
+        # A turn lasts until its tools' results arrive, not only until its
+        # last assistant message — else a tool span outlives its parent.
+        tool_end: dict = {}
+        for u in us:
+            if u.get("end_ns"):
+                tool_end[u.get("turn")] = max(tool_end.get(u.get("turn"), 0), u["end_ns"])
+        ts = [dict(t, end_ns=max(t.get("end_ns") or 0, tool_end.get(t.get("turn"), 0)))
+              for t in ts]
         starts = [x["start_ns"] for x in ts + us if x.get("start_ns")]
         ends = [x["end_ns"] for x in ts + us if x.get("end_ns")]
         if not starts:

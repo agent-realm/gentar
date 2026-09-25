@@ -602,8 +602,8 @@ mkdir "subjects/$SUBJECT"
 ARENA_FILES=(-f docker-compose.yml)
 [ -f "$ARENA/compose.rm.yml" ] && ARENA_FILES+=(-f compose.rm.yml)
 # Telemetry destination (optional; AGENTS.md decision 6): the arena's
-# collector also forwards everything to GENTAR_OTLP_EXPORT with
-# GENTAR_OTLP_KEY. Both or neither — half a destination is a refusal, not a
+# collector forwards what the coordinator scrubbed to GENTAR_OTLP_EXPORT
+# with GENTAR_OTLP_KEY. Both or neither — half a destination is a refusal, not a
 # run whose telemetry silently goes nowhere.
 if [ -n "${GENTAR_OTLP_EXPORT:-}" ] || [ -n "${GENTAR_OTLP_KEY:-}" ]; then
   if [ -z "${GENTAR_OTLP_EXPORT:-}" ] || [ -z "${GENTAR_OTLP_KEY:-}" ]; then
