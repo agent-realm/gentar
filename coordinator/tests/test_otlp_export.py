@@ -145,5 +145,28 @@ class AgentSpansTest(unittest.TestCase):
         self.assertNotIn(TOKEN, json.dumps(sent.bodies))
 
 
+    def test_no_agent_span_outlives_its_session(self):
+        # agentstats never yields this (a tool starts at its turn's message),
+        # but the tree must hold for any rows: an unfinished tool starting
+        # after every recorded end still ends inside its session.
+        s_ = 1_000_000_000
+        turns = [{"session": 0, "turn": 0, "model": "claude", "input_tokens": 1,
+                  "output_tokens": 1, "cache_read_tokens": 0, "cache_creation_tokens": 0,
+                  "tool_calls": 1, "start_ns": 100 * s_, "end_ns": 102 * s_}]
+        tools = [{"session": 0, "tool": "Bash", "duration_ms": None, "is_error": False,
+                  "completed": False, "turn": 0, "start_ns": 105 * s_, "end_ns": 0}]
+        s = spans(cfg_with())
+        s.step_start("sub", "run1", "suite", "scenario")
+        agent_rows(s, "sub", "run1", "suite", turns, tools)
+        sent = Sent()
+        with mock.patch("urllib.request.urlopen", sent):
+            s.otlp.flush()
+        got = [sp for _, sp in all_spans(sent.bodies[0][1])]
+        session, = [sp for sp in got if sp["name"] == "agent.session"]
+        for child in got:
+            if child["name"] in ("agent.turn", "agent.tool"):
+                self.assertLessEqual(int(child["endTimeUnixNano"]),
+                                     int(session["endTimeUnixNano"]), child["name"])
+
 if __name__ == "__main__":
     unittest.main()

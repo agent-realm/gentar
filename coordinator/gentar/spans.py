@@ -396,7 +396,7 @@ def _agent_spans(spans: "Spans", subject, run_id, scenario, turns, tools) -> Non
             continue
         sid = secrets.token_hex(8)
         o.span(subject, run_id, scenario, sid, "", "agent.session", "pass",
-               min(starts), max(ends or starts),
+               min(starts), max(ends + starts),
                attrs={"agent.turns": len(ts), "agent.tool_calls": len(us),
                       "agent.input_tokens": sum(t["input_tokens"] for t in ts),
                       "agent.output_tokens": sum(t["output_tokens"] for t in ts)})
