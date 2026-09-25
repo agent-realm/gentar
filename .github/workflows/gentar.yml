@@ -108,15 +108,10 @@ jobs:
         scenario: ${{ fromJSON(needs.gate-setup.outputs.scenarios) }}
     env:
       COMPOSE_PROJECT_NAME: gentar-ci
-      # History store (optional; history/): every run ALSO writes there.
-      # compose.history.yml joins its docker network when the variable is set.
-      GENTAR_HISTORY_URL: ${{ vars.GENTAR_HISTORY_URL }}
-      GENTAR_HISTORY_NETWORK: ${{ vars.GENTAR_HISTORY_NETWORK }}
-      GENTAR_HISTORY_PASSWORD: ${{ secrets.GENTAR_HISTORY_WRITER_PASSWORD }}
       # Telemetry destination (optional): forward every run to it.
       GENTAR_OTLP_EXPORT: ${{ secrets.GENTAR_OTLP_EXPORT }}
       GENTAR_OTLP_KEY: ${{ secrets.GENTAR_OTLP_KEY }}
-      COMPOSE_FILE: ${{ format('docker-compose.yml{0}{1}', vars.GENTAR_HISTORY_NETWORK && ':compose.history.yml' || '', secrets.GENTAR_OTLP_EXPORT && ':compose.export.yml' || '') }}
+      COMPOSE_FILE: ${{ format('docker-compose.yml{0}', secrets.GENTAR_OTLP_EXPORT && ':compose.export.yml' || '') }}
       # Names every sandbox this JOB creates, so teardown can remove the
       # ones a cancelled job stranded and nothing else on the shared
       # bench-host (bin/bench-reap). Unique per repository (GitHub
@@ -175,15 +170,10 @@ jobs:
     runs-on: [self-hosted, gentar-bench]
     env:
       COMPOSE_PROJECT_NAME: gentar-nightly
-      # History store (optional; history/): every run ALSO writes there.
-      # compose.history.yml joins its docker network when the variable is set.
-      GENTAR_HISTORY_URL: ${{ vars.GENTAR_HISTORY_URL }}
-      GENTAR_HISTORY_NETWORK: ${{ vars.GENTAR_HISTORY_NETWORK }}
-      GENTAR_HISTORY_PASSWORD: ${{ secrets.GENTAR_HISTORY_WRITER_PASSWORD }}
       # Telemetry destination (optional): forward every run to it.
       GENTAR_OTLP_EXPORT: ${{ secrets.GENTAR_OTLP_EXPORT }}
       GENTAR_OTLP_KEY: ${{ secrets.GENTAR_OTLP_KEY }}
-      COMPOSE_FILE: ${{ format('docker-compose.yml{0}{1}', vars.GENTAR_HISTORY_NETWORK && ':compose.history.yml' || '', secrets.GENTAR_OTLP_EXPORT && ':compose.export.yml' || '') }}
+      COMPOSE_FILE: ${{ format('docker-compose.yml{0}', secrets.GENTAR_OTLP_EXPORT && ':compose.export.yml' || '') }}
       # Names every sandbox this JOB creates, so teardown can remove the
       # ones a cancelled job stranded and nothing else on the shared
       # bench-host (bin/bench-reap). Unique per repository (GitHub
@@ -321,15 +311,10 @@ jobs:
     runs-on: [self-hosted, gentar-bench]
     env:
       COMPOSE_PROJECT_NAME: gentar-dispatch
-      # History store (optional; history/): every run ALSO writes there.
-      # compose.history.yml joins its docker network when the variable is set.
-      GENTAR_HISTORY_URL: ${{ vars.GENTAR_HISTORY_URL }}
-      GENTAR_HISTORY_NETWORK: ${{ vars.GENTAR_HISTORY_NETWORK }}
-      GENTAR_HISTORY_PASSWORD: ${{ secrets.GENTAR_HISTORY_WRITER_PASSWORD }}
       # Telemetry destination (optional): forward every run to it.
       GENTAR_OTLP_EXPORT: ${{ secrets.GENTAR_OTLP_EXPORT }}
       GENTAR_OTLP_KEY: ${{ secrets.GENTAR_OTLP_KEY }}
-      COMPOSE_FILE: ${{ format('docker-compose.yml{0}{1}', vars.GENTAR_HISTORY_NETWORK && ':compose.history.yml' || '', secrets.GENTAR_OTLP_EXPORT && ':compose.export.yml' || '') }}
+      COMPOSE_FILE: ${{ format('docker-compose.yml{0}', secrets.GENTAR_OTLP_EXPORT && ':compose.export.yml' || '') }}
       # Names every sandbox this JOB creates, so teardown can remove the
       # ones a cancelled job stranded and nothing else on the shared
       # bench-host (bin/bench-reap). Unique per repository (GitHub

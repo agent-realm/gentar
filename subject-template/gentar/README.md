@@ -93,15 +93,6 @@ the reports, and an agent's screen transcript appears on the dashboard only
 as its length (it stays in the run report, for the fix loop). A dashboard
 that cannot be redacted is not published.
 
-**Keeping history.** If your arena host runs gentar's history store
-(`bin/history deploy` in the engine), set the repository variables
-`GENTAR_HISTORY_URL=http://gentar-history:8123` and
-`GENTAR_HISTORY_NETWORK=gentar-history`, and the secret
-`GENTAR_HISTORY_WRITER_PASSWORD` (whoever operates the store sets it with
-`bin/history writer-secret owner/repo`, never by hand). Every run then also
-lands in the store — redacted, agent numbers only, never a transcript — for
-trends across runs. Unset, nothing changes.
-
 **Sending telemetry to a collector.** To have every run land in your
 organisation's ClickStack (or any OTLP/HTTP collector), set two repository
 **secrets** — whoever operates the collector gives you both:

@@ -55,7 +55,7 @@ def all_spans(body):
 class TraceShapeTest(unittest.TestCase):
 
     def run_one(self, s):
-        s.history.redact_values([("ANTHROPIC_AUTH_TOKEN", TOKEN)])
+        s.redactor.redact_values([("ANTHROPIC_AUTH_TOKEN", TOKEN)])
         root = s.step_start("sub", "run1", "suite", "scenario", attrs={"bench_kind": "sbx"})
         s.emit("sub", "run1", "suite", "oracle.step.0", "fail",
                detail=f"$ curl -H 'x: {TOKEN}' benchuser@bench.internal.example\n401")
@@ -129,7 +129,7 @@ class RelayTest(unittest.TestCase):
 
     def relay(self, cfg, raw):
         s = spans(cfg)
-        s.history.redact_values([("ANTHROPIC_AUTH_TOKEN", TOKEN)])
+        s.redactor.redact_values([("ANTHROPIC_AUTH_TOKEN", TOKEN)])
         root = s.step_start("sub", "run1", "suite", "scenario")
         sent = Sent()
         with mock.patch("urllib.request.urlopen", sent):

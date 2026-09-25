@@ -291,46 +291,9 @@ adding another CLI is a turn script, not engine work.
 
 ---
 
-## History — runs that outlive their stack
-
-An arena's ClickHouse dies with the arena. The **history store** is one
-persistent ClickHouse on the arena host (`history/`) that every run can ALSO
-write to, so runs, suites and subjects can be compared over time: pass rate
-per suite, median durations, and the agent's numbers — tokens, turns, tool
-calls — taken from its session transcript.
-
-What reaches it is decided before a row leaves the coordinator:
-
-- the bench-host settings and every credential a suite declares are
-  scrubbed, in every encoding and any 8+ character prefix;
-- an agent's transcript is never stored — only numbers derived from it,
-  with tool names reduced to Claude Code's built-ins, `mcp` or `other`;
-- three identities: an admin for the schema, a **writer** that can only
-  insert, a **reader** that can only select. Bound to `127.0.0.1` on the
-  host; arenas reach it over the `gentar-history` docker network.
-
-The identities guard the network edge; they do not keep out code that runs
-on the arena host itself (CI runners there share the user and the docker
-group). That boundary is the run policy's: only trusted code reaches the
-self-hosted runner — the same trust the bench SSH key already relies on.
-
-```bash
-bin/history deploy                  # on the arena host: passwords generated there, never shown
-bin/history writer-secret owner/repo # a repo's CI may write (piped into its Actions secret)
-bin/history reader-keychain         # this Mac may read (keychain:pilot/gentar-history-reader)
-bin/history tunnel &                # 127.0.0.1:18199 -> the host
-with-secret GENTAR_HISTORY_READER_PASSWORD=keychain:pilot/gentar-history-reader \
-  -- bin/history dashboard          # dashboard/out/history.html, with trends
-```
-
-A repo turns it on with two variables — `GENTAR_HISTORY_URL=http://gentar-history:8123`,
-`GENTAR_HISTORY_NETWORK=gentar-history` — and the secret
-`GENTAR_HISTORY_WRITER_PASSWORD`. Unset, nothing is written; a failed write
-never changes a verdict.
-
 ## Telemetry destination — every run into ClickStack
 
-The history store keeps rows; a **telemetry destination** keeps traces. When
+An arena's ClickHouse dies with the arena; a **telemetry destination** keeps its runs. When
 `GENTAR_OTLP_EXPORT` (a collector's OTLP/HTTP base URL) and `GENTAR_OTLP_KEY`
 (its ingestion key, sent as the `authorization` header) are both set, the
 coordinator sends each run there as one trace, through the arena's own
@@ -345,8 +308,8 @@ collector:
 - the resource names the subject (`service.name`) and the CI run
   (`gentar.ci_repo`, `gentar.ci_run_id`, …) and the engine sha.
 
-Scrubbing is the history store's, applied before a span leaves the
-coordinator; a driver transcript is sent only as its length. The collector
+Scrubbing is the coordinator's (the run's Redactor), applied before a span
+leaves it; a driver transcript is sent only as its length. The collector
 forwards only what arrives on its `otlp/scrubbed` receiver, which only the
 coordinator reaches (compose network, never published): a bench's
 self-report is re-sent through it scrubbed and joined to the run's trace,
@@ -367,7 +330,8 @@ GENTAR_OTLP_EXPORT=http://10.10.10.58:4318 \
 `compose.export.yml` is what wires it (layered by `bin/arena`, the kit's
 `run.sh` and CI when the URL is set); one setting without the other is
 refused by the kit, and compose itself refuses the file with either unset.
-Once ClickStack is proven in CI the v0.5.0 history store is retired.
+It replaced the v0.5.0 history store (`history/`, `bin/history`), retired
+once ClickStack was proven in CI.
 
 ## Scenario inventory
 
@@ -610,8 +574,7 @@ is short-lived.
 | `coordinator/gentar/` | the engine — bench tiers, oracle runner, pty driver, assertions, spans, reports |
 | `coordinator/scenarios/` | the suites |
 | `bench-template/` | deterministic bench template builder; `VERSION` pins the agent CLI |
-| `dashboard/generate.py` | stateless HTML renderer over the spans table (`--history`: trends) |
-| `history/`, `bin/history` | the persistent history store and its operator tool |
+| `dashboard/generate.py` | stateless HTML renderer over the spans table |
 | `bin/redact`, `bin/bench-reap` | publish-time redaction; stranded-sandbox cleanup |
 | `subject-template/` | the copyable adoption kit |
 | `docs/design.md` | the design of record, with every decision and why |

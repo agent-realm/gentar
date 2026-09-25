@@ -90,13 +90,12 @@ AGENT_SCHEMA = [
 ) ENGINE = MergeTree ORDER BY (subject, scenario, run_id, session)""",
 ]
 
-# History rows carry where the run came from; the arena's own tables do not
-# need it (one arena = one run).
+# The exported trace's resource carries where the run came from; the arena's
+# own tables do not need it (one arena = one run).
 CI_COLUMNS = ["ci_repo", "ci_run_id", "ci_run_attempt", "ci_ref", "ci_sha",
               "ci_event", "engine"]
-CI_EXTRA = "".join(f",\n    {c} LowCardinality(String)" for c in CI_COLUMNS)
 
-# Steps whose detail is an agent's screen — never stored in history.
+# Steps whose detail is an agent's screen — exported only by its length.
 PRIVATE_DETAIL_STEPS = {"driver.transcript"}
 
 
@@ -111,41 +110,19 @@ def _now_ms() -> int:
     return int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
 
 
-class History:
-    """The persistent store every arena also writes to (GENTAR_HISTORY_URL).
-
-    Write-only identity; the schema is the deployment's (history/), never
-    created from here. Every row is scrubbed first — the bench-host
-    settings and the run's declared credentials, in every encoding and any
-    8+ char prefix — and a transcript step keeps only its length: the
-    store is shared across subjects and read by dashboards. Best-effort:
-    a failure is counted and said once, never raised."""
+class Redactor:
+    """The run's scrubber: the bench-host settings, and the run's declared
+    credentials once the coordinator adds them, replaced in every encoding
+    and any 8+ char prefix (locators by exact token — see redaction). Every
+    text that leaves the arena — the OTLP export — goes through it."""
 
     def __init__(self, cfg: Config) -> None:
-        self.cfg = cfg
-        self.client = None
-        self.failed = 0
         from gentar.redaction import scrubber
-        self._scrub = scrubber([])
         self._base_secrets = [(n, v) for n, v in (
             ("GENTAR_BENCH_HOST", cfg.bench_host), ("GENTAR_BENCH_USER", cfg.bench_user),
             ("GENTAR_BENCH_JUMP", cfg.bench_jump), ("GENTAR_TART_HOST", cfg.tart_host),
-            ("GENTAR_TART_USER", cfg.tart_user),
-            ("GENTAR_HISTORY_PASSWORD", cfg.history_password)) if v]
+            ("GENTAR_TART_USER", cfg.tart_user)) if v]
         self._scrub = scrubber(self._base_secrets)
-        if not cfg.history_url:
-            return
-        try:
-            self.client = clickhouse_connect.get_client(
-                dsn=cfg.history_url, username=cfg.history_user,
-                password=cfg.history_password, database=cfg.history_db,
-                connect_timeout=5, send_receive_timeout=10)
-        except Exception as exc:
-            print(f"warn: history store unavailable — this run is not kept: "
-                  f"{type(exc).__name__}")
-            self.client = None
-        self.ci = [cfg.ci.get(c) or ("local" if c == "ci_repo" else "")
-                   for c in CI_COLUMNS[:-1]] + [cfg.engine_sha]
 
     def redact_values(self, named_values) -> None:
         """Add the run's credential values (name, value) to what is scrubbed."""
@@ -154,23 +131,6 @@ class History:
 
     def scrub(self, text: str) -> str:
         return self._scrub(text)
-
-    def insert(self, table: str, columns: list, rows: list) -> None:
-        if self.client is None or not rows:
-            return
-        # Every text column, not only detail/attrs: names and CI metadata
-        # come from files and environments too (agy review). Numbers pass.
-        clean = [[self.scrub(v) if isinstance(v, str) else v for v in r + self.ci]
-                 for r in rows]
-        try:
-            self.client.insert(f"{self.cfg.history_db}.{table}",
-                               clean,
-                               column_names=columns + CI_COLUMNS)
-        except Exception as exc:
-            self.failed += len(rows)
-            if self.failed == len(rows):          # say it once per run
-                print(f"warn: history write failed (the run is unaffected): "
-                      f"{type(exc).__name__}")
 
 
 _OTLP_STATUS = {"pass": 1, "fail": 2, "error": 2}      # OK, ERROR; else UNSET
@@ -219,7 +179,7 @@ class Otlp:
 
     One trace per run: the `scenario` span is the root, every other span of
     the run hangs under it, and the agent's session -> turns -> tool calls
-    come from its transcript as numbers only. Text is the history scrubber's
+    come from its transcript as numbers only. Text is the run's Redactor's
     (declared credentials, bench-host settings, every encoding, 8+ char
     prefixes) and a transcript step keeps only its length. Buffered, flushed
     at the end of the run; best-effort — never the verdict.
@@ -354,8 +314,8 @@ class Otlp:
 class Spans:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
-        self.history = History(cfg)
-        self.otlp = Otlp(cfg, self.history.scrub)
+        self.redactor = Redactor(cfg)
+        self.otlp = Otlp(cfg, self.redactor.scrub)
         self.client = None
         try:
             self.client = clickhouse_connect.get_client(
@@ -374,7 +334,7 @@ class Spans:
         db = self.cfg.clickhouse_db
         # A phase-1..4 table has the old minimal shape; IF NOT EXISTS
         # would keep it and every insert would fail forever. Dev-stage
-        # arena: detect the stale shape and drop it (history is
+        # arena: detect the stale shape and drop it (an arena's tables are
         # disposable), else create idempotently.
         existing = self.client.query(
             f"SELECT name FROM system.columns "
@@ -425,10 +385,6 @@ class Spans:
             start_ns = end_ns - (duration_ms or 0) * 1_000_000
             self.otlp.span(subject, run_id, scenario, span_id, parent, step,
                            status, start_ns, end_ns, attrs, detail)
-        h = self.history
-        hdetail = (f"(agent transcript, {len(detail or '')} chars — not kept)"
-                   if step in PRIVATE_DETAIL_STEPS else h.scrub(detail))
-        h.insert("spans", COLUMNS, [row[:11] + [h.scrub(row[11]), hdetail]])
         if self.client is None:
             return
         try:
@@ -519,7 +475,7 @@ def _agent_spans(spans: "Spans", subject, run_id, scenario, turns, tools) -> Non
 
 def agent_rows(spans: "Spans", subject: str, run_id: str, scenario: str,
                turns: list, tools: list) -> None:
-    """agentstats rows into the arena's tables and history. Numbers and
+    """agentstats rows into the arena's tables and the export. Numbers and
     labels only — by construction of agentstats, so nothing to scrub."""
     t_rows = [[subject, run_id, scenario, t["session"], t["turn"], t["model"],
                t["input_tokens"], t["output_tokens"], t["cache_read_tokens"],
@@ -531,7 +487,6 @@ def agent_rows(spans: "Spans", subject: str, run_id: str, scenario: str,
                               ("agent_tools", AGENT_TOOL_COLUMNS, u_rows)):
         if not rows:
             continue
-        spans.history.insert(table, cols, rows)
         if spans.client is not None:
             try:
                 spans.client.insert(f"{spans.cfg.clickhouse_db}.{table}", rows,

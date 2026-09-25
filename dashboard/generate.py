@@ -162,41 +162,6 @@ def public_grid(grid):
             if r.get("current_step") in PRIVATE_DETAIL_STEPS else r for r in grid]
 
 
-def fetch_trends(url, user, pw, db, days=30):
-    """Per (subject, scenario) over the last `days`: runs, passes, fails,
-    last status, median scenario duration, and agent tokens. For the
-    history store, where runs span CI jobs and subjects."""
-    rows = ch_query(url, user, pw, f"""
-        SELECT subject, scenario, count() AS runs,
-               countIf(status = 'pass') AS n_pass, countIf(status = 'fail') AS n_fail,
-               argMax(status, last_event) AS last_status,
-               toString(max(last_event)) AS last_run
-        FROM {db}.latest_scenario_status
-        WHERE last_event > now() - INTERVAL {int(days)} DAY
-        GROUP BY subject, scenario ORDER BY subject, scenario
-    """)
-    dur = ch_query(url, user, pw, f"""
-        SELECT subject, scenario, quantile(0.5)(duration_ms) AS median_ms
-        FROM {db}.spans
-        WHERE step = 'scenario' AND status IN ('pass', 'fail')
-          AND ts_start > now() - INTERVAL {int(days)} DAY
-        GROUP BY subject, scenario
-    """)
-    tok = ch_query(url, user, pw, f"""
-        SELECT subject, scenario, sum(input_tokens + output_tokens) AS tokens,
-               sum(tool_calls) AS tool_calls
-        FROM {db}.agent_turns
-        GROUP BY subject, scenario
-    """)
-    extra = {}
-    for r in dur:
-        extra.setdefault((r["subject"], r["scenario"]), {})["median_ms"] = r["median_ms"]
-    for r in tok:
-        extra.setdefault((r["subject"], r["scenario"]), {}).update(
-            tokens=r["tokens"], tool_calls=r["tool_calls"])
-    return [{**r, **extra.get((r["subject"], r["scenario"]), {})} for r in rows]
-
-
 def badge(status: str) -> str:
     color = STATUS_COLOR.get(status, "#8a8a86")
     text_color = STATUS_DARK_TEXT.get(status, "#ffffff")
@@ -250,12 +215,6 @@ PAGE_TEMPLATE = """<title>gentar dashboard</title>
 <h1>gentar -- {title}</h1>
 <div class="sub">{db} on {where} -- generated {generated_at}{watch_note}</div>
 
-<div id="trends-wrap" style="display:none">
-  <h2 style="font-size:15px;margin:8px 0">Trends (last 30 days)</h2>
-  <div class="container"><table>
-    <thead><tr><th style="width:18%">Subject</th><th style="width:22%">Suite</th><th>Runs</th><th>Pass rate</th><th>Last</th><th>Median</th><th>Agent tokens</th><th>Tool calls</th></tr></thead>
-    <tbody id="trends-body"></tbody>
-  </table></div>
   <h2 style="font-size:15px;margin:22px 0 8px">Runs</h2>
 </div>
 
@@ -279,7 +238,6 @@ const RUNS = {runs_json};
 const GRID = {grid_json};
 const EVENTS = {events_json};
 const AGENT = {agent_json};
-const TRENDS = {trends_json};
 
 // Everything below comes from runs — command output included — and this
 // page can be a PUBLIC artifact that someone opens: text goes in escaped.
@@ -362,17 +320,6 @@ function toggleTimeline(i) {{
   document.getElementById(`tl-${{i}}`).classList.toggle("open");
 }}
 
-if (TRENDS.length > 0) {{
-  document.getElementById("trends-wrap").style.display = "block";
-  document.getElementById("trends-body").innerHTML = TRENDS.map(t => {{
-    const rate = t.runs ? Math.round(100 * t.n_pass / t.runs) + "%" : "-";
-    return `<tr><td>${{esc(t.subject)}}</td><td>${{esc(t.scenario)}}</td><td>${{t.runs}}</td>` +
-      `<td>${{rate}} <span class="detail">(${{t.n_fail}} fail)</span></td>` +
-      `<td>${{badge(t.last_status)}} <span class="detail">${{esc(t.last_run)}}</span></td>` +
-      `<td>${{fmtDur(t.median_ms)}}</td><td>${{t.tokens ?? "-"}}</td><td>${{t.tool_calls ?? "-"}}</td></tr>`;
-  }}).join("");
-}}
-
 if (RUNS.length > 0) {{
   select.value = "0";
   renderRun(0);
@@ -389,13 +336,11 @@ def _script_json(value) -> str:
     return json.dumps(value, default=str).replace("</", "<\\/").replace("<!--", "<\\!--")
 
 
-def render(runs, grid, events, agent, db: str, watch: bool, trends=None,
-           history: bool = False) -> str:
+def render(runs, grid, events, agent, db: str, watch: bool) -> str:
     watch_note = " -- auto-refreshing every 5s" if watch else ""
     return PAGE_TEMPLATE.format(
-        title="history" if history else "telemetry",
-        where="the history store" if history else "the arena's ClickHouse",
-        trends_json=_script_json(trends or []),
+        title="telemetry",
+        where="the arena's ClickHouse",
         db=html.escape(db),
         generated_at=time.strftime("%Y-%m-%d %H:%M:%S %Z"),
         watch_note=watch_note,
@@ -423,8 +368,6 @@ def main(argv):
     # A published dashboard shows only its own invocation's runs: a kept
     # arena's ClickHouse still holds earlier ones, whose credentials the
     # publisher does not know to redact (agy review).
-    ap.add_argument("--history", action="store_true",
-                    help="the history store: add trends across runs and subjects")
     ap.add_argument("--since", type=int, default=0,
                     help="only runs started at or after this Unix time")
     args = ap.parse_args(argv)
@@ -433,9 +376,8 @@ def main(argv):
 
     def once():
         runs, grid, events, agent = fetch(url, user, pw, db, args.runs, args.since)
-        trends = fetch_trends(url, user, pw, db) if args.history else []
         html_body = render(runs, public_grid(grid), public_events(events), agent, db,
-                           args.watch, trends=trends, history=args.history)
+                           args.watch)
         write_html(args.out, html_body, args.watch)
         print(f"dashboard: {args.out}  ({len(runs)} runs, {len(grid)} scenario rows, {len(events)} events, {len(agent)} runs with agent spans)")
 

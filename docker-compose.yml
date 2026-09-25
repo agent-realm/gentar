@@ -121,15 +121,7 @@ services:
       # "allow" = this arena uses sbx stored secrets on purpose; otherwise
       # an sbx bench-host holding any is refused (credential proxy).
       GENTAR_SBX_SECRETS: ${GENTAR_SBX_SECRETS:-}
-      # History (optional): the persistent store this run ALSO writes to.
-      # Empty = off; config.py defaults user/db. The network it lives on is
-      # joined by compose.history.yml (layered when GENTAR_HISTORY_NETWORK
-      # is set).
-      GENTAR_HISTORY_URL: ${GENTAR_HISTORY_URL:-}
-      GENTAR_HISTORY_USER: ${GENTAR_HISTORY_USER:-}
-      GENTAR_HISTORY_PASSWORD: ${GENTAR_HISTORY_PASSWORD:-}
-      GENTAR_HISTORY_DB: ${GENTAR_HISTORY_DB:-}
-      # Where a run came from, for history rows; empty on a local run.
+      # Where a run came from, for the exported trace; empty on a local run.
       GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-}
       GITHUB_RUN_ID: ${GITHUB_RUN_ID:-}
       GITHUB_RUN_ATTEMPT: ${GITHUB_RUN_ATTEMPT:-}

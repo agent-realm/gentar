@@ -1,7 +1,7 @@
 """Agent numbers come out of a transcript; its text never does.
 
 The rule agreed with the first adopter: a Claude Code session transcript is
-the whole conversation and can hold a credential verbatim, while the history
+the whole conversation and can hold a credential verbatim, while the export
 store is shared and the dashboard can be a public artifact. So extraction
 yields numbers and a closed set of labels only — pinned here by planting a
 fake secret everywhere a transcript can carry text and checking it appears
