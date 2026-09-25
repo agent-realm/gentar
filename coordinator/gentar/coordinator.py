@@ -114,9 +114,15 @@ def _relay_agent_spans(bench: BenchHost, run_id: str, spans: Spans,
     """Ship the bench's self-report drop file (OTLP/HTTP-JSON at
     $WORKSPACE_DIR/gentar-otlp.json, if any) to otelcol. Best-effort,
     like all telemetry: a missing file is normal (most scenarios don't
-    self-report); a failed relay warns and moves on."""
-    rc, out = bench.exec(
-        run_id, "cat \"$WORKSPACE_DIR/gentar-otlp.json\" 2>/dev/null")
+    self-report); a failed relay warns and moves on. It runs in the run's
+    `finally`, so NOTHING here may raise: a bench that hangs (the read times
+    out) once escaped and skipped the scenario's end, report and teardown."""
+    try:
+        rc, out = bench.exec(
+            run_id, "cat \"$WORKSPACE_DIR/gentar-otlp.json\" 2>/dev/null")
+    except Exception as exc:
+        print(f"warn: agent self-report not read (non-fatal): {type(exc).__name__}")
+        return
     if rc != 0 or not out.strip():
         return
     # The copy that may leave the arena goes scrubbed, through its own door;

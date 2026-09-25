@@ -295,6 +295,17 @@ class EveryTerminalPathTest(unittest.TestCase):
                 mock.patch("gentar.spans.Otlp.payload", side_effect=TypeError("boom")):
             self.assertEqual(coordinator.run("flaky", cfg_with(GENTAR_QUARANTINE="flaky")), 0)
 
+    def test_a_hung_bench_read_never_escapes_the_relay(self):
+        # gate 36167948310 attempt 1: sbx hung, the self-report read timed
+        # out in the run's finally, and the traceback skipped the scenario's
+        # end, its report and its teardown.
+        import subprocess
+        from gentar import coordinator
+        bench = mock.MagicMock()
+        bench.exec.side_effect = subprocess.TimeoutExpired(["ssh"], 60)
+        s = spans(cfg_with())
+        coordinator._relay_agent_spans(bench, "run1", s, cfg_with(), "sub", "suite")
+
     def test_refusals_without_a_run_id_are_separate_traces(self):
         a, b = spans(cfg_with()), spans(cfg_with())
         a.emit("arena", "", "s1", "budget.refuse", "error")

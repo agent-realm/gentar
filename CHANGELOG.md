@@ -53,6 +53,16 @@ ClickStack on arf first.
 - Kit pin `v0.6.0`. Nothing is sent anywhere unless a repo sets both
   settings; an adopter that moves the pin and sets nothing sees no change.
 
+### Fixed
+
+- **A hung bench could crash a run's teardown.** Reading the bench's
+  self-report file ran in the run's `finally` outside any guard; when sbx
+  hung, the read timed out and the traceback skipped the scenario's end,
+  its report and the bench's removal. Now it warns and moves on.
+- Refused and quarantined runs now leave a trace too (they used to return
+  with their spans unsent), and `bin/arena` refuses half a telemetry
+  destination as the kit's `run.sh` does.
+
 ## 0.5.0 — 2026-09-24
 
 **History, and the agent's own numbers.** Runs outlive their stack, and an
