@@ -152,6 +152,17 @@ class RedactTest(unittest.TestCase):
         self.assertNotIn("10.10.10.5", out)
         self.assertNotIn("polat", out)
 
+    def test_a_locator_after_any_escape_or_underscore_is_redacted(self):
+        # agy review of the whole-token rule: each of these hid the value
+        # behind a letter or digit that is not part of its token
+        for text in ("url=%2F10.10.10.5", "user=%40polat", "\x1b[31m10.10.10.5\x1b[0m",
+                     "\x1b[1;38;5;208mpolat", "user_polat", "polat_ssh",
+                     "\\x0a10.10.10.5", "\\01210.10.10.5", "&quot10.10.10.5", "&#39;polat"):
+            _, out = self.run_redact(text, GENTAR_REDACT_NAMES="GENTAR_BENCH_USER GENTAR_BENCH_HOST",
+                                     GENTAR_BENCH_USER="polat", GENTAR_BENCH_HOST="10.10.10.5")
+            self.assertNotIn("10.10.10.5", out, text)
+            self.assertNotIn("polat", out, text)
+
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",
                                  GENTAR_REDACT_NAMES="SHORT LONG",

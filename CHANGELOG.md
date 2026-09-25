@@ -36,9 +36,11 @@ Adopters pin a release tag, not a branch.
   `polat` redacted the middle of `github.com/ramazanpolat/…` in live
   reports (claude-playbooks), and a host `10.10.10.5` would have taken the
   head of `10.10.10.52` (cockpit). A locator is now replaced only where no
-  host/user character (`[A-Za-z0-9_-]`, or a `.` followed by one) continues
-  it on either side — a sentence-final `.` still counts as an end.
-  Credentials keep plain substring matching.
+  host/user character (`[A-Za-z0-9-]`, or a `.` followed by one) continues
+  it on either side — a sentence-final `.` still ends it, `_` ends it, and
+  so does any escape right before it (terminal colour codes, `\n`/`\x0a`/
+  `\012`/`\u00e9`, `%2F`, `&quot`), which would otherwise hide the value
+  behind a letter or digit. Credentials keep plain substring matching.
 
 ## 0.6.2 — 2026-09-25
 
