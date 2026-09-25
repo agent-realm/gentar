@@ -39,7 +39,10 @@ Adopters pin a release tag, not a branch.
   also by its host:port and host. Everything else keeps the prefix rule —
   a token-shaped value behind such a name, and a URL that carries a
   credential (user:pass@, a query, a fragment, or a path segment over 12
-  characters, as in webhook URLs). Trade-off: a locator cut
+  characters, as in webhook URLs). A host counts only when shaped like
+  one: IPv4, a lowercase dotted name, or a short lowercase label.
+- **Every value is now also redacted URL-encoded** (`polat%40host`,
+  `sk%2Fabc…`) — credentials included; no form matched it before. Trade-off: a locator cut
   mid-value keeps its surviving head, a partial address.
 
 ## 0.6.0 — 2026-09-25

@@ -32,7 +32,7 @@ is treated as a credential: the stricter rule is the default.
 import html
 import json
 import re
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 MIN_VALUE = 4
 MIN_PREFIX = 8
@@ -40,7 +40,17 @@ MIN_PREFIX = 8
 _MAX_PATH_SEGMENT = 12       # /v1, /api/otlp: fine; a 24-char token segment: not
 _LOCATOR_NAME = re.compile(r"_(HOST|USER|URL|ENDPOINT|EXPORT|JUMP)$")
 _URL = re.compile(r"^[a-z][a-z0-9+.-]*://[^\s]+$", re.I)
-_HOSTLIKE = re.compile(r"^(?:[A-Za-z0-9_.-]+@)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*(?::\d{1,5})?$")
+# Host shapes that tokens do not take: an IPv4 address, a LOWERCASE dotted
+# name (labels <= 63, last label starts with a letter), or a short lowercase
+# single label (a VM name, a unix user). Mixed-case, long single labels and
+# anything with other characters are credential-shaped (agy review: a
+# sk-ant-... key in a *_USER setting matched the first, looser pattern).
+_IPV4 = r"(?:\d{1,3}\.){3}\d{1,3}"
+_DOTTED = r"(?:[a-z0-9-]{1,63}\.)+[a-z][a-z0-9-]{0,62}"
+_LABEL = r"[a-z][a-z0-9_-]{0,14}"
+_USERPART = r"(?:[a-z_][a-z0-9_.-]{0,31}@)?"
+_HOSTLIKE = re.compile(rf"^{_USERPART}(?:{_IPV4}|{_DOTTED}|{_LABEL})(?::\d{{1,5}})?$")
+_HOSTNAME = re.compile(rf"^(?:{_IPV4}|{_DOTTED}|{_LABEL})$")
 
 
 def _locator_parts(name: str, value: str):
@@ -54,19 +64,20 @@ def _locator_parts(name: str, value: str):
             # #fragment, or a token as a path segment (webhook URLs). Any of
             # those, and it is a credential: the prefix rule stays.
             if (u.username is not None or u.password is not None or u.query
-                    or u.fragment or not u.hostname
+                    or u.fragment or not u.hostname or not _HOSTNAME.match(u.hostname)
                     or any(len(seg) > _MAX_PATH_SEGMENT for seg in u.path.split("/"))):
                 return None
         except ValueError:
             return None
-        return {value, u.netloc, u.hostname}
+        return {value, value.lower(), u.netloc, u.netloc.lower(), u.hostname}
     if _HOSTLIKE.match(value):
         return {value}
     return None
 
 
 def _forms(value: str):
-    raw = [value, json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1]]
+    raw = [value, json.dumps(value)[1:-1], json.dumps(value, ensure_ascii=False)[1:-1],
+           quote(value, safe=""), quote(value, safe="/:")]      # URL-encoded, too
     out = set(raw)
     for f in raw:
         out.add(html.escape(f))

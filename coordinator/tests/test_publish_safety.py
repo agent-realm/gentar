@@ -93,10 +93,13 @@ class RedactTest(unittest.TestCase):
     def test_a_credential_behind_a_locator_name_keeps_the_prefix_rule(self):
         # the name alone does not make a locator: a token-shaped value in a
         # *_URL / *_USER setting is still cut-safe
-        v = "sk-ant-api03-ABCDEFGHIJKLMNOP token"
-        r, out = self.run_redact("| `X=sk-ant-api03-ABC` |",
-                                 GENTAR_REDACT_NAMES="WEIRD_URL", WEIRD_URL=v)
-        self.assertNotIn("sk-ant-api03-ABC", out)
+        for name, v in (("WEIRD_URL", "sk-ant-api03-ABCDEFGHIJKLMNOP token"),
+                        ("API_USER", "sk-ant-api03-ABCDEFGHIJKLMNOP"),       # agy: dash token
+                        ("DB_USER", "abcdef0123456789abcdef"),              # long hex label
+                        ("JWT_HOST", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl")):
+            cut = v[:16]
+            r, out = self.run_redact(f"| `X={cut}` |", GENTAR_REDACT_NAMES=name, **{name: v})
+            self.assertNotIn(cut, out, (name, out))
 
     def test_a_url_that_carries_a_credential_keeps_the_prefix_rule(self):
         for v in ("https://user:hunter2hunter2@collector.corp:4318",
@@ -106,6 +109,15 @@ class RedactTest(unittest.TestCase):
             _, out = self.run_redact(f"| `{cut}` |", GENTAR_REDACT_NAMES="HOOK_URL",
                                      HOOK_URL=v)
             self.assertNotIn(cut, out, v)
+
+    def test_a_value_is_caught_url_encoded(self):
+        # agy: an application that URL-encodes a value (a query parameter)
+        # emits polat%40bench.corp, which no raw/JSON/HTML form matches
+        for name, v, enc in (("GENTAR_BENCH_JUMP", "polat@bench.corp", "polat%40bench.corp"),
+                             ("ANTHROPIC_AUTH_TOKEN", "sk/abc+def=ghij", "sk%2Fabc%2Bdef%3Dghij")):
+            _, out = self.run_redact(f"GET /x?u={enc}&y=1", GENTAR_REDACT_NAMES=name,
+                                     **{name: v})
+            self.assertNotIn(enc, out, (name, out))
 
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",
