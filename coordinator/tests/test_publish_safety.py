@@ -68,6 +68,65 @@ class RedactTest(unittest.TestCase):
         self.assertNotIn("sk-ant-api03-ABC", out)
         self.assertIn("«redacted:ANTHROPIC_AUTH_TOKEN»`", out)
 
+    def test_a_locator_does_not_redact_unrelated_addresses(self):
+        # cockpit#29: the 8-char head `http://1` of the export URL redacted
+        # every http://1… URL; `10.10.10` of the bench host its whole subnet
+        text = ("export http://10.10.10.58:4318/v1/traces\n"
+                "provider http://10.10.10.100:20128/v1 local http://127.0.0.1:8123\n"
+                "bench ssh polat@10.10.10.52 ; peer 10.10.10.58:4318 ; other 10.10.10.60\n")
+        r, out = self.run_redact(
+            text, GENTAR_REDACT_NAMES="GENTAR_OTLP_EXPORT GENTAR_BENCH_HOST",
+            GENTAR_OTLP_EXPORT="http://10.10.10.58:4318", GENTAR_BENCH_HOST="10.10.10.52")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for kept in ("http://10.10.10.100:20128/v1", "http://127.0.0.1:8123", "10.10.10.60"):
+            self.assertIn(kept, out)
+        for gone in ("10.10.10.58", "10.10.10.52"):   # exact value, host:port and host
+            self.assertNotIn(gone, out)
+
+    def test_an_https_locator_leaves_other_https_urls_alone(self):
+        r, out = self.run_redact("see https://docs.example.org and https://collector.corp:4318",
+                                 GENTAR_REDACT_NAMES="GENTAR_OTLP_EXPORT",
+                                 GENTAR_OTLP_EXPORT="https://collector.corp:4318")
+        self.assertIn("https://docs.example.org", out)
+        self.assertNotIn("collector.corp", out)
+
+    def test_a_credential_behind_a_locator_name_keeps_the_prefix_rule(self):
+        # the name alone does not make a locator: a token-shaped value in a
+        # *_URL / *_USER setting is still cut-safe
+        for name, v in (("WEIRD_URL", "sk-ant-api03-ABCDEFGHIJKLMNOP token"),
+                        ("API_USER", "sk-ant-api03-ABCDEFGHIJKLMNOP"),       # agy: dash token
+                        ("DB_USER", "abcdef0123456789abcdef"),              # long hex label
+                        ("JWT_HOST", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl")):
+            cut = v[:16]
+            r, out = self.run_redact(f"| `X={cut}` |", GENTAR_REDACT_NAMES=name, **{name: v})
+            self.assertNotIn(cut, out, (name, out))
+
+    def test_a_url_that_carries_a_credential_keeps_the_prefix_rule(self):
+        for v in ("https://user:hunter2hunter2@collector.corp:4318",
+                  "https://collector.corp:4318/v1?key=abcdef0123456789",
+                  "https://hooks.slack.com/services/T0000/B0000/XXXXXXXXXXXXXXXXXXXXXXXX"):
+            cut = v[:len(v) - 6]                      # a report column cut it
+            _, out = self.run_redact(f"| `{cut}` |", GENTAR_REDACT_NAMES="HOOK_URL",
+                                     HOOK_URL=v)
+            self.assertNotIn(cut, out, v)
+
+    def test_a_mixed_case_host_is_caught_as_written(self):
+        # Codex: urlsplit lowercases the hostname, so a standalone
+        # Collector.Corp survived when only collector.corp was added
+        _, out = self.run_redact("dns Collector.Corp and collector.corp",
+                                 GENTAR_REDACT_NAMES="GENTAR_OTLP_EXPORT",
+                                 GENTAR_OTLP_EXPORT="https://Collector.Corp:4318")
+        self.assertNotIn("collector.corp", out.lower(), out)
+
+    def test_a_value_is_caught_url_encoded(self):
+        # agy: an application that URL-encodes a value (a query parameter)
+        # emits polat%40bench.corp, which no raw/JSON/HTML form matches
+        for name, v, enc in (("GENTAR_BENCH_JUMP", "polat@bench.corp", "polat%40bench.corp"),
+                             ("ANTHROPIC_AUTH_TOKEN", "sk/abc+def=ghij", "sk%2Fabc%2Bdef%3Dghij")):
+            _, out = self.run_redact(f"GET /x?u={enc}&y=1", GENTAR_REDACT_NAMES=name,
+                                     **{name: v})
+            self.assertNotIn(enc, out, (name, out))
+
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",
                                  GENTAR_REDACT_NAMES="SHORT LONG",
