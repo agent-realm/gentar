@@ -9,6 +9,8 @@ length — and it must never change a verdict.
 
 import json
 import os
+import pathlib
+import re
 import unittest
 from unittest import mock
 
@@ -21,7 +23,7 @@ TOKEN = "tok-9f8e7d6c5b4a-secret"
 
 def cfg_with(**env):
     base = {"GENTAR_BENCH_HOST": "bench.internal.example", "GENTAR_BENCH_USER": "benchuser",
-            "GENTAR_OTLP_ENDPOINT": "http://otelcol:4318", "GITHUB_REPOSITORY": "o/r",
+            "GENTAR_OTLP_SCRUBBED_ENDPOINT": "http://otelcol:14318", "GITHUB_REPOSITORY": "o/r",
             "GITHUB_RUN_ID": "42", "GENTAR_ENGINE_SHA": "abc123", "GENTAR_REPORT_DIR": ""}
     base.update(env)
     with mock.patch.dict(os.environ, base, clear=True):
@@ -67,7 +69,7 @@ class TraceShapeTest(unittest.TestCase):
     def test_one_trace_rooted_at_the_scenario(self):
         root, sent = self.run_one(spans(cfg_with()))
         (url, body), = sent.bodies
-        self.assertEqual(url, "http://otelcol:4318/v1/traces")
+        self.assertEqual(url, "http://otelcol:14318/v1/traces")
         got = all_spans(body)
         by = {sp["name"]: sp for _, sp in got}
         self.assertEqual(by["scenario"]["spanId"], root)
@@ -100,7 +102,7 @@ class TraceShapeTest(unittest.TestCase):
         self.assertEqual(names.count("scenario"), 1)
 
     def test_no_endpoint_no_export(self):
-        s = spans(cfg_with(GENTAR_OTLP_ENDPOINT=""))
+        s = spans(cfg_with(GENTAR_OTLP_SCRUBBED_ENDPOINT=""))
         s.emit("sub", "run1", "suite", "step.0")
         self.assertEqual(s.otlp.buf, {})
 
@@ -111,6 +113,77 @@ class TraceShapeTest(unittest.TestCase):
             s.otlp.flush()
         self.assertTrue(s.otlp.failed)
 
+
+
+class RelayTest(unittest.TestCase):
+    """A bench's self-report leaves only through the scrubbed door."""
+
+    def report(self, **span):
+        sp = {"traceId": "ab" * 16, "spanId": "cd" * 8, "name": "agent.selfreport",
+              "startTimeUnixNano": "10000000000", "endTimeUnixNano": "11000000000",
+              "attributes": [{"key": "cmd", "value": {"stringValue":
+                              f"curl -H 'x: {TOKEN}' benchuser@bench.internal.example"}}]}
+        sp.update(span)
+        return json.dumps({"resourceSpans": [{"resource": {"attributes": []},
+                                              "scopeSpans": [{"spans": [sp]}]}]})
+
+    def relay(self, cfg, raw):
+        s = spans(cfg)
+        s.history.redact_values([("ANTHROPIC_AUTH_TOKEN", TOKEN)])
+        root = s.step_start("sub", "run1", "suite", "scenario")
+        sent = Sent()
+        with mock.patch("urllib.request.urlopen", sent):
+            s.otlp.relay("sub", "run1", raw)
+        return root, sent
+
+    def test_scrubbed_joined_to_the_run_and_named(self):
+        root, sent = self.relay(cfg_with(), self.report())
+        (url, body), = sent.bodies
+        self.assertEqual(url, "http://otelcol:14318/v1/traces")
+        blob = json.dumps(body, ensure_ascii=False)
+        for secret in (TOKEN, TOKEN[:14], "bench.internal.example", "benchuser"):
+            self.assertNotIn(secret, blob)
+        (res, sp), = all_spans(body)
+        self.assertEqual(sp["traceId"], trace_id("sub", "run1"))
+        self.assertEqual(sp["parentSpanId"], root)
+        keys = {a["key"]: a["value"] for a in res["attributes"]}
+        self.assertEqual(keys["service.name"], {"stringValue": "sub"})
+        self.assertEqual(keys["gentar.run_id"], {"stringValue": "run1"})
+
+    def test_its_own_service_and_parents_are_kept(self):
+        raw = json.loads(self.report(parentSpanId="ef" * 8))
+        raw["resourceSpans"][0]["resource"]["attributes"] = [
+            {"key": "service.name", "value": {"stringValue": "claude-code"}}]
+        _, sent = self.relay(cfg_with(), json.dumps(raw))
+        (res, sp), = all_spans(sent.bodies[0][1])
+        self.assertEqual(sp["parentSpanId"], "ef" * 8)
+        names = [a["value"] for a in res["attributes"] if a["key"] == "service.name"]
+        self.assertEqual(names, [{"stringValue": "claude-code"}])
+
+    def test_no_destination_nothing_relayed(self):
+        _, sent = self.relay(cfg_with(GENTAR_OTLP_SCRUBBED_ENDPOINT=""), self.report())
+        self.assertEqual(sent.bodies, [])
+
+    def test_what_does_not_parse_stays_local(self):
+        for raw in ("not json", "[1, 2]", '{"resourceLogs": []}', TOKEN):
+            _, sent = self.relay(cfg_with(), raw)
+            self.assertEqual(sent.bodies, [], raw)
+
+
+class ExportConfigTest(unittest.TestCase):
+    """The destination is fed by the scrubbed receiver and nothing else."""
+
+    def test_no_export_pipeline_reads_the_raw_receiver(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        text = (root / "otelcol" / "export.yaml").read_text()
+        pipelines = text.split("pipelines:", 1)[1]
+        receivers = re.findall(r"receivers:\s*\[([^\]]*)\]", pipelines)
+        self.assertTrue(receivers)
+        for group in receivers:
+            self.assertEqual([r.strip() for r in group.split(",")], ["otlp/scrubbed"])
+        compose = (root / "compose.export.yml").read_text()
+        self.assertNotIn("14318:", compose)       # the scrubbed door is never published
+        self.assertIn("GENTAR_OTLP_SCRUBBED_ENDPOINT: http://otelcol:14318", compose)
 
 class AgentSpansTest(unittest.TestCase):
 

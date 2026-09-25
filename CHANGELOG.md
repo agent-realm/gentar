@@ -32,11 +32,13 @@ ClickStack on arf first.
 
 - **Telemetry destination** (AGENTS.md decision 6): `GENTAR_OTLP_EXPORT` +
   `GENTAR_OTLP_KEY`, both or neither. Set, `compose.export.yml` gives the
-  arena's collector an `otlphttp` exporter for traces, logs and metrics
-  (queued and retried), and the coordinator sends each run as one OTLP
-  trace rooted at `scenario` with every step as a child span and the CI
-  identity on the resource. Scrubbed by the history store's scrubber before
-  it leaves; transcripts only by length; best-effort, never the verdict.
+  arena's collector an `otlphttp` exporter (queued and retried) fed ONLY by
+  an unpublished `otlp/scrubbed` receiver, and the coordinator sends each
+  run there as one OTLP trace rooted at `scenario` with every step as a
+  child span and the CI identity on the resource. Scrubbed by the history
+  store's scrubber before it leaves; transcripts only by length; a bench's
+  self-report re-sent scrubbed and joined to the run's trace, its raw copy
+  local only; best-effort, never the verdict.
   The kit's `run.sh` refuses one without the other (exit 2) and redacts
   both from published files; `bin/arena` and CI layer the file when the URL
   is set. The kit workflow passes both from repository secrets.

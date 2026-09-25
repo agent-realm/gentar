@@ -185,10 +185,11 @@ def _kv(key: str, value) -> dict:
 class Otlp:
     """Every finished span, as OTLP/HTTP JSON, to the ARENA's collector.
 
-    That collector keeps a local copy and — when the adopting repo declared
-    a telemetry destination (GENTAR_OTLP_EXPORT, compose.export.yml) —
-    forwards it. So this class never talks to anything outside the arena;
-    the destination and its key live only in the collector.
+    Only when the adopting repo declared a telemetry destination
+    (GENTAR_OTLP_EXPORT, compose.export.yml): spans go to that collector's
+    `otlp/scrubbed` receiver, the only input its export pipeline reads. So
+    this class never talks to anything outside the arena; the destination
+    and its key live only in the collector.
 
     One trace per run: the `scenario` span is the root, every other span of
     the run hangs under it, and the agent's session -> turns -> tool calls
@@ -210,7 +211,7 @@ class Otlp:
 
     def span(self, subject, run_id, scenario, span_id, parent, name, status,
              start_ns, end_ns, attrs=None, detail="") -> None:
-        if not self.cfg.otlp_endpoint:
+        if not self.cfg.otlp_scrubbed_endpoint:
             return
         if not parent and name != "scenario":
             parent = self.roots.get((subject, run_id), "")
@@ -235,25 +236,65 @@ class Otlp:
         if sum(len(v) for v in self.buf.values()) >= 200:
             self.flush()
 
-    def payload(self) -> dict:
+    def resource(self, subject) -> list:
         ci = [(c, self.cfg.ci.get(c) or ("local" if c == "ci_repo" else ""))
               for c in CI_COLUMNS[:-1]]
+        return ([_kv("service.name", subject), _kv("gentar.engine", self.cfg.engine_sha)]
+                + [_kv(f"gentar.{c}", self.scrub(v)) for c, v in ci if v])
+
+    def payload(self) -> dict:
         return {"resourceSpans": [{
-            "resource": {"attributes": [_kv("service.name", subject),
-                                        _kv("gentar.engine", self.cfg.engine_sha)]
-                         + [_kv(f"gentar.{c}", self.scrub(v)) for c, v in ci if v]},
+            "resource": {"attributes": self.resource(subject)},
             "scopeSpans": [{"scope": {"name": "gentar"}, "spans": spans}]}
             for subject, spans in self.buf.items() if spans]}
 
     def flush(self) -> None:
-        if not self.buf or not self.cfg.otlp_endpoint:
+        if not self.buf or not self.cfg.otlp_scrubbed_endpoint:
             return
         body = json.dumps(self.payload()).encode()
         self.buf = {}
+        self._post(body)
+
+    def relay(self, subject, run_id, raw: str) -> None:
+        """A bench's self-report (OTLP/HTTP JSON), through the scrubbed door.
+
+        The raw file still goes to the collector's local-only receiver; this
+        copy is the one that may leave. Scrubbed as text first, then it must
+        parse — a scrub that cut through JSON, or anything that is not
+        OTLP JSON, is not sent (it stays local). Its spans join the run's
+        trace (parentless ones under the scenario root) and its resource
+        names the subject when it named no service. Best-effort.
+        """
+        if not self.cfg.otlp_scrubbed_endpoint or not (raw or "").strip():
+            return
+        try:
+            doc = json.loads(self.scrub(raw))
+            groups = doc.get("resourceSpans") if isinstance(doc, dict) else None
+            if not isinstance(groups, list):
+                return
+            tid, root = trace_id(subject, run_id), self.roots.get((subject, run_id), "")
+            ours = {a["key"]: a for a in self.resource(subject)}
+            for rs in groups:
+                attrs = rs.setdefault("resource", {}).setdefault("attributes", [])
+                have = {a.get("key") for a in attrs if isinstance(a, dict)}
+                attrs.extend(a for k, a in ours.items() if k not in have)
+                if "gentar.run_id" not in have:
+                    attrs.append(_kv("gentar.run_id", run_id))
+                for ss in rs.get("scopeSpans") or []:
+                    for sp in ss.get("spans") or []:
+                        sp["traceId"] = tid
+                        if not sp.get("parentSpanId") and root:
+                            sp["parentSpanId"] = root
+            body = json.dumps({"resourceSpans": groups}).encode()
+        except Exception:
+            return
+        self._post(body)
+
+    def _post(self, body: bytes) -> None:
         try:
             import urllib.request
             req = urllib.request.Request(
-                f"{self.cfg.otlp_endpoint.rstrip('/')}/v1/traces", data=body,
+                f"{self.cfg.otlp_scrubbed_endpoint.rstrip('/')}/v1/traces", data=body,
                 method="POST", headers={"content-type": "application/json"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 resp.read()

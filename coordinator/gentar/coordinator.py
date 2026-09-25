@@ -119,6 +119,9 @@ def _relay_agent_spans(bench: BenchHost, run_id: str, spans: Spans,
         run_id, "cat \"$WORKSPACE_DIR/gentar-otlp.json\" 2>/dev/null")
     if rc != 0 or not out.strip():
         return
+    # The copy that may leave the arena goes scrubbed, through its own door;
+    # the raw file below reaches the local ClickHouse only.
+    spans.otlp.relay(subject, run_id, out)
     try:
         import urllib.request
         req = urllib.request.Request(

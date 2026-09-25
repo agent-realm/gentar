@@ -333,8 +333,8 @@ never changes a verdict.
 The history store keeps rows; a **telemetry destination** keeps traces. When
 `GENTAR_OTLP_EXPORT` (a collector's OTLP/HTTP base URL) and `GENTAR_OTLP_KEY`
 (its ingestion key, sent as the `authorization` header) are both set, the
-arena's own collector forwards everything it receives there, and the
-coordinator sends each run as one trace:
+coordinator sends each run there as one trace, through the arena's own
+collector:
 
 - `scenario` is the root; every step (`bench.create`, `subject.push`,
   `oracle.step.N`, `assert`, `run.*`) is its child, with duration, status and
@@ -346,8 +346,13 @@ coordinator sends each run as one trace:
   (`gentar.ci_repo`, `gentar.ci_run_id`, …) and the engine sha.
 
 Scrubbing is the history store's, applied before a span leaves the
-coordinator; a driver transcript is sent only as its length. Export is
-best-effort — a collector that is down is warned about once and never
+coordinator; a driver transcript is sent only as its length. The collector
+forwards only what arrives on its `otlp/scrubbed` receiver, which only the
+coordinator reaches (compose network, never published): a bench's
+self-report is re-sent through it scrubbed and joined to the run's trace,
+while the raw copy — and anything else sent to `:4318` — stays in the local
+ClickHouse. A test holds that no export pipeline reads the raw receiver.
+Export is best-effort — a collector that is down is warned about once and never
 changes a verdict. The arena keeps its local copy as before.
 
 The organisation's destination is ClickStack on arf (VM 149,
