@@ -41,7 +41,12 @@ cd "$HERE"
 # Local runs layer compose.rm.yml. The documented compose contract in
 # docker-compose.yml is untouched — `docker compose run --rm coordinator …`
 # still works exactly as the README and CI describe it.
-compose() { docker compose -f docker-compose.yml -f compose.rm.yml "$@"; }
+compose() {
+  local extra=()
+  # History store on this host's docker network (history/): join it.
+  [ -n "${GENTAR_HISTORY_NETWORK:-}" ] && extra=(-f compose.history.yml)
+  docker compose -f docker-compose.yml -f compose.rm.yml ${extra[@]+"${extra[@]}"} "$@"
+}
 
 # docker-compose.yml mounts the bench ssh key as a compose SECRET
 # (`file: ${GENTAR_BENCH_KEY_FILE:-~/.ssh/id_ed25519}`). When that file

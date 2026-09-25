@@ -57,6 +57,17 @@ class RedactTest(unittest.TestCase):
             self.assertNotIn(form, out)
         self.assertEqual(out.count("«redacted:TOKEN»"), 5, out)
 
+    def test_a_truncated_value_loses_its_surviving_head(self):
+        # a report's command column cuts a value; the head must not survive
+        # (claude-playbooks, scanning its public artifacts)
+        v = "sk-ant-api03-ABCDEFGHIJKLMNOP"
+        r, out = self.run_redact("| `ANTHROPIC_AUTH_TOKEN=sk-ant-api03-ABC` |",
+                                 GENTAR_REDACT_NAMES="ANTHROPIC_AUTH_TOKEN",
+                                 ANTHROPIC_AUTH_TOKEN=v)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("sk-ant-api03-ABC", out)
+        self.assertIn("«redacted:ANTHROPIC_AUTH_TOKEN»`", out)
+
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",
                                  GENTAR_REDACT_NAMES="SHORT LONG",
@@ -138,6 +149,21 @@ class DashboardHidesTranscriptsTest(unittest.TestCase):
         gen.ch_query = lambda url, user, pw, sql: seen.append(sql) or []
         gen.fetch("http://x", "u", "p", "gentar", 500, since=1700000000)
         self.assertIn("toUnixTimestamp(run_started) >= 1700000000", seen[0])
+
+    def test_step_output_cannot_break_out_of_the_page(self):
+        # the page can be a public artifact someone opens: output that holds
+        # `</script>` must not end the data block, and text is escaped
+        spec = importlib.util.spec_from_file_location("gen", GENERATE)
+        gen = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gen)
+        evil = '</script><img src=x onerror=alert(1)><!--'
+        events = [{"subject": "s", "run_id": "r", "scenario": "a", "step": "step.0",
+                   "status": "fail", "ts_start": "", "ts_end": "", "duration_ms": 1,
+                   "detail": evil, "span_id": "1"}]
+        html = gen.render([], [], events, [], "gentar", False)
+        self.assertNotIn("</script><img", html)
+        self.assertEqual(html.count("</script>"), 1)      # only the page's own
+        self.assertIn("function esc(", html)
 
     def test_the_grid_hides_a_transcript_that_was_the_last_step(self):
         spec = importlib.util.spec_from_file_location("gen", GENERATE)

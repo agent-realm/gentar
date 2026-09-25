@@ -14,7 +14,7 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.4.2` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.5.0` |
 
 ## Quickstart (local)
 
@@ -92,6 +92,15 @@ your suites declare are replaced by `«redacted:NAME»` in the dashboard and
 the reports, and an agent's screen transcript appears on the dashboard only
 as its length (it stays in the run report, for the fix loop). A dashboard
 that cannot be redacted is not published.
+
+**Keeping history.** If your arena host runs gentar's history store
+(`bin/history deploy` in the engine), set the repository variables
+`GENTAR_HISTORY_URL=http://gentar-history:8123` and
+`GENTAR_HISTORY_NETWORK=gentar-history`, and the secret
+`GENTAR_HISTORY_WRITER_PASSWORD` (whoever operates the store sets it with
+`bin/history writer-secret owner/repo`, never by hand). Every run then also
+lands in the store — redacted, agent numbers only, never a transcript — for
+trends across runs. Unset, nothing changes.
 
 To watch a run live instead, keep the stack up with `GENTAR_KEEP_ARENA=1` and,
 from a second shell (use your own port if you moved it):

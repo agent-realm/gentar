@@ -113,6 +113,22 @@ class Config:
         self.clickhouse_password = _opt("GENTAR_CLICKHOUSE_PASSWORD", "gentar")
         self.clickhouse_db = _opt("GENTAR_CLICKHOUSE_DB", "gentar")
 
+        # History: a persistent ClickHouse every arena ALSO writes to, so
+        # runs outlive their stack and trends span runs and subjects. Off
+        # unless a URL is set. Write-only identity; rows are redacted and
+        # carry no transcript text (see spans.History). Best-effort, like
+        # all telemetry: history never changes a verdict.
+        self.history_url = _opt("GENTAR_HISTORY_URL")
+        self.history_user = _opt("GENTAR_HISTORY_USER") or "gentar_writer"
+        self.history_password = _opt("GENTAR_HISTORY_PASSWORD")
+        self.history_db = _opt("GENTAR_HISTORY_DB") or "gentar_history"
+        # Where the run came from, for history: CI identity (GitHub's own
+        # variables, forwarded by compose) or "local".
+        self.ci = {k: _opt(v) for k, v in (
+            ("ci_repo", "GITHUB_REPOSITORY"), ("ci_run_id", "GITHUB_RUN_ID"),
+            ("ci_run_attempt", "GITHUB_RUN_ATTEMPT"), ("ci_ref", "GITHUB_REF"),
+            ("ci_sha", "GITHUB_SHA"), ("ci_event", "GITHUB_EVENT_NAME"))}
+
         # Sandbox name prefix; run id is appended by the coordinator.
         # Empty reads as the default: compose forwards it as
         # ${GENTAR_NAME_PREFIX:-}, which is an empty string when unset.

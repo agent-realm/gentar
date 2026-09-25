@@ -71,28 +71,18 @@ def main(argv):
         for v in (os.environ.get(n, ""), resolved.get(n, "")):
             if len(v) >= 4:
                 values.add((v, n))
-    # Every form a value can take in a published file, not only the raw
-    # one: the dashboard embeds data as JSON (a backslash, quote, control
-    # character or non-ASCII byte comes out escaped) and HTML may escape
-    # it again — a raw-only replace missed those (agy review).
-    forms = set()
-    for v, n in values:
-        for f in (v,
-                  json.dumps(v)[1:-1],
-                  json.dumps(v, ensure_ascii=False)[1:-1],
-                  html.escape(v),
-                  html.escape(v, quote=False),
-                  html.escape(json.dumps(v)[1:-1])):
-            if len(f) >= 4:
-                forms.add((f, n))
-    pairs = sorted(forms, key=lambda p: -len(p[0]))
+    # One implementation, shared with the coordinator's history writer:
+    # every encoding of a value, and any 8+ character prefix of it (a
+    # report or a span cap can cut a value; the head must not survive).
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "coordinator"))
+    from gentar.redaction import scrubber
+    scrub = scrubber((n, v) for v, n in values)
     rc = 0
     for f in files:
         try:
             with open(f, encoding="utf-8", errors="surrogateescape") as fh:
                 text = fh.read()
-            for value, name in pairs:
-                text = text.replace(value, f"«redacted:{name}»")
+            text = scrub(text)
             with open(f, "w", encoding="utf-8", errors="surrogateescape") as fh:
                 fh.write(text)
         except OSError as exc:

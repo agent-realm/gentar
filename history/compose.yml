@@ -1,0 +1,46 @@
+# gentar history store — ONE persistent ClickHouse per arena host.
+#
+# Every arena on the host ALSO writes its rows here (redacted, no
+# transcript text — the coordinator guarantees that before a row leaves),
+# so runs outlive their stack and trends span runs and subjects.
+#
+#   - bound to 127.0.0.1 only; read it from elsewhere through an ssh tunnel
+#     (`bin/history tunnel`);
+#   - arena coordinators reach it over the `gentar-history` docker network,
+#     as http://gentar-history:8123 (compose.history.yml joins them);
+#   - three identities, passwords generated on the host by deploy.sh and
+#     never printed: gentar_admin (schema), gentar_writer (insert only),
+#     gentar_reader (select only).
+#
+# What the identities do NOT do: keep out code that runs ON this host. The
+# CI runners here run as the user that owns secrets/ and are in the docker
+# group, so a job can read those files or `docker exec` into the store. The
+# boundary for that is the run policy — only trusted code reaches the
+# self-hosted runner (PR code stays off it; fork runs need approval) — the
+# same boundary that already guards the bench SSH key during a job. The
+# identities guard the network edge and keep a writer from reading.
+#
+# Deploy / update:  bin/history deploy   (from an engine checkout)
+name: gentar-history
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.3
+    container_name: gentar-history
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GENTAR_HISTORY_PORT:-18199}:8123"
+    volumes:
+      - gentar-history-data:/var/lib/clickhouse
+      - ./users.d:/etc/clickhouse-server/users.d:ro
+    networks: [gentar-history]
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      retries: 30
+volumes:
+  gentar-history-data:
+networks:
+  gentar-history:
+    name: gentar-history

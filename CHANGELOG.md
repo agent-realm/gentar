@@ -22,6 +22,52 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.5.0 — 2026-09-24
+
+**History, and the agent's own numbers.** Runs outlive their stack, and an
+agent suite finally says what the agent did.
+
+### Added
+
+- **The history store** (`history/`, `bin/history`): one persistent
+  ClickHouse per arena host, bound to 127.0.0.1 and reached by arenas over
+  the `gentar-history` docker network. Admin / insert-only writer /
+  select-only reader, passwords generated on the host and moved only by
+  pipe (into a repo's Actions secret, or this Mac's Keychain). The
+  identities guard the network edge, not code running on the arena host
+  (runners share its user and docker group); that trust is the run
+  policy's, as for the bench key. Every run
+  also writes its spans there when `GENTAR_HISTORY_URL` is set — scrubbed
+  of the bench-host settings and declared credentials, transcripts never
+  kept, CI identity attached. Best-effort: a failed write never changes a
+  verdict.
+- **Agent numbers from the session transcript** (`gentar.agentstats`):
+  after each scenario the coordinator reads the bench's Claude Code
+  transcripts back and derives turns, tokens (input, output, cache) and
+  tool calls (duration, errors), into the arena, history and a new report
+  section. Numbers and a closed label set only — a test plants a secret in
+  every text field of a fixture and finds it nowhere in the output. Tool
+  names outside Claude Code's built-ins become `mcp` or `other`.
+- **History dashboard**: `bin/history dashboard` renders trends per suite
+  and subject — runs, pass rate, last result, median duration, agent
+  tokens, tool calls — from the store, through a tunnel, as the reader.
+
+### Changed
+
+- The run dashboard shows agent turns, tokens and tool calls per run,
+  replacing the self-report count that was always empty for real agents.
+- **Redaction is one implementation** (`gentar.redaction`), shared by
+  `bin/redact` and the history writer, and now also replaces any 8+
+  character prefix of a secret: a report's command column or a span's
+  detail cap can cut a value, and its head used to survive
+  (claude-playbooks, scanning its public artifacts).
+
+### Fixed
+
+- **The dashboard could be made to run a step's output as markup.** Text
+  from runs is now escaped, and the embedded data cannot close its
+  `<script>` block — the page can be a public artifact someone opens.
+
 ## 0.4.2 — 2026-09-23
 
 **Every run leaves a dashboard** — the pilot's ask since the morning.

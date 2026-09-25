@@ -8,6 +8,7 @@ verdict: 0 pass · 1 fail · 2 usage/config refusal. Dispatches Python
 builtins (smoke) and TOML scenarios (oracle runner)."""
 
 import os
+import shlex
 import time
 
 from gentar.benchhost import BenchHost, make_bench
@@ -16,7 +17,7 @@ from gentar.oracle import run_oracle
 from gentar.provenance import run_attrs
 from gentar.report import RunReport
 from gentar.scenarios import REGISTRY, known_names
-from gentar.spans import Spans, new_run_id
+from gentar.spans import Spans, agent_rows, new_run_id
 from gentar.toml_scenario import (TomlScenario, credentials_satisfied,
                                   dropped_credentials, satisfied_group,
                                   load_dir)
@@ -69,6 +70,43 @@ def _spent_so_far(spans: Spans) -> int:
         return sum(int(v) for v in result.result_columns[0])
     except Exception:
         return 0
+
+
+# Where Claude Code keeps session transcripts: <config dir>/projects/<cwd>/
+# <session>.jsonl, the config dir being ~/.claude or a playbook's own.
+_TRANSCRIPTS = ("find \"$HOME\" -maxdepth 7 -path '*/projects/*' -name '*.jsonl' "
+                "-size -20M 2>/dev/null | head -20")
+
+
+def _collect_agent_stats(bench: BenchHost, run_id: str, spans: Spans,
+                         subject: str, name: str, report) -> None:
+    """Numbers from the agent's session transcript(s), if an agent ran:
+    tokens, turns, tool calls — into the arena, history and the report.
+    The transcript text is read into memory here and dropped; agentstats
+    returns numbers and labels only. Best-effort, never the verdict."""
+    try:
+        rc, listing = bench.exec(run_id, _TRANSCRIPTS, timeout=60)
+        paths = [p for p in listing.splitlines() if p.strip()] if rc == 0 else []
+        if not paths:
+            return
+        texts = []
+        for p in paths:
+            rc, text = bench.exec(run_id, f"cat {shlex.quote(p)}", timeout=120)
+            if rc == 0:
+                texts.append(text)
+        from gentar.agentstats import extract
+        turns, tools, totals = extract(texts)
+        del texts
+        if not turns:
+            return
+        agent_rows(spans, subject, run_id, name, turns, tools)
+        report.agent_stats = totals
+        spans.emit(subject, run_id, name, "agent.stats", "pass",
+                   attrs={k: str(v) for k, v in totals.items()},
+                   detail=f"{totals['turns']} turns, {totals['tool_calls']} tool calls, "
+                          f"{totals['input_tokens'] + totals['output_tokens']} tokens")
+    except Exception as exc:
+        print(f"warn: agent stats not collected (non-fatal): {type(exc).__name__}")
 
 
 def _relay_agent_spans(bench: BenchHost, run_id: str, spans: Spans,
@@ -259,6 +297,10 @@ def run(name: str, cfg: Config | None = None) -> int:
         _write_report(report, cfg)
         return 2
     spans = Spans(cfg)
+    # History keeps this run; scrub the values of what it declared.
+    if scenario:
+        spans.history.redact_values(
+            [(n, os.environ.get(n, "")) for n in scenario.credential_names()])
     run_id = new_run_id(cfg.name_prefix)
     report = RunReport(
         scenario=name, run_id=run_id, subject=subject,
@@ -303,6 +345,7 @@ def run(name: str, cfg: Config | None = None) -> int:
                    attrs={"verdict": "fail"}, detail=str(exc)[:2000])
     finally:
         _relay_agent_spans(bench, run_id, spans, cfg, subject, name)
+        _collect_agent_stats(bench, run_id, spans, subject, name, report)
         status = "pass" if verdict == 0 else "fail"
         report.mark(status, verdict)
         report.summary = summary
