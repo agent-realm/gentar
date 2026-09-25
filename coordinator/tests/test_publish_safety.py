@@ -157,7 +157,8 @@ class RedactTest(unittest.TestCase):
         # behind a letter or digit that is not part of its token
         for text in ("url=%2F10.10.10.5", "user=%40polat", "\x1b[31m10.10.10.5\x1b[0m",
                      "\x1b[1;38;5;208mpolat", "user_polat", "polat_ssh",
-                     "\\x0a10.10.10.5", "\\01210.10.10.5", "&quot10.10.10.5", "&#39;polat"):
+                     "\\x0a10.10.10.5", "\\01210.10.10.5", "&quot10.10.10.5", "&#39;polat",
+                     "ramazan%2Fpolat%2Frepo", "ssh%3A%2F%2Fuser%4010.10.10.5%2Fx"):  # Codex
             _, out = self.run_redact(text, GENTAR_REDACT_NAMES="GENTAR_BENCH_USER GENTAR_BENCH_HOST",
                                      GENTAR_BENCH_USER="polat", GENTAR_BENCH_HOST="10.10.10.5")
             self.assertNotIn("10.10.10.5", out, text)
