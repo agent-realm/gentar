@@ -130,6 +130,35 @@ def credentials_satisfied(groups: list[list[str]], get) -> bool:
     return satisfied_group(groups, get) is not None
 
 
+def _check_judge(path, i, j) -> None:
+    """A semantic expect: one narrow yes/no question about the screen."""
+    where = f"{path}: driver.turns[{i}].judge"
+    if not isinstance(j, dict):
+        raise ScenarioError(f"{where} must be a table: {{ question = \"…\", p_min = 0.9 }}")
+    unknown = set(j) - {"question", "true", "false", "p_min", "p_max_no", "hold", "every"}
+    if unknown:
+        raise ScenarioError(f"{where}: unknown key(s) {sorted(unknown)}")
+    if not isinstance(j.get("question"), str) or not j["question"].strip():
+        raise ScenarioError(f"{where}.question must be a non-empty string")
+    for k in ("true", "false"):
+        if k in j and not isinstance(j[k], str):
+            raise ScenarioError(f"{where}.{k} must be a string (what counts as {k})")
+    p_min = j.get("p_min", 0.9)
+    p_max_no = j.get("p_max_no", 0.2)
+    if not isinstance(p_min, (int, float)) or not 0.5 < p_min <= 1:
+        raise ScenarioError(f"{where}.p_min must be in (0.5, 1]")
+    if not isinstance(p_max_no, (int, float)) or not 0 <= p_max_no < p_min:
+        raise ScenarioError(f"{where}.p_max_no must be in [0, p_min)")
+    hold = j.get("hold", 2)
+    if not isinstance(hold, int) or isinstance(hold, bool) or hold < 2:
+        raise ScenarioError(
+            f"{where}.hold must be an integer >= 2 — a judged turn never passes on a "
+            f"single yes (identical requests can get different answers)")
+    every = j.get("every", 3)
+    if not isinstance(every, (int, float)) or every <= 0:
+        raise ScenarioError(f"{where}.every must be a positive number of seconds")
+
+
 class TomlScenario:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -145,6 +174,30 @@ class TomlScenario:
         # container bench (template = image ref; default per config
         # otherwise, i.e. the sbx tier).
         self.bench = sc.get("bench")
+        # What kind of data the scenario touches. "synthetic" is the only
+        # value that lets a semantic turn send a screen to a judge (pilot,
+        # 2026-09-26); anything else, or nothing, keeps every screen inside
+        # the arena. Checked by the coordinator before any bench exists.
+        self.data = sc.get("data", "")
+        if not isinstance(self.data, str):
+            raise ScenarioError(f"{path}: scenario.data must be a string (\"synthetic\")")
+        # The judge key is the COORDINATOR's; declaring it would forward it
+        # into the bench, where the agent under test could read it.
+        for field in ("credentials", "pass_env"):
+            flat = [n for e in (sc.get(field) or []) for n in (e if isinstance(e, list) else [e])]
+            if "TYPESAFE_API_KEY" in flat:
+                raise ScenarioError(
+                    f"{path}: scenario.{field} names TYPESAFE_API_KEY — the judge key "
+                    f"stays with the coordinator and is never forwarded to a bench")
+        # Judge limits (only read when a turn uses a judge).
+        judge = doc.get("judge") or {}
+        self.judge_max_calls = int(judge.get("max_calls", 200))
+        self.judge_max_input_tokens = int(judge.get("max_input_tokens", 500_000))
+        self.judge_lines = int(judge.get("lines", 40))
+        if not 1 <= self.judge_lines <= 40:
+            raise ScenarioError(
+                f"{path}: judge.lines must be 1..40 — the pilot's egress rule sends at "
+                f"most the last 40 content rows of the screen")
         # Entries are ALTERNATIVE providers; an entry may be a single env
         # var name or a LIST of names that must travel together — a token
         # without its endpoint is half a provider (PR #26 review: the old
@@ -194,7 +247,13 @@ class TomlScenario:
                 raise ScenarioError(
                     f"{path}: driver.turns[{i}].type must be "
                     f"answer|expect|pick|abort|key")
-            if kind in ("answer", "expect") and not t.get(("prompt" if kind == "answer" else "pattern")):
+            if kind == "expect" and ("pattern" in t) == ("judge" in t):
+                raise ScenarioError(
+                    f"{path}: driver.turns[{i}] (expect) needs exactly one of "
+                    f"`pattern` (a regex) or `judge` (a semantic question)")
+            if kind == "expect" and "judge" in t:
+                _check_judge(path, i, t["judge"])
+            elif kind in ("answer", "expect") and not t.get(("prompt" if kind == "answer" else "pattern")):
                 raise ScenarioError(f"{path}: driver.turns[{i}] missing prompt/pattern")
             if kind == "pick" and not t.get("label"):
                 raise ScenarioError(f"{path}: driver.turns[{i}] missing label")
@@ -223,6 +282,10 @@ class TomlScenario:
         for i, c in enumerate(self.commands):
             if "command" not in c:
                 raise ScenarioError(f"{path}: verify.commands[{i}] missing command")
+
+    @property
+    def uses_judge(self) -> bool:
+        return any("judge" in t for t in self.turns)
 
     def describe(self) -> str:
         parts = [f"subject={self.subject or '-'}", f"agent={self.agent}",

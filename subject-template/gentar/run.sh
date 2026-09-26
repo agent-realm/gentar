@@ -340,6 +340,17 @@ EOF
   return 1
 }
 
+# 0 when the suite has a judged turn (a semantic expect).
+judged() {
+  grep -Eq '^[[:space:]]*(\[driver\.turns\.judge\]|judge[[:space:]]*=)' "$1"
+}
+# 0 when the suite has no judged turn, or the judge key is set. A judged
+# suite without it would only refuse (exit 2).
+judge_ready() {
+  judged "$1" || return 0
+  [ -n "${TYPESAFE_API_KEY:-}" ]
+}
+
 # --sweep: every suite this environment can run. A suite whose
 # credentials are absent is SKIPPED with its reason, not run into an
 # exit-2 refusal that would turn the whole sweep red for a key nobody
@@ -352,16 +363,31 @@ if [ "$SWEEP" = 1 ]; then
   for f in "$HERE"/scenarios/*.toml; do
     [ -f "$f" ] || continue
     s=$(basename "$f" .toml)
-    if credentials_present "$f"; then
-      runnable="$runnable $s"
-    else
+    if ! credentials_present "$f"; then
       echo "skipping $s — no credential group of it is fully set" >&2
+    elif [ "${GITHUB_EVENT_NAME:-}" = pull_request ] && judged "$f"; then
+      echo "skipping $s — judged suites never run on a pull request (phase 2 only)" >&2
+    elif ! judge_ready "$f"; then
+      echo "skipping $s — it has judged turns and TYPESAFE_API_KEY is not set" >&2
+    else
+      runnable="$runnable $s"
     fi
   done
   [ -n "$runnable" ] || { echo "no runnable suites in gentar/scenarios" >&2; exit 2; }
   echo "sweep:$runnable" >&2
   set -- $runnable
   SCENARIO=$1; shift
+fi
+# A judged suite sends screens to a judge and gates on probabilities: never
+# on a pull request, whatever picked it (a policy, no policy, a PR's own
+# `gentar:` line). Enforced here, where suites run, not only in plan.py.
+if [ "${GITHUB_EVENT_NAME:-}" = pull_request ]; then
+  for s in "$SCENARIO" "$@"; do
+    if [ -f "$HERE/scenarios/$s.toml" ] && judged "$HERE/scenarios/$s.toml"; then
+      echo "refusing $s — judged suites never run on a pull request (phase 2 only)" >&2
+      exit 2
+    fi
+  done
 fi
 ARENA=${GENTAR_DIR:-$HERE/.arena}
 # Engine version. A RELEASE TAG by default, never a moving branch: the
@@ -372,7 +398,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.6.4}
+REF=${GENTAR_REF:-v0.7.0}
 
 # --review: has this repo outgrown its suites?
 #
@@ -833,7 +859,7 @@ done
 # file is passed through the engine's bin/redact, which replaces the VALUES
 # of these variables: the bench-host identity, plus every credential a
 # suite here declares.
-REDACT_NAMES="GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_JUMP GENTAR_TART_HOST GENTAR_TART_USER GENTAR_DAYTONA_API_KEY GENTAR_OSB_API_KEY GENTAR_OTLP_KEY GENTAR_OTLP_EXPORT"
+REDACT_NAMES="GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_JUMP GENTAR_TART_HOST GENTAR_TART_USER GENTAR_DAYTONA_API_KEY GENTAR_OSB_API_KEY GENTAR_OTLP_KEY GENTAR_OTLP_EXPORT TYPESAFE_API_KEY"
 for f in ${SCENARIO_FILES[@]+"${SCENARIO_FILES[@]}"}; do
   REDACT_NAMES="$REDACT_NAMES $(credential_groups "$f" | tr '\n' ' ')"
 done

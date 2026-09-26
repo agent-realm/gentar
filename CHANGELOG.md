@@ -22,6 +22,34 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.7.0 — 2026-09-26
+
+**Semantic turns.** A regex that breaks on rewording can be replaced by a
+typed judgment of the screen, under the pilot's egress rule. Minor bump: the
+scenario schema gains `[scenario] data`, `[judge]` and `[driver.turns.judge]`,
+and the kit gains judged-suite rules (AGENTS.md decision 7).
+
+### Added
+
+- **Semantic turns — a judged `expect`** (step 1 of the semantic-suites
+  design). `[driver.turns.judge]` asks TypeSafe (`jev-1.13.0`, pinned) a
+  yes/no question about the screen, and the turn needs P(yes) >= `p_min`
+  on `hold` consecutive polls. It never presses anything, and the danger
+  gate is checked first.
+  - **Synthetic data only:** `[scenario] data = "synthetic"` is required,
+    and anything else is refused (exit 2) before a bench exists.
+  - **Only the scrubbed current screen is sent,** and the `judge.call`
+    span keeps a hash, not the text.
+  - **The key (`TYPESAFE_API_KEY`) stays with the coordinator.** It is
+    never forwarded to a bench, and the loader refuses it in
+    `credentials` or `pass_env`.
+  - **Per-run call and token caps.**
+  - **`bin/judge-eval`** measures judged turns against fixture screens.
+  - **Kit:** `plan.py` keeps judged suites out of phase 1 and lints for
+    fixtures and the synthetic declaration. `--sweep` skips a judged suite
+    without the key, and the workflow passes the secret.
+  - **`semantic-demo`** is the engine's example.
+
 ## 0.6.4 — 2026-09-26
 
 ### Fixed

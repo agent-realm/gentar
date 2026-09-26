@@ -14,7 +14,7 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.6.4` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.7.0` |
 
 ## Quickstart (local)
 
@@ -123,6 +123,24 @@ GENTAR_CLICKHOUSE_HOST_PORT=8123 python3 gentar/.arena/dashboard/generate.py \
 Until the first suite creates its tables it says it is waiting — not an
 error. The ClickHouse goes with the arena, so after `--down` only the
 rendered file is left.
+
+## Semantic suites (optional)
+
+A judged `expect` asks TypeSafe a yes/no question about the screen instead
+of matching a regex. See the engine README, *Semantic turns*. Three rules
+the kit enforces:
+
+- the scenario declares `[scenario] data = "synthetic"`, and the engine
+  refuses the run otherwise;
+- each judged turn has 3+ yes and 3+ no screens under
+  `gentar/judge-fixtures/<scenario>/<turn>/{yes,no}/`.
+  `with-secret TYPESAFE_API_KEY=<ref> -- python3 gentar/.arena/bin/judge-eval gentar/scenarios gentar/judge-fixtures`
+  measures them (python 3.11+);
+- judged suites run in phase 2 only, and `plan.py` drops them from any
+  phase-1 pick.
+
+The key is the repository secret `TYPESAFE_API_KEY`. Without it, `--sweep`
+skips judged suites by name.
 
 ## When this repo's code changes
 

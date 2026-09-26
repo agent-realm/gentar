@@ -21,6 +21,7 @@ import contextvars
 import datetime
 import hashlib
 import json
+import os
 import secrets
 import uuid
 
@@ -121,7 +122,8 @@ class Redactor:
         self._base_secrets = [(n, v) for n, v in (
             ("GENTAR_BENCH_HOST", cfg.bench_host), ("GENTAR_BENCH_USER", cfg.bench_user),
             ("GENTAR_BENCH_JUMP", cfg.bench_jump), ("GENTAR_TART_HOST", cfg.tart_host),
-            ("GENTAR_TART_USER", cfg.tart_user)) if v]
+            ("GENTAR_TART_USER", cfg.tart_user),
+            ("TYPESAFE_API_KEY", os.environ.get("TYPESAFE_API_KEY", ""))) if v]
         self._scrub = scrubber(self._base_secrets)
 
     def redact_values(self, named_values) -> None:

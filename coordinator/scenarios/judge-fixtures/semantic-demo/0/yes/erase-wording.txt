@@ -1,0 +1,8 @@
+demo-cli v2.1.0
+
+ Projects
+   alpha-sandbox      synthetic   1 files
+   beta-sandbox       synthetic   3 files
+
+ ⚠ beta-sandbox will be permanently erased (3 files).
+ Are you sure? Enter the name beta-sandbox to continue: 

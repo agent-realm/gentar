@@ -1,0 +1,7 @@
+demo-cli v2.1.0
+
+ Projects
+   alpha-sandbox      synthetic   1 files
+   beta-sandbox       synthetic   3 files
+
+ Rename project "beta-sandbox" to (loading...)
