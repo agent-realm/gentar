@@ -18,21 +18,26 @@ class TurnFailure(AssertionError):
     pass
 
 
+def make_judge(scenario, spans: Spans, subject: str, run_id: str):
+    """The run's one judge (judged turns, a goal pilot, soft verify)."""
+    # The coordinator already refused a non-synthetic scenario or a missing
+    # key before any bench existed; Judge re-checks both.
+    from gentar.judge import KEY_NAME, Judge
+    return Judge(scenario, os.environ.get(KEY_NAME, ""), spans.redactor.scrub,
+                 spans, subject, run_id,
+                 max_calls=scenario.judge_max_calls,
+                 max_input_tokens=scenario.judge_max_input_tokens,
+                 lines=scenario.judge_lines)
+
+
 def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
               subject: str = "arena",
               env: dict[str, str] | None = None,
-              report=None) -> str:
+              report=None, judge=None, state: dict | None = None) -> str:
     name = scenario.name
-    judge = None
-    if getattr(scenario, "uses_judge", False):
-        # The coordinator already refused a non-synthetic scenario or a
-        # missing key before any bench existed; Judge re-checks both.
-        from gentar.judge import KEY_NAME, Judge
-        judge = Judge(scenario, os.environ.get(KEY_NAME, ""), spans.redactor.scrub,
-                      spans, subject, run_id,
-                      max_calls=scenario.judge_max_calls,
-                      max_input_tokens=scenario.judge_max_input_tokens,
-                      lines=scenario.judge_lines)
+    if judge is None and getattr(scenario, "uses_judge", False) and (
+            getattr(scenario, "goal", "") or any("judge" in t for t in scenario.turns)):
+        judge = make_judge(scenario, spans, subject, run_id)
     driver = PtyDriver(bench, run_id)
     driver.start(scenario.driver_command, env=env)
     spans.emit(subject, run_id, name, "driver.start",
@@ -124,6 +129,13 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                 "produce EOF")
         return f"driver ok: {len(scenario.turns)} turns"
     finally:
+        if state is not None:
+            # The final screen, for soft [[verify.judge]] checks. Never
+            # stored: it lives only in this run's memory.
+            try:
+                state["screen"] = driver.screen()
+            except Exception:
+                state["screen"] = ""
         spans.emit(subject, run_id, name, "driver.transcript",
                    detail=driver.transcript[-8000:])
         if report is not None:

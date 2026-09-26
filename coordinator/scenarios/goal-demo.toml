@@ -105,9 +105,21 @@ id = "cancel"
 key = "escape"
 when = "a removal prompt is open for a project that must NOT be deleted"
 
+[semantic]
+# The verdict over three fresh benches: two of three must pass. The rule is
+# passes/runs >= pass_rate_min exactly: 2/3 = 0.667, so 0.66 (not 0.67,
+# which would need 3/3).
+runs = 3
+pass_rate_min = 0.66
+
 [[verify.commands]]
 command = 'grep -qx a "$WORKSPACE_DIR/projects/alpha-sandbox/readme.txt" && echo alpha-kept'
 contains = "alpha-kept"
+
+[[verify.judge]]
+# Soft: reported only, never the verdict (reality above decides).
+question = "Does `screen` show that beta-sandbox was removed and alpha-sandbox is still listed?"
+p_min = 0.9
 
 [[verify.commands]]
 command = 'test ! -e "$WORKSPACE_DIR/projects/beta-sandbox" && echo beta-gone'

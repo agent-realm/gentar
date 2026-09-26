@@ -420,6 +420,45 @@ trap (alpha's deletion prompt → `cancel`, 1.00). Live, it went
 `select_down` (0.93), `open_delete`, `type_target`, `done` (1.00), in 8
 judge calls.
 
+### Rates and soft judgments
+
+A judged suite can be judged **over N runs**, each on a fresh bench:
+
+```toml
+[semantic]
+runs = 3              # 1..20
+pass_rate_min = 0.67  # passes/runs needed for exit 0
+```
+
+- A refusal (exit 2) ends it at once, since it would refuse every time.
+- It **stops early** once the minimum is out of reach: further runs would
+  spend judge calls on a known verdict.
+- Every run writes its own report, and a `semantic.rate` span records the
+  passes.
+- **Only judged suites** may declare a rate. A deterministic suite must
+  pass every time, and a rate would only hide its flakes.
+- The rule is exactly `passes / runs >= pass_rate_min`: for 2 of 3 write
+  `0.66`, not `0.67` (2/3 = 0.667).
+- Judge caps (`[judge] max_calls`, `max_input_tokens`) are **per run**, so
+  N runs may spend up to N times the caps, with N ≤ 20.
+- A quarantined suite is skipped once. It doesn't "pass" N times.
+
+A **soft judgment** asks a yes/no question about the driver's **final**
+screen, after reality has passed:
+
+```toml
+[[verify.judge]]
+question = "Does `screen` show that beta-sandbox was removed and alpha-sandbox is still listed?"
+p_min = 0.9
+```
+
+- It is **reported only**: *pass*, *fail*, *undecided* or *unavailable*,
+  in the report's "Soft judgments" section and a `judge.soft` span.
+- A run with a soft check that isn't a clear yes still passes, marked
+  "judge-flagged".
+- It never runs after a reality failure, so it can never rescue one.
+- It follows the same egress rule as every judged turn.
+
 Today the agent under the pty is `claude-code`, pinned by
 `bench-template/VERSION` and baked into the bench template so no run
 depends on a registry at test time. The driver itself is agent-agnostic;

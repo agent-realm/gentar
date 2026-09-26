@@ -342,9 +342,11 @@ EOF
 
 # 0 when the suite has a judged turn (a semantic expect).
 judged() {
-  # Bare or quoted keys ("goal" = ..., 'judge' = ...): TOML allows both, and
-  # a miss here would let a judged suite run on a pull request (Codex).
-  grep -Eq "^[[:space:]]*(\\[[[:space:]]*driver[[:space:]]*\\.[[:space:]]*turns[[:space:]]*\\.[[:space:]]*[\"']?judge[\"']?[[:space:]]*\\]|[\"']?(judge|goal)[\"']?[[:space:]]*=)" "$1"
+  # Deliberately broad: any non-comment line where `judge` or `goal` is a key
+  # segment — bare, quoted or dotted, in a key or a table header
+  # ([["verify"."judge"]], driver.goal = ...). Over-matching only skips a
+  # suite on a pull request; under-matching would run a judged one (Codex).
+  grep -Eq "^[^#]*(^|[^A-Za-z0-9_])[\"']?(judge|goal)[\"']?[[:space:]]*(=|\\])" "$1"
 }
 # 0 when the suite has no judged turn, or the judge key is set. A judged
 # suite without it would only refuse (exit 2).
@@ -400,7 +402,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.7.0}
+REF=${GENTAR_REF:-v0.8.0}
 
 # --review: has this repo outgrown its suites?
 #

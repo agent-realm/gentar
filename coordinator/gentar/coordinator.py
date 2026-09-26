@@ -146,8 +146,79 @@ def _relay_agent_spans(bench: BenchHost, run_id: str, spans: Spans,
 def run(name: str, cfg: Config | None = None) -> int:
     """Run one scenario; every terminal path — pass, fail, refusal,
     quarantine — then flushes its trace (best-effort, never the verdict)."""
+    cfg = cfg or Config()
+    runs, rate_min = _rate_plan(name, cfg)
+    if runs <= 1:
+        with exporting():
+            return _run(name, cfg)
+    return _run_rate(name, cfg, runs, rate_min)
+
+
+def _rate_plan(name: str, cfg: Config) -> tuple:
+    """(runs, pass_rate_min) from the scenario's [semantic] table; (1, 1.0)
+    for a builtin, an unknown name (let _run refuse it) or no table."""
+    try:
+        _, scenario = _resolve(name, cfg)
+    except RunError:
+        return 1, 1.0
+    if scenario is None or name in cfg.quarantine:
+        return 1, 1.0                   # quarantine skips once, it does not "pass" N times
+    return int(getattr(scenario, "semantic_runs", 1)), float(getattr(scenario, "pass_rate_min", 1.0))
+
+
+def _rate_budget_refusal(name: str, cfg: Config, runs: int) -> str:
+    """The WHOLE rate's spend, checked before the first bench (Codex): one
+    repetition within the cap and the next refused would be an exit 2 after
+    a bench already existed."""
+    try:
+        _, scenario = _resolve(name, cfg)
+    except RunError:
+        return ""
+    each = scenario.budget_tokens if scenario else 0
+    if not (cfg.budget_cap and each):
+        return ""
     with exporting():
-        return _run(name, cfg)
+        already = _spent_so_far(Spans(cfg))
+    if already + each * runs > cfg.budget_cap:
+        return (f"budget guard: {runs} runs x {each} units would spend {each * runs}, "
+                f"{already} already burned, cap {cfg.budget_cap} (refusing before any bench exists)")
+    return ""
+
+
+def _run_rate(name: str, cfg: Config, runs: int, rate_min: float) -> int:
+    """A judged suite's verdict over N runs, each on a fresh bench: exit 0
+    iff passes/N >= pass_rate_min. A refusal (exit 2) ends it at once — it
+    would refuse every time. Stops early once the minimum is out of reach
+    (every further run is judge calls spent on a known verdict)."""
+    import math
+    refusal = _rate_budget_refusal(name, cfg, runs)
+    if refusal:
+        print(f"Error: {refusal}")
+        return 2
+    need = math.ceil(rate_min * runs - 1e-9)
+    passes = done = 0
+    for i in range(runs):
+        print(f"semantic run {i + 1}/{runs} of {name}")
+        with exporting():
+            rc = _run(name, cfg)
+        if rc == 2:
+            return 2
+        done += 1
+        passes += rc == 0
+        if passes + (runs - done) < need:
+            print(f"semantic rate: {passes}/{done} so far — {need}/{runs} is out of reach, stopping")
+            break
+    rate = passes / runs
+    ok = passes >= need
+    print(f"semantic rate of {name}: {passes}/{runs} passed ({rate:.2f}; needs {rate_min:.2f}) "
+          f"— {'PASS' if ok else 'FAIL'}")
+    with exporting():
+        Spans(cfg).emit(ARENA_SUBJECT, new_run_id(cfg.name_prefix), name, "semantic.rate",
+                        "pass" if ok else "fail",
+                        attrs={"runs": str(runs), "run": str(done), "passes": str(passes),
+                               "pass_rate_min": str(rate_min)},
+                        detail=f"{passes}/{runs} passed")
+    return 0 if ok else 1
 
 
 def _run(name: str, cfg: Config | None = None) -> int:

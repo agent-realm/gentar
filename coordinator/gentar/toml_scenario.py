@@ -130,6 +130,23 @@ def credentials_satisfied(groups: list[list[str]], get) -> bool:
     return satisfied_group(groups, get) is not None
 
 
+def _check_soft_judge(path, i, j) -> None:
+    """[[verify.judge]]: a yes/no question about the final screen, reported only."""
+    where = f"{path}: verify.judge[{i}]"
+    if not isinstance(j, dict):
+        raise ScenarioError(f"{where} must be a table")
+    unknown = set(j) - {"question", "true", "false", "p_min", "p_max_no"}
+    if unknown:
+        raise ScenarioError(f"{where}: unknown key(s) {sorted(unknown)}")
+    if not isinstance(j.get("question"), str) or not j["question"].strip():
+        raise ScenarioError(f"{where}.question must be a non-empty string")
+    p_min, p_no = j.get("p_min", 0.9), j.get("p_max_no", 0.2)
+    if not isinstance(p_min, (int, float)) or not 0.5 < p_min <= 1:
+        raise ScenarioError(f"{where}.p_min must be in (0.5, 1]")
+    if not isinstance(p_no, (int, float)) or not 0 <= p_no < p_min:
+        raise ScenarioError(f"{where}.p_max_no must be in [0, p_min)")
+
+
 def _check_judge(path, i, j) -> None:
     """A semantic expect: one narrow yes/no question about the screen."""
     where = f"{path}: driver.turns[{i}].judge"
@@ -287,6 +304,8 @@ class TomlScenario:
         verify = doc.get("verify") or {}
         self.files = list(verify.get("files", []))
         self.commands = list(verify.get("commands", []))
+        # Soft judgments of the final screen: reported, never the verdict.
+        self.judge_checks = list(verify.get("judge", []))
 
         driver = doc.get("driver") or {}
         self.driver_command = driver.get("command")
@@ -301,6 +320,11 @@ class TomlScenario:
         self.goal_timeout = driver.get("timeout", 300)
         if self.goal or self.actions:
             _check_goal(path, self)
+        # Rates over N runs — for judged suites only: a deterministic suite
+        # must pass every time, so a rate would only hide its flakes.
+        semantic = doc.get("semantic") or {}
+        self.semantic_runs = semantic.get("runs", 1)
+        self.pass_rate_min = semantic.get("pass_rate_min", 1.0)
 
         # Spend ceiling in "spend units" (tokens today). 0 = unbudgeted.
         budget = doc.get("budget") or {}
@@ -346,6 +370,20 @@ class TomlScenario:
                 raise ScenarioError(
                     f"{path}: driver.turns[{i}].optional must be a boolean "
                     f"(skip the turn when its screen never shows)")
+        for i, j in enumerate(self.judge_checks):
+            _check_soft_judge(path, i, j)
+        if self.judge_checks and not self.driver_command:
+            raise ScenarioError(f"{path}: verify.judge needs a [driver] — it judges the final screen")
+        if (isinstance(self.semantic_runs, bool) or not isinstance(self.semantic_runs, int)
+                or not 1 <= self.semantic_runs <= 20):
+            raise ScenarioError(f"{path}: semantic.runs must be an integer 1..20")
+        if (isinstance(self.pass_rate_min, bool) or not isinstance(self.pass_rate_min, (int, float))
+                or not 0 < self.pass_rate_min <= 1):
+            raise ScenarioError(f"{path}: semantic.pass_rate_min must be in (0, 1]")
+        if (self.semantic_runs > 1 or self.pass_rate_min < 1) and not self.uses_judge:
+            raise ScenarioError(
+                f"{path}: [semantic] runs / pass_rate_min are for judged suites only — a "
+                f"deterministic suite must pass every time")
         for i, f in enumerate(self.files):
             if "path" not in f:
                 raise ScenarioError(f"{path}: verify.files[{i}] missing path")
@@ -355,7 +393,8 @@ class TomlScenario:
 
     @property
     def uses_judge(self) -> bool:
-        return bool(self.goal) or any("judge" in t for t in self.turns)
+        return (bool(self.goal) or bool(self.judge_checks)
+                or any("judge" in t for t in self.turns))
 
     def describe(self) -> str:
         parts = [f"subject={self.subject or '-'}", f"agent={self.agent}",

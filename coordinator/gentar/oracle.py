@@ -123,11 +123,15 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
               report=report)
 
     # 3b. Interactive driver turns (scripted today; agents phase 6).
+    judge, final = None, {}
     if scenario.driver_command:
-        from gentar.scripted import run_turns
+        from gentar.scripted import make_judge, run_turns
+        if getattr(scenario, "uses_judge", False):
+            judge = make_judge(scenario, spans, subject, run_id)
         summary = run_turns(scenario, bench, run_id, spans, subject=subject,
-                            env=run_env(scenario), report=report)
-        if not scenario.files and not scenario.commands:
+                            env=run_env(scenario), report=report,
+                            judge=judge, state=final)
+        if not scenario.files and not scenario.commands and not scenario.judge_checks:
             return summary
 
     # 4. Verdicts from reality.
@@ -153,4 +157,38 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
             + "; ".join(f"{r.name}: {r.detail}" for r in results if not r.ok))
 
     ok = sum(1 for r in results)
-    return f"oracle ok: {ok}/{len(results)} assertions passed"
+    flagged = _soft_judgments(scenario, judge, final.get("screen", ""), spans,
+                              subject, run_id, report)
+    note = f" (judge-flagged: {flagged} soft check(s) not a clear yes)" if flagged else ""
+    return f"oracle ok: {ok}/{len(results)} assertions passed{note}"
+
+
+def _soft_judgments(scenario, judge, screen, spans, subject, run_id, report) -> int:
+    """[[verify.judge]] after reality has passed: yes / no / undecided on the
+    final screen. REPORTED ONLY — a soft check never changes the verdict
+    (reality decides) and never rescues a failure (it only runs after a
+    pass). A judge that cannot answer is recorded, not fatal."""
+    if not scenario.judge_checks or judge is None:
+        return 0
+    from gentar.judge import JudgeUnavailable
+    flagged = 0
+    for i, j in enumerate(scenario.judge_checks):
+        try:
+            p = judge.noul(screen, j["question"], true=j.get("true", ""),
+                           false=j.get("false", ""), turn=f"verify.{i}")
+            status = ("pass" if p >= float(j.get("p_min", 0.9))
+                      else "fail" if p <= float(j.get("p_max_no", 0.2)) else "undecided")
+            detail = f"P(yes)={p:.2f}"
+        except JudgeUnavailable as exc:
+            status, detail = "unavailable", str(exc)
+        except Exception as exc:                    # reported only: nothing here may fail a run
+            status, detail = "unavailable", f"judge error: {type(exc).__name__}"
+        flagged += status != "pass"
+        # The spans table's status is an Enum (running/pass/fail/skip/error):
+        # map the soft outcome onto it, keep the outcome itself as an attr.
+        spans.emit(subject, run_id, scenario.name, "judge.soft",
+                   {"pass": "pass", "fail": "fail", "undecided": "skip"}.get(status, "error"),
+                   attrs={"question": j["question"][:200], "soft": status}, detail=detail)
+        if report is not None:
+            report.soft.append({"question": j["question"], "status": status, "detail": detail})
+    return flagged
