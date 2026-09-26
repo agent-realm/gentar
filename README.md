@@ -347,6 +347,79 @@ of phase 1 (a PR never runs one), and requires `data = "synthetic"`.
 good" and "retype the name", never "delete" or "confirm", and the trap
 fixture (the same wording for the *other* project) scores 0.02.
 
+### Goal pilots — the judge drives toward a goal
+
+A goal pilot gets a **goal** and a **closed set of actions** instead of a
+turn list. On each poll the judge picks one action, `wait`, `done` or
+`stuck` from what the current screen allows:
+
+```toml
+[scenario]
+data = "synthetic"
+
+[driver]
+command = 'python3 "$WORKSPACE_DIR/demo-tui.py"'
+goal = "Delete the project beta-sandbox. Leave alpha-sandbox untouched."
+max_steps = 12        # actions, not polls
+p_act = 0.8           # the pick's probability needed ...
+every = 2             # ... on two polls running (seconds between polls)
+timeout = 240
+
+[[driver.actions]]
+id = "open_delete"
+send = "d"            # literal text; the judge never writes
+when = "the project list is shown and the > cursor is on the project that must be deleted"
+
+[[driver.actions]]
+id = "trust_folder"   # an approving action: explicit and anchored
+key = "enter"
+approve = true
+on = "Do you trust the files in this folder"
+when = "the trust-folder dialog is shown"
+```
+
+- **Rules, in code:**
+  - Before every poll, a screen matching the danger pattern aborts,
+    whatever the judge would say.
+  - An action is taken only when the **same** pick reaches `p_act` on two
+    consecutive polls.
+  - On an approval screen, only a declared `approve = true` action whose
+    `on` regex anchors that very screen is offered. No other action that
+    would answer it (`y`, `yes`, Enter) is offered, and an approving action
+    is never offered off its anchor.
+  - The same screen and pick three times is a loop and fails. So does
+    `stuck`, three low-confidence polls running, `max_steps`, or the
+    timeout.
+- **`done` is not a verdict.** It stops driving, and `[[verify.*]]`
+  decides.
+- **A limit worth knowing:** "an approval screen" means one that the
+  driver's approval pattern recognises. An approval prompt worded so the
+  pattern misses it is, to the code, an ordinary screen, and any declared
+  action may be picked there. The danger gate still applies. So keep
+  Enter-sending actions out of scenarios where an unrecognised approval
+  prompt can appear, or add an `approve = true` action anchored to it.
+- **The same egress rule** applies as for judged turns: synthetic only,
+  the scrubbed current screen, and a hash in the span.
+- **The goal is in the question, not the screen state,** so screen text
+  can't restate it.
+
+**The judge sits behind a backend interface.** A backend declares whether
+its probabilities are `calibrated`, and whether its `egress` is
+`external` or `in-house`. TypeSafe is calibrated and external, and is the
+only backend. An uncalibrated backend is refused wherever a threshold
+decides. Whether a backend may see a scenario's screens is decided in one
+function (`judge.egress_allowed`). Today that means synthetic only, for
+every backend.
+
+**Fixtures:** `judge-fixtures/<scenario>/goal/<expected action>/*.txt`
+holds screens and the action a correct pilot takes on each.
+`bin/judge-eval` asks exactly what a run asks (the same instructions and
+the same offer for that screen) and requires the expected pick at
+`p_act`. `goal-demo` is the engine's example: 6 of 6 right, including the
+trap (alpha's deletion prompt → `cancel`, 1.00). Live, it went
+`select_down` (0.93), `open_delete`, `type_target`, `done` (1.00), in 8
+judge calls.
+
 Today the agent under the pty is `claude-code`, pinned by
 `bench-template/VERSION` and baked into the bench template so no run
 depends on a registry at test time. The driver itself is agent-agnostic;

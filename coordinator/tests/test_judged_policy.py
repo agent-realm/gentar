@@ -83,8 +83,13 @@ class JudgedPolicyTest(unittest.TestCase):
         first = repo / "gentar" / "scenarios" / "first-suite.toml"
         first.write_text(first.read_text().replace('"REPLACE-ME"', '"judgedpr"'))
         (repo / "gentar" / "scenarios" / "semantic.toml").write_text(
-            JUDGED.format(name="semantic", data='data = "synthetic"\nsubject = "judgedpr"'))
-        env = dict(os.environ, GITHUB_EVENT_NAME="pull_request", GENTAR_DIR=str(self.tmp / "no-engine"))
+            '[scenario]\nname = "semantic"\ndata = "synthetic"\nsubject = "judgedpr"\n'
+            '[driver]\ncommand = "d"\n"goal" = "G"\n[[driver.actions]]\nid = "a"\n'
+            'key = "down"\nwhen = "w"\n')          # a QUOTED key (Codex)
+        # No engine to stage: if the guard is ever missing, the run fails fast
+        # at staging instead of building an arena on this machine.
+        env = dict(os.environ, GITHUB_EVENT_NAME="pull_request", GENTAR_DIR=str(self.tmp / "no-engine"),
+                   GENTAR_REPO_URL=str(self.tmp / "no-such-engine"))
         r = subprocess.run(["/bin/bash", "gentar/run.sh", "semantic"], cwd=repo, env=env,
                            capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
@@ -107,6 +112,24 @@ class JudgedPolicyTest(unittest.TestCase):
         self.fixtures()
         problems = "\n".join(self.mod.lint(policy(self.mod, []), self.tmp / "none"))
         self.assertIn('data = "synthetic"', problems)
+
+    def test_a_goal_pilot_is_judged_and_needs_goal_fixtures(self):
+        (self.tmp / "scenarios" / "pilot.toml").write_text(
+            '[scenario]\nname = "pilot"\ndata = "synthetic"\n[driver]\ncommand = "d"\n'
+            'goal = "G"\n[[driver.actions]]\nid = "a"\nkey = "down"\nwhen = "w"\n')
+        self.assertIn("pilot", self.mod.judged_suites())
+        env = {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REPOSITORY": "o/r",
+               "PR_HEAD_REPO": "o/r", "PR_BODY": "gentar: pilot fast"}
+        self.assertEqual(self.mod.plan(env, policy(self.mod, []))["suites"], ["fast"])
+        problems = "\n".join(self.mod.lint(policy(self.mod, []), self.tmp / "none"))
+        self.assertIn("its goal pilot needs", problems)
+        for a, n in (("a", 2), ("done", 1)):
+            d = self.tmp / "judge-fixtures" / "pilot" / "goal" / a
+            d.mkdir(parents=True)
+            for i in range(n):
+                (d / f"s{i}.txt").write_text("screen")
+        problems = "\n".join(self.mod.lint(policy(self.mod, []), self.tmp / "none"))
+        self.assertNotIn("its goal pilot needs", problems)
 
     def test_a_measured_synthetic_phase2_suite_is_clean(self):
         self.fixtures()

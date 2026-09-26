@@ -159,6 +159,66 @@ def _check_judge(path, i, j) -> None:
         raise ScenarioError(f"{where}.every must be a positive number of seconds")
 
 
+GOAL_RESERVED = ("wait", "done", "stuck")
+_ACTION_ID = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
+
+
+def _check_goal(path, sc) -> None:
+    """A goal pilot: one goal, a closed list of actions, nothing else."""
+    from gentar.keys import KEYS
+    where = f"{path}: driver"
+    if not isinstance(sc.goal, str) or not sc.goal.strip():
+        raise ScenarioError(f"{where}.goal must be a non-empty string when actions are declared")
+    if sc.turns:
+        raise ScenarioError(f"{where}: a goal pilot has no scripted turns — use one or the other")
+    if not sc.actions:
+        raise ScenarioError(f"{where}.actions: a goal pilot needs its closed set of actions")
+    for name, v, ok in (("max_steps", sc.max_steps, isinstance(sc.max_steps, int) and 1 <= sc.max_steps <= 200),
+                        ("p_act", sc.p_act, isinstance(sc.p_act, (int, float)) and 0.5 < sc.p_act <= 1),
+                        ("every", sc.goal_every, isinstance(sc.goal_every, (int, float)) and sc.goal_every > 0),
+                        ("timeout", sc.goal_timeout, isinstance(sc.goal_timeout, (int, float)) and sc.goal_timeout > 0)):
+        if isinstance(v, bool) or not ok:
+            raise ScenarioError(f"{where}.{name} is out of range: {v!r}")
+    seen = set()
+    for i, a in enumerate(sc.actions):
+        w = f"{where}.actions[{i}]"
+        if not isinstance(a, dict):
+            raise ScenarioError(f"{w} must be a table")
+        unknown = set(a) - {"id", "when", "send", "key", "then", "approve", "on"}
+        if unknown:
+            raise ScenarioError(f"{w}: unknown key(s) {sorted(unknown)}")
+        aid = a.get("id")
+        if not isinstance(aid, str) or not _ACTION_ID.match(aid) or aid in GOAL_RESERVED:
+            raise ScenarioError(f"{w}.id must be [a-z][a-z0-9_]* and not one of {GOAL_RESERVED}")
+        if aid in seen:
+            raise ScenarioError(f"{w}.id {aid!r} is declared twice")
+        seen.add(aid)
+        if not isinstance(a.get("when"), str) or not a["when"].strip():
+            raise ScenarioError(f"{w}.when must say when the action applies")
+        if ("send" in a) == ("key" in a):
+            raise ScenarioError(f"{w} needs exactly one of `send` (literal text) or `key`")
+        if "send" in a and not isinstance(a["send"], str):
+            raise ScenarioError(f"{w}.send must be a string (typed as given — the judge never writes)")
+        if "key" in a and a["key"] not in KEYS:
+            raise ScenarioError(f"{w}.key must be one of {' '.join(sorted(KEYS))}")
+        if "then" in a and a["then"] != "enter":
+            raise ScenarioError(f"{w}.then may only be \"enter\"")
+        if "approve" in a and not isinstance(a["approve"], bool):
+            raise ScenarioError(f"{w}.approve must be true or false")
+        if a.get("approve"):
+            on = a.get("on")
+            if not isinstance(on, str) or not on.strip():
+                raise ScenarioError(
+                    f"{w}: an approving action needs `on`, a regex anchoring the one screen "
+                    f"it may approve — approval is never offered on an unanticipated screen")
+            try:
+                re.compile(on)
+            except re.error as exc:
+                raise ScenarioError(f"{w}.on is not a valid regex: {exc}") from None
+        elif "on" in a:
+            raise ScenarioError(f"{w}.on is only for approving actions (approve = true)")
+
+
 class TomlScenario:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -231,6 +291,16 @@ class TomlScenario:
         driver = doc.get("driver") or {}
         self.driver_command = driver.get("command")
         self.turns = list(driver.get("turns", []))
+        # A goal-driven pilot: a goal and a CLOSED set of actions; the judge
+        # picks one action per step from the screen (README, Goal pilots).
+        self.goal = driver.get("goal", "")
+        self.actions = list(driver.get("actions", []))
+        self.max_steps = driver.get("max_steps", 25)
+        self.p_act = driver.get("p_act", 0.8)
+        self.goal_every = driver.get("every", 2)
+        self.goal_timeout = driver.get("timeout", 300)
+        if self.goal or self.actions:
+            _check_goal(path, self)
 
         # Spend ceiling in "spend units" (tokens today). 0 = unbudgeted.
         budget = doc.get("budget") or {}
@@ -285,7 +355,7 @@ class TomlScenario:
 
     @property
     def uses_judge(self) -> bool:
-        return any("judge" in t for t in self.turns)
+        return bool(self.goal) or any("judge" in t for t in self.turns)
 
     def describe(self) -> str:
         parts = [f"subject={self.subject or '-'}", f"agent={self.agent}",

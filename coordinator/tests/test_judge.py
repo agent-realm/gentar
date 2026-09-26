@@ -337,3 +337,49 @@ class KeyIsScrubbedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Backend:
+    """A stand-in backend: the interface, nothing else."""
+    name, egress = "stub", "in-house"
+
+    def __init__(self, calibrated=True, answers=None):
+        self.calibrated = calibrated
+        self.answers = answers or {"q": {"type": "choice", "choice": "b",
+                                         "probabilities": {"a": 0.1, "b": 0.9}, "confidence": 0.8}}
+        self.sent = []
+
+    def ask(self, state, questions, attempt):
+        attempt()
+        self.sent.append((state, questions))
+        return {"answers": self.answers, "model": "stub-1", "input_tokens": 10, "request_id": ""}
+
+
+class BackendInterfaceTest(unittest.TestCase):
+
+    def make(self, backend, data="synthetic"):
+        spans = mock.MagicMock()
+        return Judge(Scn(data=data), "", scrubber([]), spans, "sub", "r", backend=backend), spans
+
+    def test_an_uncalibrated_backend_cannot_decide_a_threshold(self):
+        with self.assertRaises(JudgeRefused):
+            self.make(Backend(calibrated=False))
+
+    def test_rule_b_holds_for_any_backend_even_in_house(self):
+        with self.assertRaises(JudgeRefused):
+            self.make(Backend(), data="")
+
+    def test_choose_returns_the_pick_and_every_probability(self):
+        b = Backend()
+        j, spans = self.make(b)
+        choice, probs, conf = j.choose("a screen", "Goal: X. Which action?", {"a": "do a", "b": "do b"})
+        self.assertEqual((choice, probs["b"], conf), ("b", 0.9, 0.8))
+        self.assertEqual(b.sent[0][1]["q"]["type"], "choice")
+        attrs = spans.emit.call_args.kwargs["attrs"]
+        self.assertEqual((attrs["judge.backend"], attrs["judge.egress"]), ("stub", "in-house"))
+        self.assertEqual(attrs["judge.q.choice"], "b")
+
+    def test_the_typesafe_backend_declares_itself(self):
+        from gentar.judge import TypeSafeBackend
+        self.assertTrue(TypeSafeBackend.calibrated)
+        self.assertEqual(TypeSafeBackend.egress, "external")
