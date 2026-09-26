@@ -22,6 +22,13 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.8.0 — 2026-09-26
+
+**Goal pilots and rates.** The judge can drive toward a goal over a closed
+set of actions, a judged suite can be judged over N runs, and a soft check
+can flag a run without deciding it. Minor bump: the scenario schema gains
+`[driver] goal` / `[[driver.actions]]`, `[semantic]` and `[[verify.judge]]`.
+
 ### Added
 
 - **Rates over N runs** (step 2b of the semantic-suites design).
