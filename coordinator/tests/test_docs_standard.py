@@ -77,6 +77,20 @@ class DocsCheckTest(unittest.TestCase):
         self.assertEqual([p for p in problems if "broken link" in p],
                          ["README.md: broken link docs/nope.md"])
 
+    def test_edge_cases_from_review(self):
+        # a directory named like a page is not a tutorial
+        with tempfile.TemporaryDirectory() as d:
+            repo = make_repo(Path(d), **{"docs/tutorials/one.md": None})
+            (repo / "docs" / "tutorials" / "fake.md").mkdir(parents=True)
+            self.assertTrue(any("docs/tutorials/: missing" in p
+                                for p in self.plan.docs_problems(repo)))
+        # links in any example page are checked, repo-root links resolve,
+        # hidden directories in examples/ need no README
+        found = self.problems(**{"examples/01-small/details.md": "[x](nope.md)\n",
+                                 "README.md": "# x\n[root](/docs/guides/op.md)\n",
+                                 "examples/.cache/x.txt": "x"})
+        self.assertEqual(found, ["examples/01-small/details.md: broken link nope.md"])
+
     def test_the_policy_switch_is_a_boolean_and_off_by_default(self):
         self.assertIs(self.plan.SCHEMA["check"]["docs"], False)
 

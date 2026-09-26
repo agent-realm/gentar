@@ -13,6 +13,11 @@
 A refusal is never a red test. Fix the invocation or the configuration,
 not the code under test.
 
+
+`bin/arena`'s own usage errors are not verdicts either: `64` means the
+command was called wrongly (e.g. `bin/arena run` with no scenario), and
+`69` means `bin/arena sql` found no ClickHouse up (run with
+`GENTAR_KEEP_ARENA=1` first).
 ## 2. Read the report
 
 Every terminal outcome writes one: `out/report-<run_id>.md` in the

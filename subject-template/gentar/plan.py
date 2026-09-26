@@ -354,9 +354,10 @@ def docs_problems(repo):
         out.append(f"README.md: {len(readme.read_text().splitlines())} lines — keep it short "
                    f"(<= {README_MAX_LINES}); move the manual into docs/")
     for sub in ("tutorials", "guides"):
-        if not list((repo / "docs" / sub).glob("*.md")):
+        if not [p for p in (repo / "docs" / sub).glob("*.md") if p.is_file()]:
             out.append(f"docs/{sub}/: missing or empty")
-    examples = [d for d in sorted((repo / "examples").glob("*")) if d.is_dir()]
+    examples = [d for d in sorted((repo / "examples").glob("*"))
+                if d.is_dir() and not d.name.startswith(".")]
     if not examples:
         out.append("examples/: missing or empty (smallest to full, each with a README.md)")
     for d in examples:
@@ -365,7 +366,7 @@ def docs_problems(repo):
     if not (repo / "AGENTS.md").is_file():
         out.append("AGENTS.md: missing (the agent entry for installing and deploying)")
     pages = [readme, repo / "AGENTS.md", *sorted((repo / "docs").rglob("*.md")),
-             *sorted((repo / "examples").rglob("README.md"))]
+             *sorted((repo / "examples").rglob("*.md"))]
     for page in pages:
         if not page.is_file():
             continue
@@ -373,7 +374,8 @@ def docs_problems(repo):
             if re.match(r"[a-z][a-z0-9+.-]*:", target) or target.startswith("#"):
                 continue                      # URLs, mailto:, in-page anchors
             path = target.split("#", 1)[0]
-            if path and not (page.parent / path).exists():
+            base = repo if path.startswith("/") else page.parent   # /x = repo root
+            if path and not (base / path.lstrip("/")).exists():
                 out.append(f"{page.relative_to(repo)}: broken link {target}")
     return out
 
