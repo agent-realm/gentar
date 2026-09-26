@@ -64,6 +64,8 @@ class RunReport:
     # Numbers derived from the agent's session transcript(s), if any ran
     # (gentar.agentstats) — counts only, never transcript text.
     agent_stats: dict = field(default_factory=dict)
+    # Soft [[verify.judge]] results — reported, never the verdict.
+    soft: list = field(default_factory=list)
 
     def mark(self, verdict: str, exit_code: int) -> None:
         self.verdict = verdict
@@ -138,6 +140,15 @@ class RunReport:
                     lines.append(_tail(s.output, _STEP_TAIL))
                     lines.append("```")
                 lines.append("")
+
+        if self.soft:
+            lines.append("## Soft judgments (reported only — not the verdict)")
+            lines.append("")
+            lines.append("| question | result | detail |")
+            lines.append("|---|---|---|")
+            for s in self.soft:
+                lines.append(f"| {_tail(s['question'], 160)} | {s['status']} | {_tail(s['detail'], 120)} |")
+            lines.append("")
 
         if self.asserts:
             failed = sum(1 for a in self.asserts if not a.ok)

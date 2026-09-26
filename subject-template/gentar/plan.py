@@ -206,7 +206,8 @@ def judged_suites():
         turns = driver.get("turns") or []
         idx = [i for i, t in enumerate(turns) if isinstance(t, dict) and "judge" in t]
         goal = bool(driver.get("goal"))
-        if idx or goal:
+        soft = bool((data.get("verify") or {}).get("judge"))
+        if idx or goal or soft:
             name = (data.get("scenario") or {}).get("name", f.stem)
             out[name] = {"turns": idx, "goal": goal,
                          "data": (data.get("scenario") or {}).get("data", ""), "file": f.name}
