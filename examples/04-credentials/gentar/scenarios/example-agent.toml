@@ -1,0 +1,19 @@
+# An agent-in-the-loop suite: a real claude-code does a small task
+# headlessly, and the file it writes is the verdict.
+[scenario]
+name = "example-agent"
+subject = "example"
+template = "gentar-bench-v1"      # the bench template with claude-code baked in
+# Env var NAMES, never values. Entries are ALTERNATIVES; a list entry is a
+# GROUP that must be present together (a token without its endpoint is
+# half a provider).
+credentials = ["ANTHROPIC_API_KEY", ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]
+
+[driver]
+command = 'cd "$WORKSPACE_DIR" && DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 240 claude -p "Create a file named greeting.txt containing exactly: hello from an agent" --dangerously-skip-permissions'
+
+[budget]
+tokens = 20000                    # a declared ceiling for the budget guard
+
+[[verify.commands]]
+command = 'grep -F "hello from an agent" "$WORKSPACE_DIR/greeting.txt"'

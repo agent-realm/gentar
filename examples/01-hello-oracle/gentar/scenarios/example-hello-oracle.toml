@@ -1,0 +1,14 @@
+# The smallest suite: one step, one reality check.
+[scenario]
+name = "example-hello-oracle"
+subject = "example"
+agent = "shell"
+
+[oracle]
+steps = [
+    "printf 'hello from gentar\\n' > ~/hello-gentar.txt",
+]
+
+[[verify.files]]
+path = "~/hello-gentar.txt"
+contains = "hello from gentar"

@@ -1,0 +1,15 @@
+# The floor suite: cheap and deterministic, runs on every default-branch push.
+[scenario]
+name = "example-full-install"
+subject = "example"
+agent = "shell"
+
+[oracle]
+steps = [
+    "mkdir -p ~/.local/bin",
+    "printf '#!/bin/sh\\necho example 2.0.0\\n' > ~/.local/bin/example && chmod +x ~/.local/bin/example",
+]
+
+[[verify.commands]]
+command = "~/.local/bin/example --version"
+contains = "example 2.0.0"

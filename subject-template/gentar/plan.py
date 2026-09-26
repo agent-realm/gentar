@@ -72,8 +72,11 @@ SCHEMA = {
                "os": ["ubuntu-latest"]},
     "phase2": {"on": list(PHASE2_TRIGGERS), "release_gate": True,
                "max_age_days": 0},
-    "check": {"allow_drift": []},
+    "check": {"allow_drift": [], "docs": False},
 }
+
+README_MAX_LINES = 150
+_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 
 # The kit files --check compares byte for byte against the pinned engine's
 # copies. hooks.py, policy.toml and the scenarios are the subject's own.
@@ -115,6 +118,8 @@ def load_policy(path=POLICY):
     if raw:
         raise Refuse(f"{path.name}: unknown table(s): {', '.join(sorted(raw))} "
                      f"(known: {', '.join(SCHEMA)})")
+    if not isinstance(out["check"]["docs"], bool):
+        raise Refuse("[check] docs must be true or false")
     p1, p2 = out["phase1"], out["phase2"]
     if not isinstance(p1["checks"], bool):
         raise Refuse("[phase1] checks must be true or false")
@@ -335,6 +340,44 @@ def emit(res):
 PAIRISH = re.compile(r".*_(BASE_URL|URL|ENDPOINT|HOST)$")
 
 
+def docs_problems(repo):
+    """The docs standard, MECHANICALLY: what is missing, never how good it
+    is (review judges content). A short README (what / why / how), docs
+    with tutorials and guides, examples each with a README, an AGENTS.md
+    agent entry, and every relative link resolving."""
+    repo = Path(repo)
+    out = []
+    readme = repo / "README.md"
+    if not readme.is_file():
+        out.append("README.md: missing (what it is, why it exists, how it is used)")
+    elif len(readme.read_text().splitlines()) > README_MAX_LINES:
+        out.append(f"README.md: {len(readme.read_text().splitlines())} lines — keep it short "
+                   f"(<= {README_MAX_LINES}); move the manual into docs/")
+    for sub in ("tutorials", "guides"):
+        if not list((repo / "docs" / sub).glob("*.md")):
+            out.append(f"docs/{sub}/: missing or empty")
+    examples = [d for d in sorted((repo / "examples").glob("*")) if d.is_dir()]
+    if not examples:
+        out.append("examples/: missing or empty (smallest to full, each with a README.md)")
+    for d in examples:
+        if not (d / "README.md").is_file():
+            out.append(f"examples/{d.name}/README.md: missing")
+    if not (repo / "AGENTS.md").is_file():
+        out.append("AGENTS.md: missing (the agent entry for installing and deploying)")
+    pages = [readme, repo / "AGENTS.md", *sorted((repo / "docs").rglob("*.md")),
+             *sorted((repo / "examples").rglob("README.md"))]
+    for page in pages:
+        if not page.is_file():
+            continue
+        for target in _LINK.findall(page.read_text()):
+            if re.match(r"[a-z][a-z0-9+.-]*:", target) or target.startswith("#"):
+                continue                      # URLs, mailto:, in-page anchors
+            path = target.split("#", 1)[0]
+            if path and not (page.parent / path).exists():
+                out.append(f"{page.relative_to(repo)}: broken link {target}")
+    return out
+
+
 def lint(policy, engine_root):
     """Problems, as strings. Empty = clean."""
     problems = []
@@ -403,7 +446,10 @@ def lint(policy, engine_root):
                     problems.append(
                         f"{j['file']}: judged turn {i} has {have} {label} fixture(s) under "
                         f"gentar/judge-fixtures/{name}/{i}/{label}/ — needs {MIN_FIXTURES}+")
-    # 4. the PR invariant rests on the kit's workflow; say so when it cannot.
+    # 4. the docs standard, when the policy opts in ([check] docs = true).
+    if policy and policy["check"]["docs"]:
+        problems += [f"docs: {p}" for p in docs_problems(HERE.parent)]
+    # 5. the PR invariant rests on the kit's workflow; say so when it cannot.
     wf = ".github/workflows/gentar-arena.yml"
     if wf in allowed:
         print(f"note: {wf} is allowed to drift, so 'no pull_request job reaches "

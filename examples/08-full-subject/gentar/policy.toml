@@ -1,0 +1,11 @@
+# Which suites run when (AGENTS.md, decision 5). Read only by gentar/plan.py.
+
+[phase1]
+checks = true                        # bench-free: dry-run, lint, kit drift
+bench = "off"                        # pull requests never reach the bench
+floor = ["example-full-install"]     # every push to the default branch
+
+[phase2]
+on = ["dispatch", "arena", "rc"]     # the full regression
+release_gate = true                  # a v* release needs a green phase 2
+max_age_days = 0

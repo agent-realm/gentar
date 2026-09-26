@@ -1,4 +1,15 @@
-# Adapting gentar into a repo — for the agent doing it
+# gentar — the entry for agents
+
+Three jobs start here:
+
+- **Adapting gentar into a repo** (installing it): the procedure below,
+  from [*gentar is not installed*](#gentar-is-not-installed-it-is-adapted)
+  onwards.
+- **Deploying an arena** (a bench host, a runner, telemetry, a judge): see
+  [*Deploying an arena*](#deploying-an-arena).
+- **Releasing gentar itself:** see [*Before any release*](#before-any-release).
+
+## Adapting gentar into a repo
 
 You are reading this because someone told you to adapt, adopt or install
 gentar into a repository. This file is the procedure. The human-facing
@@ -120,7 +131,10 @@ does on a fresh machine is the entire point.
    front instead. CI's own sweep is `gentar/run.sh --sweep` — every suite
    whose credentials are present, the rest skipped by name — and it tears
    down with `gentar/run.sh --down`. Write `gentar/policy.toml` (decision 5)
-   and run `gentar/run.sh --check`: it is what every PR will run, and it
+   and run `gentar/run.sh --check`: it is what every PR will run (including
+   the docs check the template turns on, `[check] docs = true` — ask the
+   pilot whether this repo follows the docs standard; if not, set it false
+   and say so, never silently), and it
    fails on a kit file that differs from the pinned engine's copy — adapt
    through `hooks.py`, `policy.toml` and repository variables, never by
    editing kit files. **A local pass is not a CI pass**: the
@@ -213,3 +227,52 @@ names, so a behaviour change *inside* a file some suite already mentions
 will not appear — say so rather than implying the review was exhaustive.
 And adding a suite is not the same as running one: until it has exited 0,
 report it as written, not working.
+
+## Deploying an arena
+
+An arena needs somewhere to run benches, something to run it, and
+optionally somewhere to send telemetry and a judge. The full how-to is
+[`docs/guides/deploy-an-arena.md`](docs/guides/deploy-an-arena.md). As an
+agent:
+
+1. **Bench host:** any Linux box with `sbx` installed and logged in once.
+   Check its sandbox network policy and its stored secrets before the first
+   run: the engine refuses an sbx host with stored secrets (exit 2).
+2. **Runner (own-arena CI):** a self-hosted runner labelled `arena` on a
+   host with Docker and reach to the bench host. Give each subject its own
+   compose ports (`GENTAR_CLICKHOUSE_HOST_PORT` / `GENTAR_OTLP_HOST_PORT`
+   repo variables) when several share a host.
+3. **Secrets, by reference only.** Pipe them: never print a value, never
+   ask the pilot to paste one.
+   - `BENCH_SSH_KEY`, `GENTAR_BENCH_HOST`, `GENTAR_BENCH_USER`;
+   - `GENTAR_CLONE_KEY` (a read-only deploy key) when the engine repo is
+     private;
+   - `GENTAR_OTLP_EXPORT` + `GENTAR_OTLP_KEY` for a telemetry destination;
+   - `TYPESAFE_API_KEY` for judged suites.
+4. **Stop and ask before** registering a runner on a repo you don't own,
+   adding a deploy key, setting a secret on someone else's repo, or
+   building a bench template on a shared host. A template save blocks
+   every sandbox on that host, so a template build needs an announced
+   window.
+
+## Before any release
+
+The pilot's standard (2026-09-26): **no release without it.** Before
+asking for a tag, check all four, and fix what is missing first:
+
+1. **A good README:** short and precise, saying **what** gentar is, **why**
+   it exists and **how** it is used. The manual lives in
+   [`docs/reference/`](docs/reference/), not the README.
+2. **Docs with full tutorials** ([`docs/tutorials/`](docs/tutorials/)) and
+   **guides for common operations** ([`docs/guides/`](docs/guides/)),
+   current with this release's features.
+3. **Examples from the smallest to the full-blown**
+   ([`examples/`](examples/)), each with its own `README.md`. A new
+   feature gets an example.
+4. **An agent entry for installation and deployment:** this file.
+
+The mechanical half is automated. `coordinator/tests/test_docs_standard.py`
+fails when anything is missing or a relative link is broken, and adopters
+get the same check from `plan.py lint` through `[check] docs = true` in
+their `policy.toml`. Whether the content is *good* is for review, not the
+lint.

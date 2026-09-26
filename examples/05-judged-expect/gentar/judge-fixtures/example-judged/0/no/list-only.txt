@@ -1,0 +1,7 @@
+demo-cli v2.1.0
+
+ Projects
+   alpha-sandbox      synthetic   1 files
+   beta-sandbox       synthetic   3 files
+
+ Select a project and press d to delete, r to rename, q to quit.

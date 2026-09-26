@@ -1,0 +1,8 @@
+demo-cli v2.1.0
+
+ Projects
+   alpha-sandbox      synthetic   1 files
+   beta-sandbox       synthetic   3 files
+
+ You are about to remove "beta-sandbox" and its 3 files for good.
+ Retype the project's name to go ahead, or leave it empty to back out: 

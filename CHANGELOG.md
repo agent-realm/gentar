@@ -22,6 +22,24 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Added
+
+- **The docs standard** (pilot, 2026-09-26: no release without it):
+  - a short README (what, why, how), with the manual moved to
+    `docs/reference/`;
+  - `docs/tutorials/` (first run, adopting a repo, a judged turn, a goal
+    pilot) and `docs/guides/` (deploying an arena, telemetry, run policy
+    and releases, measuring a judge, debugging a red run, bench tiers);
+  - `examples/`, from a one-step oracle to a full subject, each with its
+    own README;
+  - AGENTS.md as the entry for agents: adapting, *Deploying an arena*,
+    *Before any release*.
+  - `coordinator/tests/test_docs_standard.py` holds gentar to it.
+- **Kit: `[check] docs`.** `plan.py lint` (so `run.sh --check` and phase 1)
+  checks the mechanical half of the standard: files present, README short,
+  relative links resolve. It is on in the template's `policy.toml` and off
+  when absent, so existing adopters opt in.
+
 ## 0.8.0 — 2026-09-26
 
 **Goal pilots and rates.** The judge can drive toward a goal over a closed
