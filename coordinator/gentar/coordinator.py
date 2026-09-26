@@ -161,8 +161,8 @@ def _rate_plan(name: str, cfg: Config) -> tuple:
         _, scenario = _resolve(name, cfg)
     except RunError:
         return 1, 1.0
-    if scenario is None:
-        return 1, 1.0
+    if scenario is None or name in cfg.quarantine:
+        return 1, 1.0                   # quarantine skips once, it does not "pass" N times
     return int(getattr(scenario, "semantic_runs", 1)), float(getattr(scenario, "pass_rate_min", 1.0))
 
 

@@ -437,6 +437,11 @@ pass_rate_min = 0.67  # passes/runs needed for exit 0
   passes.
 - **Only judged suites** may declare a rate. A deterministic suite must
   pass every time, and a rate would only hide its flakes.
+- The rule is exactly `passes / runs >= pass_rate_min`: for 2 of 3 write
+  `0.66`, not `0.67` (2/3 = 0.667).
+- Judge caps (`[judge] max_calls`, `max_input_tokens`) are **per run**, so
+  N runs may spend up to N times the caps, with N ≤ 20.
+- A quarantined suite is skipped once. It doesn't "pass" N times.
 
 A **soft judgment** asks a yes/no question about the driver's **final**
 screen, after reality has passed:

@@ -181,6 +181,8 @@ def _soft_judgments(scenario, judge, screen, spans, subject, run_id, report) -> 
             detail = f"P(yes)={p:.2f}"
         except JudgeUnavailable as exc:
             status, detail = "unavailable", str(exc)
+        except Exception as exc:                    # reported only: nothing here may fail a run
+            status, detail = "unavailable", f"judge error: {type(exc).__name__}"
         flagged += status != "pass"
         spans.emit(subject, run_id, scenario.name, "judge.soft", status,
                    attrs={"question": j["question"][:200]}, detail=detail)

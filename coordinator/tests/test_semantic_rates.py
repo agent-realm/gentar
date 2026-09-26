@@ -46,6 +46,30 @@ class RateTest(unittest.TestCase):
         self.assertEqual(rate([0, 0, 1], runs=3, rate_min=1.0), (1, 3))
 
 
+class ReviewTest(unittest.TestCase):
+    """agy review of #50."""
+
+    def test_two_of_three_meets_point_six_six(self):
+        self.assertEqual(rate([0, 1, 0], runs=3, rate_min=0.66), (0, 3))
+        self.assertEqual(rate([0, 1, 0], runs=3, rate_min=0.67), (1, 2))   # exact: needs 3/3
+
+    def test_a_quarantined_judged_suite_is_skipped_once_not_passed_n_times(self):
+        cfg = mock.MagicMock(quarantine={"g"})
+        sc = mock.MagicMock(semantic_runs=5, pass_rate_min=0.8)
+        with mock.patch.object(coord, "_resolve", return_value=(None, sc)):
+            self.assertEqual(coord._rate_plan("g", cfg), (1, 1.0))
+
+    def test_any_judge_error_in_a_soft_check_is_reported_never_raised(self):
+        class Broken:
+            def noul(self, *a, **k):
+                raise ValueError("bad JSON from the service")
+        class One:
+            name, judge_checks = "s", [{"question": "Q?"}]
+        report = RunReport(scenario="s", run_id="r")
+        self.assertEqual(_soft_judgments(One, Broken(), "scr", mock.MagicMock(), "s", "r", report), 1)
+        self.assertEqual(report.soft[0]["status"], "unavailable")
+
+
 class Judge:
     def __init__(self, ps):
         self.ps = list(ps)
