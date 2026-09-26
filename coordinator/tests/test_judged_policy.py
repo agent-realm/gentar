@@ -83,8 +83,13 @@ class JudgedPolicyTest(unittest.TestCase):
         first = repo / "gentar" / "scenarios" / "first-suite.toml"
         first.write_text(first.read_text().replace('"REPLACE-ME"', '"judgedpr"'))
         (repo / "gentar" / "scenarios" / "semantic.toml").write_text(
-            JUDGED.format(name="semantic", data='data = "synthetic"\nsubject = "judgedpr"'))
-        env = dict(os.environ, GITHUB_EVENT_NAME="pull_request", GENTAR_DIR=str(self.tmp / "no-engine"))
+            '[scenario]\nname = "semantic"\ndata = "synthetic"\nsubject = "judgedpr"\n'
+            '[driver]\ncommand = "d"\n"goal" = "G"\n[[driver.actions]]\nid = "a"\n'
+            'key = "down"\nwhen = "w"\n')          # a QUOTED key (Codex)
+        # No engine to stage: if the guard is ever missing, the run fails fast
+        # at staging instead of building an arena on this machine.
+        env = dict(os.environ, GITHUB_EVENT_NAME="pull_request", GENTAR_DIR=str(self.tmp / "no-engine"),
+                   GENTAR_REPO_URL=str(self.tmp / "no-such-engine"))
         r = subprocess.run(["/bin/bash", "gentar/run.sh", "semantic"], cwd=repo, env=env,
                            capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)

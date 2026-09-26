@@ -35,6 +35,11 @@ class _NoSpans:
         pass
 
 
+class _Unavailable(Exception):
+    """The judge did not answer — a usage/service problem (exit 2), not a
+    misjudged fixture (exit 1)."""
+
+
 def _goal(s, judge, fixtures, repeat) -> int:
     """A goal pilot's fixtures: <fixtures>/<scenario>/goal/<expected>/*.txt —
     the screen, and the action a correct pilot takes there. Asked exactly as
@@ -51,7 +56,10 @@ def _goal(s, judge, fixtures, repeat) -> int:
                 continue
             picks = []
             for _ in range(max(1, repeat)):
-                pick, probs, _ = judge.choose(screen, goal_instructions(s.goal), offered, turn="goal")
+                try:
+                    pick, probs, _ = judge.choose(screen, goal_instructions(s.goal), offered, turn="goal")
+                except JudgeUnavailable as exc:
+                    raise _Unavailable(f"{s.name} goal: {exc}") from None
                 picks.append((pick, probs.get(pick, 0.0), probs.get(d.name, 0.0)))
             ok = all(pk == d.name and p >= p_act for pk, p, _ in picks)
             wrong += 0 if ok else 1
@@ -89,7 +97,11 @@ def main(argv):
             print(f"judge-eval: {s.name}: {exc}", file=sys.stderr)
             return 2
         if s.goal:
-            wrong += _goal(s, judge, fixtures, args.repeat)
+            try:
+                wrong += _goal(s, judge, fixtures, args.repeat)
+            except _Unavailable as exc:
+                print(f"judge-eval: {exc}", file=sys.stderr)
+                return 2
         for i, t in enumerate(s.turns):
             if "judge" not in t:
                 continue

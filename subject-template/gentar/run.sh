@@ -342,7 +342,9 @@ EOF
 
 # 0 when the suite has a judged turn (a semantic expect).
 judged() {
-  grep -Eq '^[[:space:]]*(\[driver\.turns\.judge\]|judge[[:space:]]*=|goal[[:space:]]*=)' "$1"
+  # Bare or quoted keys ("goal" = ..., 'judge' = ...): TOML allows both, and
+  # a miss here would let a judged suite run on a pull request (Codex).
+  grep -Eq "^[[:space:]]*(\\[[[:space:]]*driver[[:space:]]*\\.[[:space:]]*turns[[:space:]]*\\.[[:space:]]*[\"']?judge[\"']?[[:space:]]*\\]|[\"']?(judge|goal)[\"']?[[:space:]]*=)" "$1"
 }
 # 0 when the suite has no judged turn, or the judge key is set. A judged
 # suite without it would only refuse (exit 2).

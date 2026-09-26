@@ -126,7 +126,9 @@ class ReviewTest(unittest.TestCase):
     """agy review of #49."""
 
     def test_danger_appearing_before_the_enter_aborts_it(self):
-        d = Driver(["prompt", "prompt", "Do you want to proceed? rm -rf / --no-preserve-root"])
+        # two confirming polls + the post-judge re-check see the prompt; the
+        # danger appears only after the text is typed, before the Enter
+        d = Driver(["prompt", "prompt", "prompt", "Do you want to proceed? rm -rf / --no-preserve-root"])
         j = Picks([("type_target", 0.95)])
         with self.assertRaises(DriverAbort):
             run(d, j)
@@ -192,3 +194,76 @@ class SchemaTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CodexReviewTest(unittest.TestCase):
+    """Codex review of #49."""
+
+    def test_danger_rendered_while_the_judge_answered_aborts_before_any_key(self):
+        # the confirming poll saw a benign screen; by the time the judge
+        # answered, the screen is dangerous — re-check before acting
+        d = Driver(["list", "list", "Do you want to proceed? rm -rf / --no-preserve-root"])
+        with self.assertRaises(DriverAbort):
+            run(d, Picks([("select_down", 0.95)]))
+        self.assertEqual(d.sent, [])
+
+    def test_a_pick_no_longer_offered_on_the_fresh_screen_is_not_acted_on(self):
+        # an approving pick confirmed on its anchored screen; the screen then
+        # changes to one where it is not offered: no Enter is sent
+        anchored = "Do you trust the files in this folder?"
+        d = Driver([anchored, anchored, "Projects\n > alpha", "Projects\n > alpha"])
+        with self.assertRaises(TurnFailure):
+            run(d, Picks([("trust_folder", 0.95), ("trust_folder", 0.95), ("stuck", 0.9)]))
+        self.assertEqual(d.sent, [])
+
+    def test_egress_allowed_is_the_one_policy_point(self):
+        from unittest import mock
+        from gentar import judge as J
+        from gentar.redaction import scrubber
+
+        class InHouse:
+            name, egress, calibrated = "local", "in-house", True
+
+            def ask(self, state, questions, attempt):
+                attempt()
+                return {"answers": {"q": {"type": "noul", "noul": 0.9}}, "model": "m",
+                        "input_tokens": 1, "request_id": ""}
+
+        class Real:
+            name, data = "real-scenario", ""
+        with self.assertRaises(J.JudgeRefused):
+            J.Judge(Real(), "", scrubber([]), mock.MagicMock(), "s", "r", backend=InHouse())
+        # a pilot decision widening rule B changes egress_allowed ONLY
+        with mock.patch.object(J, "egress_allowed", lambda sc, b: b.egress == "in-house"):
+            j = J.Judge(Real(), "", scrubber([]), mock.MagicMock(), "s", "r", backend=InHouse())
+            self.assertEqual(j.noul("screen", "Q?"), 0.9)
+
+
+class JudgeEvalTest(unittest.TestCase):
+
+    def test_an_unavailable_judge_is_exit_2_not_a_misjudged_fixture(self):
+        import importlib.machinery
+        import importlib.util
+        from gentar.judge import JudgeUnavailable
+        root = Path(__file__).resolve().parents[2]
+        if not (root / "bin" / "judge-eval").exists():
+            self.skipTest("bin/ is not in the image build context")
+        loader = importlib.machinery.SourceFileLoader("judge_eval", str(root / "bin" / "judge-eval"))
+        spec = importlib.util.spec_from_loader("judge_eval", loader)
+        mod = importlib.util.module_from_spec(spec)
+        loader.exec_module(mod)
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "goal-demo" / "goal" / "select_down"
+            f.mkdir(parents=True)
+            (f / "s.txt").write_text("Projects\n > alpha")
+
+            class Down:
+                calls = input_tokens = 0
+
+                def choose(self, *a, **k):
+                    raise JudgeUnavailable("TypeSafe HTTP 503")
+
+            class Sc:
+                name, goal, actions, p_act = "goal-demo", "G", ACTIONS, 0.8
+            with self.assertRaises(mod._Unavailable):
+                mod._goal(Sc, Down(), Path(d), 1)

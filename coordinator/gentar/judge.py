@@ -141,14 +141,15 @@ class Judge:
                  max_input_tokens: int = 500_000, lines: int = 40,
                  url: str = API_URL, model: str = MODEL,
                  post=None, sleep=time.sleep) -> None:
-        if getattr(scenario, "data", "") != SYNTHETIC:
+        # egress_allowed() is THE policy point — checked before anything else,
+        # including the backend's own key check (Codex: one boundary, not two).
+        chosen = backend or TypeSafeBackend
+        if not egress_allowed(scenario, chosen):
             raise JudgeRefused(
-                f"scenario {scenario.name!r} is not declared synthetic "
-                f"([scenario] data = \"synthetic\") — no screen may leave the arena")
+                f"{getattr(chosen, 'name', 'judge')} may not see {scenario.name!r}: it is not "
+                f"declared synthetic ([scenario] data = \"synthetic\") — no screen may leave the arena")
         self.backend = backend or TypeSafeBackend(key, url=url, model=model,
                                                   post=post, sleep=sleep)
-        if not egress_allowed(scenario, self.backend):
-            raise JudgeRefused(f"{self.backend.name} may not judge {scenario.name!r}")
         if not self.backend.calibrated:
             raise JudgeRefused(
                 f"judge backend {self.backend.name!r} has no calibrated probabilities — "

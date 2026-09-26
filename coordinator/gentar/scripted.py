@@ -183,6 +183,16 @@ def _goal_pilot(driver: PtyDriver, judge, sc, spans, subject, run_id,
             return f"goal done after {steps} action(s): {' → '.join(log) or 'none'}"
         if pick == "stuck":
             raise TurnFailure(f"goal: the judge is stuck after {' → '.join(log) or 'no action'}")
+        # The judge call may have taken seconds (retries): act on the screen
+        # as it is NOW. Danger gate again, and the pick must still be offered
+        # on the fresh screen — else it is not acted on (Codex review).
+        scr = driver.screen()
+        if DANGER_RE.search(scr):
+            driver.abort("a screen matching the danger gate appeared while the judge answered")
+            raise DriverAbort("danger gate: " + _tail(scr, 300))
+        if pick not in goal_offer(sc.actions, scr):
+            sleep(float(sc.goal_every))
+            continue
         if steps >= int(sc.max_steps):
             raise TurnFailure(f"goal: max_steps {sc.max_steps} reached: {' → '.join(log)}")
         key = (screen_key(scr), pick)

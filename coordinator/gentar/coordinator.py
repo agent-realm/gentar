@@ -239,9 +239,9 @@ def _run(name: str, cfg: Config | None = None) -> int:
     # key is refused the same way: a semantic suite without its judge is
     # a usage error, never a pass. Names only; the key never reaches a log.
     if scenario and getattr(scenario, "uses_judge", False):
-        from gentar.judge import KEY_NAME, SYNTHETIC
+        from gentar.judge import KEY_NAME, TypeSafeBackend, egress_allowed
         problem = ""
-        if scenario.data != SYNTHETIC:
+        if not egress_allowed(scenario, TypeSafeBackend):
             problem = (f"judge guard: scenario {name!r} uses a judged turn but does "
                        f"not declare [scenario] data = \"synthetic\" — no screen may "
                        f"leave the arena (refusing before any bench exists)")
