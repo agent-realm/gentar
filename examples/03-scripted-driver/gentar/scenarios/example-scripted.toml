@@ -1,0 +1,37 @@
+# A pty suite: a tiny interactive CLI, driven turn by turn.
+[scenario]
+name = "example-scripted"
+subject = "example"
+agent = "shell"
+
+[oracle]
+steps = [
+'''cat > "$WORKSPACE_DIR/setup-cli.py" <<'GENTAR_EOF'
+import os
+name = input("Your name: ")
+answer = input("Install the example tool? (y/n) ")
+with open(os.path.join(os.environ["WORKSPACE_DIR"], "result.txt"), "w") as f:
+    f.write(f"{name}:{'installed' if answer.strip() == 'y' else 'skipped'}\n")
+print("setup complete")
+GENTAR_EOF''']
+
+[driver]
+command = 'python3 "$WORKSPACE_DIR/setup-cli.py"'
+
+[[driver.turns]]
+type = "answer"          # wait for the prompt (a regex), type the text + Enter
+prompt = "Your name"
+send = "example-pilot"
+
+[[driver.turns]]
+type = "answer"
+prompt = "\\(y/n\\)"
+send = "y"
+
+[[driver.turns]]
+type = "expect"          # wait for a pattern, send nothing
+pattern = "setup complete"
+
+[[verify.commands]]
+command = 'cat "$WORKSPACE_DIR/result.txt"'
+contains = "example-pilot:installed"

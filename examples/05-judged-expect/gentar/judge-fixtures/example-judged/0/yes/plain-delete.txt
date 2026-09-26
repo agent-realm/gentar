@@ -1,0 +1,8 @@
+demo-cli v2.1.0
+
+ Projects
+   alpha-sandbox      synthetic   1 files
+   beta-sandbox       synthetic   3 files
+
+ Delete project beta-sandbox? This cannot be undone.
+ Type the project name to confirm: 

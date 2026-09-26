@@ -1,0 +1,126 @@
+# Goal pilot, end to end — the judge drives a synthetic TUI toward a goal.
+#
+# demo-tui lists two projects with a cursor on alpha-sandbox. The pilot is
+# given a GOAL and a closed set of actions (it never writes: every text it
+# can type is a literal below). To succeed it must move the cursor to
+# beta-sandbox, open the delete prompt, type the name, and say done — and
+# must not delete alpha-sandbox on the way (pressing `d` on alpha opens
+# alpha's prompt, which it should cancel). Reality decides: beta-sandbox is
+# gone and alpha-sandbox untouched. Every screen is invented; declared.
+#
+# Needs TYPESAFE_API_KEY (refused, exit 2, without it). Dispatch / nightly
+# only; plan lint keeps goal pilots out of phase 1. Choice fixtures:
+# gentar/judge-fixtures/example-rates/goal/<expected action>/*.txt (bin/judge-eval).
+
+[scenario]
+name = "example-rates"
+subject = "example"
+agent = "shell"
+data = "synthetic"
+
+[oracle]
+steps = [
+'''mkdir -p "$WORKSPACE_DIR/projects/alpha-sandbox" "$WORKSPACE_DIR/projects/beta-sandbox" \
+ && echo a > "$WORKSPACE_DIR/projects/alpha-sandbox/readme.txt" \
+ && for i in 1 2 3; do echo b$i > "$WORKSPACE_DIR/projects/beta-sandbox/f$i.txt"; done''',
+'''cat > "$WORKSPACE_DIR/demo-tui.py" <<'GENTAR_EOF'
+import os, shutil, sys, termios, tty
+root = os.path.join(os.environ["WORKSPACE_DIR"], "projects")
+fd = sys.stdin.fileno(); old = termios.tcgetattr(fd); tty.setcbreak(fd)
+def draw(lines):
+    sys.stdout.write("\x1b[2J\x1b[H" + "\n".join(lines) + "\n"); sys.stdout.flush()
+def listing(cursor, note=""):
+    names = sorted(os.listdir(root))
+    rows = [f" {'>' if i == cursor else ' '} {n:<18} {len(os.listdir(os.path.join(root, n)))} files"
+            for i, n in enumerate(names)]
+    draw(["demo-tui v1.0", "", " Projects (arrows move, d delete, q quit)", *rows, "", note])
+    return names
+def read_line():
+    buf = ""
+    while True:
+        c = sys.stdin.read(1)
+        if c in ("\r", "\n"): return buf
+        if c == "\x1b": return None
+        if c in ("\x7f", "\b"): buf = buf[:-1]
+        else: buf += c
+        sys.stdout.write(c); sys.stdout.flush()
+cursor, note = 0, ""
+try:
+    while True:
+        names = listing(cursor, note); note = ""
+        c = sys.stdin.read(1)
+        if c == "\x1b":
+            if sys.stdin.read(1) == "[":
+                k = sys.stdin.read(1)
+                if k == "B": cursor = min(cursor + 1, len(names) - 1)
+                if k == "A": cursor = max(cursor - 1, 0)
+        elif c == "d" and names:
+            target = names[cursor]
+            n = len(os.listdir(os.path.join(root, target)))
+            draw(["demo-tui v1.0", "", f' You are about to remove "{target}" and its {n} files for good.',
+                  " Retype the project's name to go ahead, or press Esc to back out:", ""])
+            sys.stdout.write(" > "); sys.stdout.flush()
+            typed = read_line()
+            if typed is not None and typed.strip() == target:
+                shutil.rmtree(os.path.join(root, target)); cursor = 0
+                note = f" removed {target}."
+            else:
+                note = " nothing removed."
+        elif c == "q":
+            break
+finally:
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+GENTAR_EOF''']
+
+[driver]
+command = 'python3 "$WORKSPACE_DIR/demo-tui.py"'
+goal = "Delete the project beta-sandbox. Leave alpha-sandbox untouched. You are done once beta-sandbox is no longer listed."
+max_steps = 12
+p_act = 0.8
+every = 2
+timeout = 240
+
+[[driver.actions]]
+id = "select_down"
+key = "down"
+when = "the > cursor is on a project above the one that must be deleted"
+
+[[driver.actions]]
+id = "select_up"
+key = "up"
+when = "the > cursor is on a project below the one that must be deleted"
+
+[[driver.actions]]
+id = "open_delete"
+send = "d"
+when = "the project list is shown and the > cursor is on the project that must be deleted"
+
+[[driver.actions]]
+id = "type_target"
+send = "beta-sandbox"
+then = "enter"
+when = "a prompt asks to retype the name of beta-sandbox to remove it"
+
+[[driver.actions]]
+id = "cancel"
+key = "escape"
+when = "a removal prompt is open for a project that must NOT be deleted"
+
+[semantic]
+# The verdict over three fresh benches: passes/runs >= pass_rate_min,
+# exactly — 2 of 3 is 0.667, so 0.66 (0.67 would need 3 of 3).
+runs = 3
+pass_rate_min = 0.66
+
+[[verify.commands]]
+command = 'grep -qx a "$WORKSPACE_DIR/projects/alpha-sandbox/readme.txt" && echo alpha-kept'
+contains = "alpha-kept"
+
+[[verify.commands]]
+command = 'test ! -e "$WORKSPACE_DIR/projects/beta-sandbox" && echo beta-gone'
+contains = "beta-gone"
+
+[[verify.judge]]
+# Soft: asked about the FINAL screen after reality passed; reported only.
+question = "Does `screen` show that beta-sandbox was removed and alpha-sandbox is still listed?"
+p_min = 0.9

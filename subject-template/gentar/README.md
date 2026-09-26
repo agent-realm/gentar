@@ -142,6 +142,22 @@ the kit enforces:
 The key is the repository secret `TYPESAFE_API_KEY`. Without it, `--sweep`
 skips judged suites by name.
 
+## The docs standard (`[check] docs`)
+
+The template's `policy.toml` turns on a docs check that `run.sh --check`
+(so every PR's phase 1) enforces. It checks the **mechanical** half of a
+simple standard for this repo, not its quality:
+
+1. `README.md`, short (at most 150 lines): what it is, why it exists, how
+   it is used;
+2. `docs/tutorials/` and `docs/guides/`, not empty;
+3. `examples/`, each subdirectory with its own `README.md`;
+4. `AGENTS.md`, the entry for agents installing or deploying it;
+
+and every relative link in those files resolving. Whether the content is
+good is for review. If this repo doesn't follow the standard, set
+`docs = false` under `[check]`, and say so in the adoption.
+
 ## When this repo's code changes
 
 The suites here assert what is true of this repo, so the two move

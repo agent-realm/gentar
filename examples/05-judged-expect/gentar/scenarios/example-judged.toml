@@ -1,0 +1,73 @@
+# Semantic expect, end to end — a judged turn on a synthetic TUI.
+#
+# demo-cli first shows a RENAME prompt (the judge must say no and keep
+# waiting), then the DELETE confirmation for beta-sandbox (the judge must
+# hold a yes). The verdict is still reality's: beta-sandbox is gone and
+# alpha-sandbox untouched. Needs TYPESAFE_API_KEY; refused (exit 2) without
+# it. Every screen here is invented — the scenario declares it.
+#
+# Not a gate suite: judged turns never run on PRs (plan lint refuses it in
+# phase 1). Dispatch / nightly only. Fixtures for the judged turn live in
+# gentar/judge-fixtures/example-judged/0/{yes,no}/ (turn index 0) — bin/judge-eval measures them.
+
+[scenario]
+name = "example-judged"
+subject = "example"
+agent = "shell"
+data = "synthetic"
+
+[oracle]
+steps = [
+'''mkdir -p "$WORKSPACE_DIR/projects/alpha-sandbox" "$WORKSPACE_DIR/projects/beta-sandbox" \
+ && echo a > "$WORKSPACE_DIR/projects/alpha-sandbox/readme.txt" \
+ && for i in 1 2 3; do echo b$i > "$WORKSPACE_DIR/projects/beta-sandbox/f$i.txt"; done''',
+'''cat > "$WORKSPACE_DIR/demo-cli.py" <<'GENTAR_EOF'
+import os, shutil, sys, time
+root = os.path.join(os.environ["WORKSPACE_DIR"], "projects")
+def screen(lines):
+    sys.stdout.write("\x1b[2J\x1b[H" + "\n".join(lines) + "\n"); sys.stdout.flush()
+names = sorted(os.listdir(root))
+rows = [f"   {n:<18} synthetic   {len(os.listdir(os.path.join(root, n)))} files" for n in names]
+screen(["demo-cli v2.1.0", "", " Projects", *rows, "",
+        ' Rename project "beta-sandbox" to (loading...)'])
+time.sleep(8)
+count = len(os.listdir(os.path.join(root, "beta-sandbox")))
+screen(["demo-cli v2.1.0", "", " Projects", *rows, "",
+        f' You are about to remove "beta-sandbox" and its {count} files for good.'])
+answer = input(" Retype the project's name to go ahead, or leave it empty to back out: ")
+if answer.strip() == "beta-sandbox":
+    shutil.rmtree(os.path.join(root, "beta-sandbox"))
+    print(" removed beta-sandbox")
+else:
+    print(" nothing removed")
+GENTAR_EOF''']
+
+[driver]
+command = 'python3 "$WORKSPACE_DIR/demo-cli.py"'
+
+[[driver.turns]]
+# Deliberately NOT the wording a regex would be written for ("delete",
+# "confirm") — the screen says "remove ... for good" and "retype the name".
+type = "expect"
+timeout = 60
+[driver.turns.judge]
+question = "Does `screen` ask the user to confirm permanently deleting the project named beta-sandbox?"
+true = "the screen asks for confirmation to delete or remove beta-sandbox"
+false = "anything else: a rename, another project, a list, or still loading"
+p_min = 0.9
+hold = 2
+every = 2
+
+[[driver.turns]]
+type = "answer"
+prompt = "Retype the project"
+send = "beta-sandbox"
+timeout = 20
+
+[[verify.commands]]
+command = 'grep -qx a "$WORKSPACE_DIR/projects/alpha-sandbox/readme.txt" && echo alpha-kept'
+contains = "alpha-kept"
+
+[[verify.commands]]
+command = 'test ! -e "$WORKSPACE_DIR/projects/beta-sandbox" && echo beta-gone'
+contains = "beta-gone"

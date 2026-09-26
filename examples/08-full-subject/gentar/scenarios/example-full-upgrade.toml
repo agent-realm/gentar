@@ -1,0 +1,21 @@
+# A phase-2 suite: slower, runs on dispatch, the `arena` tag and release candidates.
+[scenario]
+name = "example-full-upgrade"
+subject = "example"
+agent = "shell"
+
+[oracle]
+steps = [
+    "mkdir -p ~/.local/bin ~/.example",
+    "printf 'version = 1\\n' > ~/.example/state.toml",
+    "printf '#!/bin/sh\\necho example 2.0.0\\n' > ~/.local/bin/example && chmod +x ~/.local/bin/example",
+    "grep -qx 'version = 1' ~/.example/state.toml && printf 'version = 2\\n' > ~/.example/state.toml",
+]
+
+[[verify.files]]
+path = "~/.example/state.toml"
+contains = "version = 2"
+
+[[verify.commands]]
+command = "~/.local/bin/example --version"
+contains = "2.0.0"

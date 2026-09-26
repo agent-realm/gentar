@@ -1,0 +1,30 @@
+# Several steps, and both kinds of reality check.
+[scenario]
+name = "example-verify"
+subject = "example"
+agent = "shell"
+
+[oracle]
+steps = [
+    'mkdir -p ~/.example-tool',
+    'printf "mode = \"fast\"\n" > ~/.example-tool/config.toml',
+    'printf "#!/bin/sh\necho example-tool 1.2.3\n" > ~/.example-tool/example-tool && chmod +x ~/.example-tool/example-tool',
+]
+
+# A file that must exist...
+[[verify.files]]
+path = "~/.example-tool/config.toml"
+
+# ...and one that must contain something.
+[[verify.files]]
+path = "~/.example-tool/config.toml"
+contains = "fast"
+
+# A command whose exit code is the verdict...
+[[verify.commands]]
+command = "test -x ~/.example-tool/example-tool"
+
+# ...and one whose output must contain a substring.
+[[verify.commands]]
+command = "~/.example-tool/example-tool --version"
+contains = "example-tool 1.2.3"
