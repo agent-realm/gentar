@@ -8,8 +8,10 @@ from review are built in:
     not), HTML-escaped, HTML of JSON — every form is replaced;
   - a value can be CUT: a report's command column or a span's detail cap
     truncates it, and a whole-value match misses the surviving prefix
-    (claude-playbooks). Any prefix of 8+ characters of a value is replaced
-    too, so a truncated secret loses what survived.
+    (claude-playbooks). Any 8+ character piece of a credential is replaced
+    too — its head, its tail (a tail window can start inside a secret,
+    cockpit#31) or its middle (a value longer than a window, cut twice) —
+    so a truncated secret loses whatever survived.
 
 Values shorter than 4 characters are left alone: replacing them would shred
 the text and they are not credentials worth that. Longest forms first, so a
@@ -163,9 +165,64 @@ def _bounded(form: str) -> _Token:
     return _Token(form)
 
 
+class _Pieces:
+    """Every 8+ character contiguous piece of one credential form — its
+    head, its tail or its middle — found in one pass over the text.
+
+    A value can be CUT, and a window can cut it at either end or both (a
+    step's first/last lines, a report's … tail): what survives is a head,
+    a tail or, for a value longer than the window, a middle. Enumerating
+    pieces grows with the value's length SQUARED (a 5,000-character JWT:
+    ~10,000 prefixes and suffixes per form, each searched in every text —
+    agy review); instead, index the value's 8-grams and scan the text once,
+    extending each hit along the value in both directions."""
+
+    def __init__(self, form: str, mark: str) -> None:
+        self.form, self.mark = form, mark
+        self.grams: dict = {}
+        for i in range(len(form) - MIN_PREFIX + 1):
+            self.grams.setdefault(form[i:i + MIN_PREFIX], []).append(i)
+
+    def spans(self, text: str):
+        f, n, k = self.form, len(text), MIN_PREFIX
+        found, i = [], 0
+        while i <= n - k:
+            hits = self.grams.get(text[i:i + k])
+            if not hits:
+                i += 1
+                continue
+            best = (i, i + k)
+            for p in hits:
+                a, b, fa, fb = i, i + k, p, p + k
+                while a > 0 and fa > 0 and text[a - 1] == f[fa - 1]:
+                    a, fa = a - 1, fa - 1
+                while b < n and fb < len(f) and text[b] == f[fb]:
+                    b, fb = b + 1, fb + 1
+                if b - a > best[1] - best[0]:
+                    best = (a, b)
+            if found and best[0] < found[-1][1]:          # overlaps the last span: merge
+                found[-1] = (found[-1][0], max(found[-1][1], best[1]))
+            else:
+                found.append(best)
+            i = best[1]
+        return found
+
+    def sub(self, text: str) -> str:
+        spans = self.spans(text)
+        if not spans:
+            return text
+        out, last = [], 0
+        for a, b in spans:
+            out.append(text[last:a])
+            out.append(self.mark)
+            last = b
+        out.append(text[last:])
+        return "".join(out)
+
+
 def scrubber(named_values):
     """named_values: iterable of (name, value). Returns scrub(text) -> text."""
-    full, prefixes = [], []          # (length, str | compiled locator, mark)
+    full, pieces = [], []            # (length, str | locator token, mark); piece finders
     for name, value in named_values:
         if not isinstance(value, str) or len(value) < MIN_VALUE:
             continue
@@ -180,11 +237,11 @@ def scrubber(named_values):
         for f in _forms(value):
             if len(f) >= MIN_VALUE:
                 full.append((len(f), f, mark))
-                # every surviving head of a cut value, longest first
-                for n in range(len(f) - 1, MIN_PREFIX - 1, -1):
-                    prefixes.append((n, f[:n], mark))
+                if len(f) > MIN_PREFIX:
+                    # every surviving piece of a cut value: head, tail, middle
+                    pieces.append(_Pieces(f, mark))
     full.sort(key=lambda p: -p[0])
-    prefixes.sort(key=lambda p: -p[0])
+    pieces.sort(key=lambda p: -len(p.form))
 
     def scrub(text: str) -> str:
         if not text:
@@ -195,8 +252,7 @@ def scrubber(named_values):
                     text = text.replace(f, mark)
             elif f.form in text:
                 text = f.sub(mark, text)
-        for _, p, mark in prefixes:
-            if p in text:
-                text = text.replace(p, mark)
+        for piece in pieces:
+            text = piece.sub(text)
         return text
     return scrub

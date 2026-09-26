@@ -22,18 +22,28 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
-Not a release (release freeze, 2026-09-26): main only; adopters stay on
-their pinned tag.
+## 0.6.4 — 2026-09-26
+
+### Fixed
+
+- **A secret cut at its start lost nothing but its head.** The prefix rule
+  catches what survives when a window keeps a value's beginning; a TAIL
+  window — a failed step's last lines (0.6.3), a report's `…` tail — can
+  start inside a secret and keep only its end, which nothing matched
+  (cockpit#31) — and a value longer than a window, cut at both ends, keeps
+  its middle. Credentials now lose ANY 8+ character piece — head, tail or
+  middle — in every form, found in one pass over the text (the value's
+  8-grams are indexed and each hit extended along it). One rule in the
+  scrubber, so every truncation site is covered, including report tails
+  that `bin/redact` only sees rendered.
 
 ### Removed
 
 - **The v0.5.0 history store** — superseded by the telemetry destination
   (0.6.0), proven in CI. Gone: `history/`, `bin/history`,
   `compose.history.yml`, the coordinator's history writer and its
-  `GENTAR_HISTORY_*` settings, the dashboard's `--history` trends mode. The
-  kit (`subject-template/`) is deliberately left byte-identical to v0.6.3:
-  it pins that tag and `--check` compares against it, so its inert history
-  wiring goes with the next release (Codex). The scrubber the writer carried stays, as the
+  `GENTAR_HISTORY_*` settings, the dashboard's `--history` trends mode, and
+  (with this release) the kit's history wiring. The scrubber the writer carried stays, as the
   run's `Redactor`, for everything the export sends. Its data (1,323 spans,
   2 agent turns, 1 tool call) was dumped before removal.
 
