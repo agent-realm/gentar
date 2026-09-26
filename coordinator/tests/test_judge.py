@@ -257,6 +257,14 @@ class SchemaTest(unittest.TestCase):
                 with self.assertRaises(ScenarioError, msg=field):
                     TomlScenario(p)
 
+    def test_a_single_yes_can_never_pass_a_turn(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "x.toml"
+            p.write_text('[scenario]\n[driver]\ncommand = "c"\n[[driver.turns]]\ntype = "expect"\n'
+                         'judge = { question = "Q?", hold = 1 }\n')
+            with self.assertRaises(ScenarioError):
+                TomlScenario(p)
+
     def test_uses_judge(self):
         with tempfile.TemporaryDirectory() as d:
             self.assertTrue(TomlScenario(write(d, "a")).uses_judge)

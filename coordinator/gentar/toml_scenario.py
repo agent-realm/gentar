@@ -150,8 +150,10 @@ def _check_judge(path, i, j) -> None:
     if not isinstance(p_max_no, (int, float)) or not 0 <= p_max_no < p_min:
         raise ScenarioError(f"{where}.p_max_no must be in [0, p_min)")
     hold = j.get("hold", 2)
-    if not isinstance(hold, int) or isinstance(hold, bool) or hold < 1:
-        raise ScenarioError(f"{where}.hold must be an integer >= 1 (consecutive polls)")
+    if not isinstance(hold, int) or isinstance(hold, bool) or hold < 2:
+        raise ScenarioError(
+            f"{where}.hold must be an integer >= 2 — a judged turn never passes on a "
+            f"single yes (identical requests can get different answers)")
     every = j.get("every", 3)
     if not isinstance(every, (int, float)) or every <= 0:
         raise ScenarioError(f"{where}.every must be a positive number of seconds")

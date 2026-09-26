@@ -135,7 +135,11 @@ class Judge:
             raise JudgeUnavailable(
                 f"judge budget spent ({self.calls} calls, {self.input_tokens} input tokens; "
                 f"caps {self.max_calls} / {self.max_input_tokens})")
-        state = self.scrub(prepare_screen(screen, self.lines))
+        # Scrubbed twice: on the raw screen (a value whole before any row is
+        # dropped or whitespace trimmed) and on what is sent (a value that
+        # only lines up once ANSI codes are stripped). The hash is of the
+        # second — exactly the bytes that leave.
+        state = self.scrub(prepare_screen(self.scrub(screen or ""), self.lines))
         if not state.strip():
             # Nothing rendered yet: no screen can be a yes, and asking about
             # an empty one only spends a call (the first live run did).
