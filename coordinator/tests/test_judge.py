@@ -115,6 +115,21 @@ class EgressTest(unittest.TestCase):
             j.noul("s", "Q?")
         self.assertEqual(len(record), 2)
 
+    def test_prepare_skips_the_blank_rows_below_the_content(self):
+        # live semantic-demo run: the rendered screen is 49 rows with the
+        # content on top and 41 blank rows below; "the last 40 rows" sent
+        # the judge an EMPTY screen, and it rightly said no for 60s
+        screen = "demo-cli\n\n You are about to remove beta-sandbox for good.\n" + "\n" * 41
+        out = prepare_screen(screen, lines=40)
+        self.assertIn("remove beta-sandbox", out)
+        self.assertTrue(out.startswith("demo-cli"))
+
+    def test_an_empty_screen_is_a_no_without_a_call(self):
+        j, record, spans = judge()
+        self.assertEqual(j.noul("\n\n\x1b[2J  \n", "Q?"), 0.0)
+        self.assertEqual(record, [])
+        self.assertEqual(j.calls, 0)
+
     def test_prepare_keeps_the_last_rows_only(self):
         screen = "\n".join(f"row {i}" for i in range(100))
         self.assertEqual(prepare_screen(screen, lines=3), "row 97\nrow 98\nrow 99")

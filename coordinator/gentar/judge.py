@@ -59,6 +59,11 @@ def prepare_screen(screen: str, lines: int = 40) -> str:
     text = _ANSI.sub("", screen or "")
     text = _BOX.sub(" ", text)
     rows = [r.rstrip() for r in text.splitlines()]
+    # The rendered screen is full height, with the content on top and blank
+    # rows below it: "the last N rows" must mean the last N CONTENT rows,
+    # or the judge is sent an empty screen (found on the first live run).
+    while rows and not rows[-1]:
+        rows.pop()
     text = "\n".join(rows[-lines:]).strip("\n")
     return _BLANKS.sub("\n\n", text)
 
@@ -131,6 +136,10 @@ class Judge:
                 f"judge budget spent ({self.calls} calls, {self.input_tokens} input tokens; "
                 f"caps {self.max_calls} / {self.max_input_tokens})")
         state = self.scrub(prepare_screen(screen, self.lines))
+        if not state.strip():
+            # Nothing rendered yet: no screen can be a yes, and asking about
+            # an empty one only spends a call (the first live run did).
+            return {qid: {"type": q["type"], "noul": 0.0} for qid, q in questions.items()}
         body = json.dumps({"state": {"screen": state}, "model": self.model,
                            "questions": questions}).encode()
         t0 = time.monotonic()

@@ -284,6 +284,69 @@ declares and passes them through with `-e NAME`, so exporting them is
 enough. Bare `docker compose run` does not — add the same `-e` flags, as
 the CI contract above does.
 
+### Semantic turns — a judged `expect`
+
+A regex `expect` breaks the day a screen is reworded. A **judged** `expect`
+asks a narrow yes/no question about the screen instead, and a typed judge
+([TypeSafe](https://docs.typesafe.ai), model pinned to `jev-1.13.0`) answers
+with a calibrated probability:
+
+```toml
+[scenario]
+data = "synthetic"                 # required: see "what may leave" below
+
+[[driver.turns]]
+type = "expect"
+timeout = 60
+[driver.turns.judge]
+question = "Does `screen` ask the user to confirm permanently deleting the project named beta-sandbox?"
+true = "the screen asks for confirmation to delete or remove beta-sandbox"
+false = "anything else: a rename, another project, a list, or still loading"
+p_min = 0.9        # P(yes) needed ...
+hold = 2           # ... on this many consecutive polls
+every = 2          # seconds between polls
+```
+
+The turn polls the rendered screen until the judge says yes with
+`P(yes) >= p_min` on `hold` consecutive polls. Identical requests do not
+always get identical answers, so a single yes is not enough. It never
+presses anything, and the danger gate is checked on every poll before the
+judge is asked. A timeout fails the turn and names the last P(yes) as a
+clear no or undecided. **The verdict is still reality's:** a judged turn
+only decides when the driver has seen what it waits for, and
+`[[verify.*]]` decides pass or fail.
+
+**What may leave the arena** (the pilot's rule, enforced in code):
+
+- only for a scenario that declares `data = "synthetic"`. Anything else
+  with a judged turn is refused, exit 2, before any bench exists;
+- only the current screen, with ANSI and box drawing stripped and the last
+  `[judge] lines` rows kept (default 40), scrubbed by the same redactor as
+  the export. Never the transcript, history or files;
+- the `judge.call` span records the sha256 and length of what was sent,
+  the question, P(yes), the model that answered, and the tokens and
+  latency. Never the screen text.
+
+**The key** is `TYPESAFE_API_KEY`, and it belongs to the **coordinator
+only**: it is never forwarded to a bench. The loader refuses it in
+`credentials` or `pass_env`. Without it, a judged scenario is refused
+(exit 2), and a kit sweep skips it by name. Lend it per run:
+`with-secret TYPESAFE_API_KEY=keychain:typesafe -- bin/arena run semantic-demo`.
+`[judge] max_calls` (default 200) and `max_input_tokens` (default 500k)
+cap a run.
+
+**Fixtures measure a question before it gates anything.** A judged turn's
+fixture screens live at
+`judge-fixtures/<scenario>/<turn-index>/{yes,no}/*.txt`.
+`bin/judge-eval` sends each one `--repeat` times and reports the P(yes)
+spread per class, whether the turn's `p_min` separates them, and a
+recommended floor. It exits 1 on any misjudged fixture. The kit's lint
+requires 3+ yes and 3+ no fixtures per judged turn, keeps judged suites out
+of phase 1 (a PR never runs one), and requires `data = "synthetic"`.
+`semantic-demo` is the engine's own example. Its screen says "remove … for
+good" and "retype the name", never "delete" or "confirm", and the trap
+fixture (the same wording for the *other* project) scores 0.02.
+
 Today the agent under the pty is `claude-code`, pinned by
 `bench-template/VERSION` and baked into the bench template so no run
 depends on a registry at test time. The driver itself is agent-agnostic;
