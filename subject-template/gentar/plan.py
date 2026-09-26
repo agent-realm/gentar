@@ -202,12 +202,14 @@ def judged_suites():
             data = tomllib.loads(f.read_text())
         except tomllib.TOMLDecodeError:
             continue
-        turns = ((data.get("driver") or {}).get("turns")) or []
+        driver = data.get("driver") or {}
+        turns = driver.get("turns") or []
         idx = [i for i, t in enumerate(turns) if isinstance(t, dict) and "judge" in t]
-        if idx:
+        goal = bool(driver.get("goal"))
+        if idx or goal:
             name = (data.get("scenario") or {}).get("name", f.stem)
-            out[name] = {"turns": idx, "data": (data.get("scenario") or {}).get("data", ""),
-                         "file": f.name}
+            out[name] = {"turns": idx, "goal": goal,
+                         "data": (data.get("scenario") or {}).get("data", ""), "file": f.name}
     return out
 
 
@@ -385,6 +387,14 @@ def lint(policy, engine_root):
         if name in floor:
             problems.append(f"policy.toml: [phase1] floor has {name}, which has judged turns — "
                             f"judged suites run in phase 2 only")
+        if j.get("goal"):
+            gdir = FIXTURES / name / "goal"
+            picks = {d.name: len(list(d.glob("*.txt"))) for d in gdir.glob("*") if d.is_dir()}
+            if sum(picks.values()) < MIN_FIXTURES or "done" not in picks or len(picks) < 2:
+                problems.append(
+                    f"{j['file']}: its goal pilot needs {MIN_FIXTURES}+ fixture screens under "
+                    f"gentar/judge-fixtures/{name}/goal/<expected action>/, covering 2+ actions "
+                    f"including done (has {sum(picks.values())} over {sorted(picks) or 'none'})")
         for i in j["turns"]:
             for label in ("yes", "no"):
                 have = len(list((FIXTURES / name / str(i) / label).glob("*.txt")))

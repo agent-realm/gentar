@@ -24,6 +24,7 @@ from pathlib import Path
 ENGINE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ENGINE / "coordinator"))
 
+from gentar.goal import goal_instructions, goal_offer  # noqa: E402
 from gentar.judge import KEY_NAME, Judge, JudgeRefused, JudgeUnavailable  # noqa: E402
 from gentar.redaction import scrubber  # noqa: E402
 from gentar.toml_scenario import load_dir  # noqa: E402
@@ -32,6 +33,33 @@ from gentar.toml_scenario import load_dir  # noqa: E402
 class _NoSpans:
     def emit(self, *a, **k):
         pass
+
+
+def _goal(s, judge, fixtures, repeat) -> int:
+    """A goal pilot's fixtures: <fixtures>/<scenario>/goal/<expected>/*.txt —
+    the screen, and the action a correct pilot takes there. Asked exactly as
+    a run asks (same instructions, same offer for that screen)."""
+    base, wrong, n = fixtures / s.name / "goal", 0, 0
+    p_act = float(s.p_act)
+    for d in sorted(p for p in base.glob("*") if p.is_dir()):
+        for f in sorted(d.glob("*.txt")):
+            screen, n = f.read_text(), n + 1
+            offered = goal_offer(s.actions, screen)
+            if d.name not in offered:
+                print(f"  {s.name} goal BAD {f.parent.name}/{f.name}: {d.name!r} is not offered on this screen")
+                wrong += 1
+                continue
+            picks = []
+            for _ in range(max(1, repeat)):
+                pick, probs, _ = judge.choose(screen, goal_instructions(s.goal), offered, turn="goal")
+                picks.append((pick, probs.get(pick, 0.0), probs.get(d.name, 0.0)))
+            ok = all(pk == d.name and p >= p_act for pk, p, _ in picks)
+            wrong += 0 if ok else 1
+            shown = ", ".join(f"{pk}={p:.2f}" for pk, p, _ in picks)
+            print(f"  {s.name} goal {'ok ' if ok else 'BAD'} want {d.name:<12} got {shown}  {f.name}")
+    print(f"{s.name} goal: {n - wrong}/{n} fixtures picked right at p_act {p_act} "
+          f"(x{repeat}; {judge.calls} calls, {judge.input_tokens} input tokens)")
+    return wrong if n else 1
 
 
 def main(argv):
@@ -60,6 +88,8 @@ def main(argv):
         except JudgeRefused as exc:
             print(f"judge-eval: {s.name}: {exc}", file=sys.stderr)
             return 2
+        if s.goal:
+            wrong += _goal(s, judge, fixtures, args.repeat)
         for i, t in enumerate(s.turns):
             if "judge" not in t:
                 continue

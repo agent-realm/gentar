@@ -18,16 +18,7 @@ import pexpect
 
 from gentar.benchhost import BenchHost
 
-# Ported verbatim from gauntlet drive.sh DRIVE_DANGER_RE.
-DANGER_RE = re.compile(
-    r"rm -rf /($|[^a-zA-Z])|mkfs\.|dd .*of=/dev/(sd|nvme|vd)"
-    r"|:\(\)\{.*:\|:.*\};:|shutdown |poweroff|systemctl (poweroff|reboot)"
-    r"|iptables -F|> */dev/(sd|nvme|vd)"
-)
-APPROVAL_RE = re.compile(
-    r"do you want to (proceed|make this edit)|requires approval|allow this command",
-    re.IGNORECASE,
-)
+from gentar.gates import APPROVAL_RE, DANGER_RE  # noqa: E402,F401  (re-exported)
 PICKER_CURSOR_RE = re.compile(r"^\s*❯\s*[0-9]+\.", re.MULTILINE)
 SPINNER_RE = re.compile(r"^[✻✽✢·✳✶]", re.MULTILINE)
 
@@ -106,6 +97,10 @@ class PtyDriver:
 
     def send_line(self, text: str) -> None:
         self.child.sendline(text)
+
+    def send_text(self, text: str) -> None:
+        """Literal text, no newline — a goal pilot's declared `send`."""
+        self.child.send(text)
 
     def send_key(self, key: str) -> None:  # "enter", "escape", "down", "ctrl-c"
         self.child.send(_KEYS[key])

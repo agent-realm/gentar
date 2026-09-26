@@ -1,0 +1,6 @@
+demo-tui v1.0
+
+ You are about to remove "beta-sandbox" and its 3 files for good.
+ Retype the project's name to go ahead, or press Esc to back out:
+
+ > 

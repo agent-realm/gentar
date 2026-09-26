@@ -22,6 +22,31 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Added
+
+- **Goal pilots** (step 2a of the semantic-suites design): `[driver] goal`
+  plus a closed `[[driver.actions]]` list. The judge picks one action (or
+  wait / done / stuck) per poll, via a TypeSafe Choice over what the
+  screen allows.
+  - An action is taken only on the same confident pick on two polls
+    running.
+  - The danger gate is checked first, on every poll.
+  - Approval is explicit and anchored (`approve = true` plus `on`).
+  - There's a loop guard, a step cap and a timeout, and `done` is not a
+    verdict.
+  - `bin/judge-eval` measures goal fixtures.
+  - `goal-demo` is the engine's example.
+- **The judge behind a backend interface.** Capability flags `calibrated`
+  and `egress` are on every `judge.call` span. An uncalibrated backend is
+  refused wherever a threshold decides. The egress policy lives in one
+  function (`egress_allowed`, rule B: synthetic only).
+
+### Changed
+
+- The danger and approval patterns move to `gentar/gates.py`, and the goal
+  offer to `gentar/goal.py`. Both are pexpect-free, so host-side
+  `judge-eval` asks exactly what a run asks.
+
 ## 0.7.0 — 2026-09-26
 
 **Semantic turns.** A regex that breaks on rewording can be replaced by a

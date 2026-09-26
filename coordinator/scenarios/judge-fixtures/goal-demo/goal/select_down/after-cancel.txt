@@ -1,0 +1,7 @@
+demo-tui v1.0
+
+ Projects (arrows move, d delete, q quit)
+ > alpha-sandbox      1 files
+   beta-sandbox       3 files
+
+ nothing removed.

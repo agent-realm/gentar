@@ -1,0 +1,6 @@
+demo-tui v1.0
+
+ You are about to remove "alpha-sandbox" and its 1 files for good.
+ Retype the project's name to go ahead, or press Esc to back out:
+
+ > 

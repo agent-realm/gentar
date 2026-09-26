@@ -68,32 +68,30 @@ def prepare_screen(screen: str, lines: int = 40) -> str:
     return _BLANKS.sub("\n\n", text)
 
 
-class Judge:
-    """One per run. Refuses unless the scenario is synthetic and a key is set."""
+def egress_allowed(scenario, backend) -> bool:
+    """May this backend see this scenario's screens? The pilot's rule B
+    (2026-09-26): only a scenario declared synthetic, whatever the backend.
+    An in-house backend (egress == "in-house", e.g. a model on the pilot's
+    own router) could one day be allowed more — that is a pilot decision,
+    and this function is the only place it would change."""
+    return getattr(scenario, "data", "") == SYNTHETIC
 
-    def __init__(self, scenario, key: str, scrub, spans, subject: str,
-                 run_id: str, *, max_calls: int = 200,
-                 max_input_tokens: int = 500_000, lines: int = 40,
-                 url: str = API_URL, model: str = MODEL,
+
+class TypeSafeBackend:
+    """TypeSafe System One over raw HTTP. Calibrated probabilities (the
+    thresholds in a judged turn mean something); external egress."""
+
+    name = "typesafe"
+    calibrated = True
+    egress = "external"
+
+    def __init__(self, key: str, *, url: str = API_URL, model: str = MODEL,
                  post=None, sleep=time.sleep) -> None:
-        if getattr(scenario, "data", "") != SYNTHETIC:
-            raise JudgeRefused(
-                f"scenario {scenario.name!r} is not declared synthetic "
-                f"([scenario] data = \"synthetic\") — no screen may leave the arena")
         if not key:
             raise JudgeRefused(f"{KEY_NAME} is not set")
-        self.scenario, self.key, self.scrub = scenario, key, scrub
-        self.spans, self.subject, self.run_id = spans, subject, run_id
-        # The egress rule's ceiling, whatever the caller passed.
-        self.max_calls, self.max_input_tokens = max_calls, max_input_tokens
-        self.lines = min(max(int(lines), 1), 40)
-        self.url, self.model = url, model
+        self.key, self.url, self.model = key, url, model
         self._post = post or self._http_post
         self._sleep = sleep
-        self.calls = 0
-        self.input_tokens = 0
-
-    # -- transport ---------------------------------------------------------
 
     def _http_post(self, body: bytes) -> tuple[dict, dict]:
         req = urllib.request.Request(self.url, data=body, method="POST", headers={
@@ -101,30 +99,74 @@ class Judge:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read()), dict(resp.headers)
 
-    def _send(self, body: bytes) -> tuple[dict, dict]:
+    def ask(self, state: str, questions: dict, attempt) -> dict:
+        """-> {answers, model, input_tokens, request_id}. `attempt()` is
+        called before EVERY HTTP attempt (the caller's cap may refuse it)."""
+        body = json.dumps({"state": {"screen": state}, "model": self.model,
+                           "questions": questions}).encode()
         last = None
-        for attempt in range(3):
-            # EVERY attempt counts against the cap: a retried or timed-out
-            # request may have been processed (and billed) remotely.
-            if self.calls >= self.max_calls:
-                raise JudgeUnavailable(f"judge budget spent ({self.calls} calls; cap {self.max_calls})")
-            self.calls += 1
+        for n in range(3):
+            attempt()
             try:
-                return self._post(body)
+                out, headers = self._post(body)
+                return {"answers": out.get("answers") or {},
+                        "model": str(out.get("model") or ""),
+                        "input_tokens": int((out.get("usage") or {}).get("input_tokens") or 0),
+                        "request_id": str((headers or {}).get("x-typesafe-request-id", ""))}
             except urllib.error.HTTPError as exc:
                 last = exc
                 if exc.code not in (408, 429, 500, 502, 503, 504, 529):
                     raise JudgeUnavailable(f"TypeSafe HTTP {exc.code}") from None
                 wait = exc.headers.get("retry-after") if exc.headers else None
                 try:
-                    delay = min(float(wait), 10.0) if wait else 0.5 * 2 ** attempt
+                    delay = min(float(wait), 10.0) if wait else 0.5 * 2 ** n
                 except ValueError:
-                    delay = 0.5 * 2 ** attempt
+                    delay = 0.5 * 2 ** n
                 self._sleep(delay)
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 last = exc
-                self._sleep(0.5 * 2 ** attempt)
+                self._sleep(0.5 * 2 ** n)
         raise JudgeUnavailable(f"TypeSafe unreachable: {type(last).__name__}")
+
+
+class Judge:
+    """One per run: the POLICY around a backend — who may send (rule B),
+    what is sent (the scrubbed current screen), how much (caps), and what is
+    kept (a hash-only audit). The backend only transports. A backend
+    without calibrated probabilities is refused here: every current use is
+    a threshold that decides (p_min, p_act, hold)."""
+
+    def __init__(self, scenario, key: str, scrub, spans, subject: str,
+                 run_id: str, *, backend=None, max_calls: int = 200,
+                 max_input_tokens: int = 500_000, lines: int = 40,
+                 url: str = API_URL, model: str = MODEL,
+                 post=None, sleep=time.sleep) -> None:
+        if getattr(scenario, "data", "") != SYNTHETIC:
+            raise JudgeRefused(
+                f"scenario {scenario.name!r} is not declared synthetic "
+                f"([scenario] data = \"synthetic\") — no screen may leave the arena")
+        self.backend = backend or TypeSafeBackend(key, url=url, model=model,
+                                                  post=post, sleep=sleep)
+        if not egress_allowed(scenario, self.backend):
+            raise JudgeRefused(f"{self.backend.name} may not judge {scenario.name!r}")
+        if not self.backend.calibrated:
+            raise JudgeRefused(
+                f"judge backend {self.backend.name!r} has no calibrated probabilities — "
+                f"it cannot decide a threshold (p_min, p_act, hold)")
+        self.scenario, self.scrub = scenario, scrub
+        self.spans, self.subject, self.run_id = spans, subject, run_id
+        # The egress rule's ceiling, whatever the caller passed.
+        self.max_calls, self.max_input_tokens = max_calls, max_input_tokens
+        self.lines = min(max(int(lines), 1), 40)
+        self.calls = 0
+        self.input_tokens = 0
+
+    def _attempt(self) -> None:
+        # EVERY attempt counts against the cap: a retried or timed-out
+        # request may have been processed (and billed) remotely.
+        if self.calls >= self.max_calls:
+            raise JudgeUnavailable(f"judge budget spent ({self.calls} calls; cap {self.max_calls})")
+        self.calls += 1
 
     # -- questions ---------------------------------------------------------
 
@@ -137,6 +179,16 @@ class Judge:
         answer = self._ask(screen, {"q": q}, turn)["q"]
         return float(answer["noul"])
 
+    def choose(self, screen: str, instructions: str, options: dict, *,
+               turn: str = "") -> tuple[str, dict, float]:
+        """One option of a CLOSED set (id -> description): the judge's pick,
+        the probability of every option, and its confidence. It can only
+        pick what it is offered — it never writes."""
+        q = {"type": "choice", "instructions": instructions, "criteria": dict(options)}
+        a = self._ask(screen, {"q": q}, turn)["q"]
+        probs = {k: float(v) for k, v in (a.get("probabilities") or {}).items()}
+        return str(a.get("choice", "")), probs, float(a.get("confidence") or 0.0)
+
     def _ask(self, screen: str, questions: dict, turn: str) -> dict:
         if self.calls >= self.max_calls or self.input_tokens >= self.max_input_tokens:
             raise JudgeUnavailable(
@@ -148,24 +200,26 @@ class Judge:
         # second — exactly the bytes that leave.
         state = self.scrub(prepare_screen(self.scrub(screen or ""), self.lines))
         if not state.strip():
-            # Nothing rendered yet: no screen can be a yes, and asking about
-            # an empty one only spends a call (the first live run did).
-            return {qid: {"type": q["type"], "noul": 0.0} for qid, q in questions.items()}
-        body = json.dumps({"state": {"screen": state}, "model": self.model,
-                           "questions": questions}).encode()
+            # Nothing rendered yet: no screen can be a yes (or a pick), and
+            # asking about an empty one only spends a call.
+            return {qid: ({"type": "noul", "noul": 0.0} if q["type"] == "noul"
+                          else {"type": q["type"], "choice": "", "probabilities": {},
+                                "confidence": 0.0})
+                    for qid, q in questions.items()}
         t0 = time.monotonic()
-        out, headers = self._send(body)
+        out = self.backend.ask(state, questions, self._attempt)
         ms = int((time.monotonic() - t0) * 1000)
-        tokens = int((out.get("usage") or {}).get("input_tokens") or 0)
-        self.input_tokens += tokens
-        answers = out.get("answers") or {}
+        self.input_tokens += out["input_tokens"]
+        answers = out["answers"]
         audit = {
+            "judge.backend": self.backend.name,
+            "judge.egress": self.backend.egress,
             "judge.sent_sha256": hashlib.sha256(state.encode()).hexdigest(),
             "judge.sent_chars": len(state),
-            "judge.model": str(out.get("model") or ""),
-            "judge.input_tokens": tokens,
+            "judge.model": out["model"],
+            "judge.input_tokens": out["input_tokens"],
             "judge.latency_ms": ms,
-            "judge.request_id": str((headers or {}).get("x-typesafe-request-id", "")),
+            "judge.request_id": out["request_id"],
             "judge.turn": turn,
         }
         for qid, q in questions.items():
@@ -173,6 +227,8 @@ class Judge:
             a = answers.get(qid) or {}
             if "noul" in a:
                 audit[f"judge.{qid}.p_yes"] = str(round(float(a["noul"]), 4))
+            if "choice" in a:
+                audit[f"judge.{qid}.choice"] = str(a["choice"])
             if "probabilities" in a:
                 audit[f"judge.{qid}.probabilities"] = json.dumps(a["probabilities"], sort_keys=True)
                 audit[f"judge.{qid}.confidence"] = str(a.get("confidence", ""))
@@ -180,5 +236,5 @@ class Judge:
                         attrs={k: str(v) for k, v in audit.items()})
         missing = [q for q in questions if q not in answers]
         if missing:
-            raise JudgeUnavailable(f"TypeSafe answered without {missing}")
+            raise JudgeUnavailable(f"{self.backend.name} answered without {missing}")
         return answers

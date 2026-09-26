@@ -342,7 +342,7 @@ EOF
 
 # 0 when the suite has a judged turn (a semantic expect).
 judged() {
-  grep -Eq '^[[:space:]]*(\[driver\.turns\.judge\]|judge[[:space:]]*=)' "$1"
+  grep -Eq '^[[:space:]]*(\[driver\.turns\.judge\]|judge[[:space:]]*=|goal[[:space:]]*=)' "$1"
 }
 # 0 when the suite has no judged turn, or the judge key is set. A judged
 # suite without it would only refuse (exit 2).

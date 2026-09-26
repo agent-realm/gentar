@@ -9,6 +9,7 @@ import re
 import time
 
 from gentar.benchhost import BenchHost
+from gentar.goal import _LOW, GOAL_RESERVED, goal_instructions, goal_offer  # noqa: F401
 from gentar.pty_driver import _KEYS, APPROVAL_RE, DANGER_RE, DriverAbort, PtyDriver, _tail
 from gentar.spans import Spans
 
@@ -37,6 +38,8 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
     spans.emit(subject, run_id, name, "driver.start",
                attrs={"command": scenario.driver_command[:120]})
     try:
+        if getattr(scenario, "goal", ""):
+            return _goal_pilot(driver, judge, scenario, spans, subject, run_id)
         for i, turn in enumerate(scenario.turns):
             kind = turn["type"]
             if kind == "answer":
@@ -126,6 +129,77 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
         if report is not None:
             report.transcript = driver.transcript
         driver.close()
+
+
+def _goal_pilot(driver: PtyDriver, judge, sc, spans, subject, run_id,
+                sleep=time.sleep, clock=time.monotonic) -> str:
+    """Drive toward a goal over a closed action set. Each poll: danger gate
+    first (a match anywhere aborts), then ONE Choice over what may be
+    offered on this screen. An action is taken only when the same pick
+    reaches p_act on two consecutive polls (identical requests can get
+    different answers); `wait` waits, `stuck` fails, `done` stops driving —
+    it is not a verdict, [[verify.*]] is. A step cap, a timeout and a loop
+    guard (the same screen and pick three times) bound it."""
+    import hashlib
+    by_id = {a["id"]: a for a in sc.actions}
+    instructions = goal_instructions(sc.goal)
+    deadline = clock() + float(sc.goal_timeout)
+    steps, pending, low, seen, log = 0, None, 0, {}, []
+    while True:
+        if clock() > deadline:
+            raise TurnFailure(f"goal: not reached within {sc.goal_timeout}s after {steps} action(s): "
+                              f"{' → '.join(log) or 'none'}")
+        scr = driver.screen()
+        if DANGER_RE.search(scr):
+            driver.abort("a screen matching the danger gate appeared under the goal pilot")
+            raise DriverAbort("danger gate: " + _tail(scr, 300))
+        offered = goal_offer(sc.actions, scr)
+        from gentar.judge import JudgeUnavailable
+        try:
+            pick, probs, _ = judge.choose(scr, instructions, offered, turn=f"goal.{steps}")
+        except JudgeUnavailable as exc:
+            raise TurnFailure(f"goal: judge unavailable — {exc}") from None
+        p = probs.get(pick, 0.0)
+        if pick not in offered or p < float(sc.p_act):
+            pending = None
+            low = low + 1 if p < _LOW else 0
+            if low >= 3:
+                raise TurnFailure(f"goal: no confident action on 3 polls running (last {pick!r} "
+                                  f"p={p:.2f}) after {' → '.join(log) or 'none'}")
+            sleep(float(sc.goal_every))
+            continue
+        low = 0
+        if pending != pick:                     # confirm on the next poll
+            pending = pick
+            sleep(float(sc.goal_every))
+            continue
+        pending = None
+        spans.emit(subject, run_id, sc.name, "driver.goal",
+                   attrs={"step": str(steps), "pick": pick, "p": f"{p:.2f}"})
+        if pick == "wait":
+            sleep(float(sc.goal_every))
+            continue
+        if pick == "done":
+            return f"goal done after {steps} action(s): {' → '.join(log) or 'none'}"
+        if pick == "stuck":
+            raise TurnFailure(f"goal: the judge is stuck after {' → '.join(log) or 'no action'}")
+        if steps >= int(sc.max_steps):
+            raise TurnFailure(f"goal: max_steps {sc.max_steps} reached: {' → '.join(log)}")
+        key = (hashlib.sha256(scr.encode()).hexdigest(), pick)
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] >= 3:
+            raise TurnFailure(f"goal: loop — {pick!r} on the same screen three times")
+        a = by_id[pick]
+        if "send" in a:
+            driver.send_text(a["send"])
+        else:
+            driver.send_key(a["key"])
+        if a.get("then") == "enter":
+            sleep(0.3)                          # Enter as its own write (paste guard)
+            driver.send_key("enter")
+        steps += 1
+        log.append(pick)
+        sleep(float(sc.goal_every))
 
 
 def _judged(driver: PtyDriver, judge, turn: dict, i: int, sleep=time.sleep) -> str:
