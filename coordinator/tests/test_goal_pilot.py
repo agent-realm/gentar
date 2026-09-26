@@ -122,6 +122,35 @@ class PilotTest(unittest.TestCase):
         self.assertIn("loop", str(ctx.exception))
 
 
+class ReviewTest(unittest.TestCase):
+    """agy review of #49."""
+
+    def test_danger_appearing_before_the_enter_aborts_it(self):
+        d = Driver(["prompt", "prompt", "Do you want to proceed? rm -rf / --no-preserve-root"])
+        j = Picks([("type_target", 0.95)])
+        with self.assertRaises(DriverAbort):
+            run(d, j)
+        self.assertEqual(d.sent, [("text", "beta-sandbox")])      # no Enter
+
+    def test_an_anchor_matches_per_line(self):
+        acts = [{"id": "ok", "key": "enter", "approve": True, "on": "^ Trust this folder\\?$",
+                 "when": "w"}]
+        self.assertIn("ok", goal_offer(acts, "header\n Trust this folder?\nfooter"))
+
+    def test_a_spinner_cannot_hide_a_loop(self):
+        # every frame differs (a spinner glyph and a ticking clock), so a raw
+        # hash never repeats; the stuck screen is still the same screen
+        frames = [f"working {'⠋⠙⠹⠸'[i % 4]} {i}s\n > alpha" for i in range(60)]
+        with self.assertRaises(TurnFailure) as ctx:
+            run(Driver(frames), Picks([("select_down", 0.95)]))
+        self.assertIn("loop", str(ctx.exception))
+
+    def test_a_confident_pick_outside_the_offer_counts_as_no_pick(self):
+        with self.assertRaises(TurnFailure) as ctx:
+            run(Driver(["s"]), Picks([("rm_everything", 0.99)]))
+        self.assertIn("no confident action", str(ctx.exception))
+
+
 GOAL = """
 [scenario]
 data = "synthetic"

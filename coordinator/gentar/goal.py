@@ -32,7 +32,7 @@ def goal_offer(actions: list, screen: str) -> dict:
     out = {}
     for a in actions:
         if a.get("approve"):
-            if re.search(a["on"], screen, re.IGNORECASE) and not DANGER_RE.search(screen):
+            if re.search(a["on"], screen, re.IGNORECASE | re.MULTILINE) and not DANGER_RE.search(screen):
                 out[a["id"]] = a["when"]
         elif approval and _answers_approval(a):
             continue
@@ -40,6 +40,18 @@ def goal_offer(actions: list, screen: str) -> dict:
             out[a["id"]] = a["when"]
     out.update(GOAL_RESERVED)
     return out
+
+
+_SPIN = re.compile(r"[✻✽✢·✳✶⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏|/\\-]|\d")
+
+
+def screen_key(screen: str) -> str:
+    """What the loop guard compares: the prepared screen with spinner glyphs
+    and digits removed, so a spinner or a clock cannot make one stuck screen
+    look new on every poll."""
+    import hashlib
+    from gentar.judge import prepare_screen
+    return hashlib.sha256(_SPIN.sub("", prepare_screen(screen, 40)).encode()).hexdigest()
 
 
 def goal_instructions(goal: str) -> str:

@@ -9,7 +9,7 @@ import re
 import time
 
 from gentar.benchhost import BenchHost
-from gentar.goal import _LOW, GOAL_RESERVED, goal_instructions, goal_offer  # noqa: F401
+from gentar.goal import _LOW, GOAL_RESERVED, goal_instructions, goal_offer, screen_key  # noqa: F401
 from gentar.pty_driver import _KEYS, APPROVAL_RE, DANGER_RE, DriverAbort, PtyDriver, _tail
 from gentar.spans import Spans
 
@@ -140,7 +140,6 @@ def _goal_pilot(driver: PtyDriver, judge, sc, spans, subject, run_id,
     different answers); `wait` waits, `stuck` fails, `done` stops driving —
     it is not a verdict, [[verify.*]] is. A step cap, a timeout and a loop
     guard (the same screen and pick three times) bound it."""
-    import hashlib
     by_id = {a["id"]: a for a in sc.actions}
     instructions = goal_instructions(sc.goal)
     deadline = clock() + float(sc.goal_timeout)
@@ -162,7 +161,8 @@ def _goal_pilot(driver: PtyDriver, judge, sc, spans, subject, run_id,
         p = probs.get(pick, 0.0)
         if pick not in offered or p < float(sc.p_act):
             pending = None
-            low = low + 1 if p < _LOW else 0
+            # A pick outside the offer is no pick at all, however sure.
+            low = low + 1 if (pick not in offered or p < _LOW) else 0
             if low >= 3:
                 raise TurnFailure(f"goal: no confident action on 3 polls running (last {pick!r} "
                                   f"p={p:.2f}) after {' → '.join(log) or 'none'}")
@@ -185,7 +185,7 @@ def _goal_pilot(driver: PtyDriver, judge, sc, spans, subject, run_id,
             raise TurnFailure(f"goal: the judge is stuck after {' → '.join(log) or 'no action'}")
         if steps >= int(sc.max_steps):
             raise TurnFailure(f"goal: max_steps {sc.max_steps} reached: {' → '.join(log)}")
-        key = (hashlib.sha256(scr.encode()).hexdigest(), pick)
+        key = (screen_key(scr), pick)
         seen[key] = seen.get(key, 0) + 1
         if seen[key] >= 3:
             raise TurnFailure(f"goal: loop — {pick!r} on the same screen three times")
@@ -196,6 +196,12 @@ def _goal_pilot(driver: PtyDriver, judge, sc, spans, subject, run_id,
             driver.send_key(a["key"])
         if a.get("then") == "enter":
             sleep(0.3)                          # Enter as its own write (paste guard)
+            # The screen may have changed since the check: the danger gate
+            # again, before the second keypress (agy review).
+            scr2 = driver.screen()
+            if DANGER_RE.search(scr2):
+                driver.abort("a screen matching the danger gate appeared before Enter")
+                raise DriverAbort("danger gate: " + _tail(scr2, 300))
             driver.send_key("enter")
         steps += 1
         log.append(pick)

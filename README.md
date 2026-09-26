@@ -392,6 +392,12 @@ when = "the trust-folder dialog is shown"
     timeout.
 - **`done` is not a verdict.** It stops driving, and `[[verify.*]]`
   decides.
+- **A limit worth knowing:** "an approval screen" means one that the
+  driver's approval pattern recognises. An approval prompt worded so the
+  pattern misses it is, to the code, an ordinary screen, and any declared
+  action may be picked there. The danger gate still applies. So keep
+  Enter-sending actions out of scenarios where an unrecognised approval
+  prompt can appear, or add an `approve = true` action anchored to it.
 - **The same egress rule** applies as for judged turns: synthetic only,
   the scrubbed current screen, and a hash in the span.
 - **The goal is in the question, not the screen state,** so screen text
