@@ -9,3 +9,6 @@ floor = ["example-full-install"]     # every push to the default branch
 on = ["dispatch", "arena", "rc"]     # the full regression
 release_gate = true                  # a v* release needs a green phase 2
 max_age_days = 0
+
+[check]
+docs = true                          # the docs standard (AGENTS.md, "Before any release")

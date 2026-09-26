@@ -76,7 +76,8 @@ SCHEMA = {
 }
 
 README_MAX_LINES = 150
-_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+# [text](target) and [text](target "title") / (target 'title')
+_LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)")
 
 # The kit files --check compares byte for byte against the pinned engine's
 # copies. hooks.py, policy.toml and the scenarios are the subject's own.

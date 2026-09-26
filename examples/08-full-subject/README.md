@@ -31,9 +31,14 @@ only.
 
 ```bash
 gentar/run.sh --check          # phase 1: lint, kit drift, dry-run — no bench
-gentar/run.sh --plan           # what a PR, a main push and a release tag would run
+# --plan evaluates ONE event, the one in the environment — ask per event:
+GITHUB_EVENT_NAME=pull_request GITHUB_REPOSITORY=o/r PR_HEAD_REPO=o/r gentar/run.sh --plan
+GITHUB_EVENT_NAME=push GITHUB_REF=refs/heads/main gentar/run.sh --plan
+GITHUB_EVENT_NAME=push GITHUB_REF=refs/tags/v1.0.0 gentar/run.sh --plan
 gentar/run.sh --sweep          # every suite this environment can run
 ```
 
-**Pass:** `--check` is clean, `--plan` shows the floor on a main push and
-nothing bench-side on a PR, and the sweep exits `0`.
+**Pass:** `--check` is clean; the three `--plan` calls show nothing
+bench-side on the PR, the floor (`example-full-install`) on the main push,
+and a release tag gated by `release-gate.sh` rather than run; the sweep
+exits `0`.

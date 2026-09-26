@@ -42,10 +42,12 @@ until it passes". It states everything needed to act.
 Re-run with the arena kept, then look:
 
 ```bash
-GENTAR_KEEP_ARENA=1 bin/arena run <scenario>
+export GENTAR_KEEP_ARENA=1     # every command below keeps the arena up
+bin/arena run <scenario>
 bin/arena sql "SELECT step, status, left(detail, 120) FROM gentar.spans ORDER BY ts_start"
 bin/arena dashboard && open dashboard/out/dashboard.html
 bin/arena down
+unset GENTAR_KEEP_ARENA
 ```
 
 In a subject repository, `gentar/run.sh` leaves `gentar/reports/dashboard.html`

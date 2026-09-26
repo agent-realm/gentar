@@ -90,6 +90,9 @@ class DocsCheckTest(unittest.TestCase):
                                  "README.md": "# x\n[root](/docs/guides/op.md)\n",
                                  "examples/.cache/x.txt": "x"})
         self.assertEqual(found, ["examples/01-small/details.md: broken link nope.md"])
+        # a link with a title is still a link (Codex)
+        titled = self.problems(**{"README.md": '# x\n[g](docs/missing.md "Guide") [ok](docs/guides/op.md \'t\')\n'})
+        self.assertEqual([p for p in titled if "broken" in p], ["README.md: broken link docs/missing.md"])
 
     def test_the_policy_switch_is_a_boolean_and_off_by_default(self):
         self.assertIs(self.plan.SCHEMA["check"]["docs"], False)

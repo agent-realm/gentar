@@ -77,11 +77,13 @@ A normal run tears the arena down, and its ClickHouse goes with it. To
 inspect the spans, keep it up:
 
 ```bash
-GENTAR_KEEP_ARENA=1 bin/arena run smoke
+export GENTAR_KEEP_ARENA=1     # every command below keeps the arena up
+bin/arena run smoke
 bin/arena sql "SELECT step, status, duration_ms FROM gentar.spans ORDER BY ts_start"
 bin/arena dashboard        # renders dashboard/out/dashboard.html
 open dashboard/out/dashboard.html
 bin/arena down             # you own the teardown when you keep the arena
+unset GENTAR_KEEP_ARENA
 ```
 
 You should see: rows for `scenario`, `bench.create`, the step and

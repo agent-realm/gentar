@@ -21,8 +21,9 @@ to put to the pilot.
 From a checkout of this repository:
 
 ```bash
-cp -R subject-template/gentar  /path/to/your-repo/gentar
-cp -R subject-template/.github /path/to/your-repo/.github   # merge if you have one
+cp -R subject-template/gentar /path/to/your-repo/gentar
+mkdir -p /path/to/your-repo/.github/workflows              # fine if it exists
+cp subject-template/.github/workflows/gentar-arena.yml /path/to/your-repo/.github/workflows/
 ```
 
 You should see: `your-repo/gentar/` holding `run.sh`, `dryrun.py`,
