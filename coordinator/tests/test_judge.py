@@ -88,6 +88,18 @@ class EgressTest(unittest.TestCase):
         self.assertNotIn("beta-sandbox", blob)
         self.assertNotIn("detail", spans.emit.call_args.kwargs)
 
+    def test_the_hash_is_of_exactly_the_bytes_sent(self):
+        # root review: scrub after prepare, before hashing AND sending — the
+        # audit's sha256 must identify the very screen that left
+        import hashlib
+        j, record, spans = judge()
+        j.noul("\x1b[1mDelete beta?\x1b[0m token " + SECRET + "\n\n\n", "Q?")
+        sent = record[0]["state"]["screen"]
+        attrs = spans.emit.call_args.kwargs["attrs"]
+        self.assertEqual(attrs["judge.sent_sha256"], hashlib.sha256(sent.encode()).hexdigest())
+        self.assertEqual(int(attrs["judge.sent_chars"]), len(sent))
+        self.assertNotIn(SECRET[:12], sent)
+
     def test_retries_a_rate_limit_then_answers(self):
         calls = []
 
