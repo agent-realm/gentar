@@ -70,6 +70,50 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(report.soft[0]["status"], "unavailable")
 
 
+class CodexReviewTest(unittest.TestCase):
+    """Codex review of #50."""
+
+    def test_the_whole_rate_budget_is_checked_before_any_bench(self):
+        cfg = mock.MagicMock(budget_cap=250, name_prefix="t")
+        sc = mock.MagicMock(budget_tokens=100)
+        ran = []
+        with mock.patch.object(coord, "_resolve", return_value=(None, sc)), \
+                mock.patch.object(coord, "_spent_so_far", return_value=0), \
+                mock.patch.object(coord, "Spans"), \
+                mock.patch.object(coord, "_run", side_effect=lambda *a: ran.append(1) or 0), \
+                mock.patch("builtins.print"):
+            self.assertEqual(coord._run_rate("s", cfg, 3, 1.0), 2)   # 3 x 100 > 250
+        self.assertEqual(ran, [])                                     # no bench ever
+
+    def test_soft_outcomes_use_valid_span_statuses(self):
+        class Sc:
+            name, judge_checks = "s", [{"question": "Q1?"}, {"question": "Q2?"}]
+        spans = mock.MagicMock()
+        _soft_judgments(Sc, Judge([0.5, None]), "scr", spans, "sub", "r", None)
+        statuses = [c.args[4] for c in spans.emit.call_args_list]
+        self.assertEqual(statuses, ["skip", "error"])       # the Enum's values only
+        self.assertEqual([c.kwargs["attrs"]["soft"] for c in spans.emit.call_args_list],
+                         ["undecided", "unavailable"])
+
+    def test_run_sh_recognises_every_judged_spelling(self):
+        import subprocess
+        root = Path(__file__).resolve().parents[2]
+        run_sh = root / "subject-template" / "gentar" / "run.sh"
+        if not run_sh.exists():
+            self.skipTest("the kit is not in the image build context")
+        text = run_sh.read_text()
+        fn = text[text.index("judged() {"):text.index("\n}\n", text.index("judged() {")) + 3]
+        yes = ['goal = "G"', '"goal" = "G"', '[driver.turns."judge"]', '[["verify"."judge"]]',
+               '[[verify.judge]]', 'verify.judge = []', 'driver.goal = "G"', '  judge = { q = 1 }']
+        no = ["goalie = 1", "# goal = x", "[[verify.commands]]", "judgement = 1", "subgoal = 1"]
+        with tempfile.TemporaryDirectory() as d:
+            for line, want in [(l, True) for l in yes] + [(l, False) for l in no]:
+                f = Path(d) / "s.toml"
+                f.write_text(line + "\n")
+                r = subprocess.run(["/bin/bash", "-c", fn + f'judged "{f}"'], capture_output=True)
+                self.assertEqual(r.returncode == 0, want, line)
+
+
 class Judge:
     def __init__(self, ps):
         self.ps = list(ps)

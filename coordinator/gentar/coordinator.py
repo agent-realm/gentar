@@ -166,12 +166,35 @@ def _rate_plan(name: str, cfg: Config) -> tuple:
     return int(getattr(scenario, "semantic_runs", 1)), float(getattr(scenario, "pass_rate_min", 1.0))
 
 
+def _rate_budget_refusal(name: str, cfg: Config, runs: int) -> str:
+    """The WHOLE rate's spend, checked before the first bench (Codex): one
+    repetition within the cap and the next refused would be an exit 2 after
+    a bench already existed."""
+    try:
+        _, scenario = _resolve(name, cfg)
+    except RunError:
+        return ""
+    each = scenario.budget_tokens if scenario else 0
+    if not (cfg.budget_cap and each):
+        return ""
+    with exporting():
+        already = _spent_so_far(Spans(cfg))
+    if already + each * runs > cfg.budget_cap:
+        return (f"budget guard: {runs} runs x {each} units would spend {each * runs}, "
+                f"{already} already burned, cap {cfg.budget_cap} (refusing before any bench exists)")
+    return ""
+
+
 def _run_rate(name: str, cfg: Config, runs: int, rate_min: float) -> int:
     """A judged suite's verdict over N runs, each on a fresh bench: exit 0
     iff passes/N >= pass_rate_min. A refusal (exit 2) ends it at once — it
     would refuse every time. Stops early once the minimum is out of reach
     (every further run is judge calls spent on a known verdict)."""
     import math
+    refusal = _rate_budget_refusal(name, cfg, runs)
+    if refusal:
+        print(f"Error: {refusal}")
+        return 2
     need = math.ceil(rate_min * runs - 1e-9)
     passes = done = 0
     for i in range(runs):

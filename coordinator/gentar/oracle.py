@@ -184,8 +184,11 @@ def _soft_judgments(scenario, judge, screen, spans, subject, run_id, report) -> 
         except Exception as exc:                    # reported only: nothing here may fail a run
             status, detail = "unavailable", f"judge error: {type(exc).__name__}"
         flagged += status != "pass"
-        spans.emit(subject, run_id, scenario.name, "judge.soft", status,
-                   attrs={"question": j["question"][:200]}, detail=detail)
+        # The spans table's status is an Enum (running/pass/fail/skip/error):
+        # map the soft outcome onto it, keep the outcome itself as an attr.
+        spans.emit(subject, run_id, scenario.name, "judge.soft",
+                   {"pass": "pass", "fail": "fail", "undecided": "skip"}.get(status, "error"),
+                   attrs={"question": j["question"][:200], "soft": status}, detail=detail)
         if report is not None:
             report.soft.append({"question": j["question"], "status": status, "detail": detail})
     return flagged
