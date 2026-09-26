@@ -112,6 +112,24 @@ class EgressTest(unittest.TestCase):
         j, _, _ = judge(post=post)
         self.assertEqual(j.noul("s", "Q?"), 0.9)
         self.assertEqual(len(calls), 2)
+        self.assertEqual(j.calls, 2)            # every attempt counts (Codex)
+
+    def test_retries_cannot_exceed_the_call_cap(self):
+        calls = []
+
+        def post(body):
+            calls.append(1)
+            raise urllib.error.HTTPError("u", 503, "busy", {"retry-after": "0"}, io.BytesIO())
+        j, _, _ = judge(post=post, max_calls=2)
+        with self.assertRaises(JudgeUnavailable):
+            j.noul("s", "Q?")
+        self.assertEqual(len(calls), 2)          # not 3: the cap stops the retries
+
+    def test_the_egress_ceiling_is_forty_rows_whatever_is_passed(self):
+        j, record, _ = judge(lines=1000)
+        self.assertEqual(j.lines, 40)
+        j.noul("\n".join(f"row {i}" for i in range(60)), "Q?")
+        self.assertEqual(record[0]["state"]["screen"].count("\n"), 39)
 
     def test_an_auth_error_is_not_retried(self):
         def post(body):
@@ -264,6 +282,14 @@ class SchemaTest(unittest.TestCase):
                          'judge = { question = "Q?", hold = 1 }\n')
             with self.assertRaises(ScenarioError):
                 TomlScenario(p)
+
+    def test_judge_lines_beyond_the_egress_ceiling_are_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            for lines in (0, 41, 1000):
+                p = Path(d) / "x.toml"
+                p.write_text(f'[scenario]\n[judge]\nlines = {lines}\n[oracle]\nsteps = ["true"]\n')
+                with self.assertRaises(ScenarioError, msg=lines):
+                    TomlScenario(p)
 
     def test_uses_judge(self):
         with tempfile.TemporaryDirectory() as d:

@@ -194,6 +194,10 @@ class TomlScenario:
         self.judge_max_calls = int(judge.get("max_calls", 200))
         self.judge_max_input_tokens = int(judge.get("max_input_tokens", 500_000))
         self.judge_lines = int(judge.get("lines", 40))
+        if not 1 <= self.judge_lines <= 40:
+            raise ScenarioError(
+                f"{path}: judge.lines must be 1..40 — the pilot's egress rule sends at "
+                f"most the last 40 content rows of the screen")
         # Entries are ALTERNATIVE providers; an entry may be a single env
         # var name or a LIST of names that must travel together — a token
         # without its endpoint is half a provider (PR #26 review: the old

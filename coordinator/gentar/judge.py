@@ -84,7 +84,9 @@ class Judge:
             raise JudgeRefused(f"{KEY_NAME} is not set")
         self.scenario, self.key, self.scrub = scenario, key, scrub
         self.spans, self.subject, self.run_id = spans, subject, run_id
-        self.max_calls, self.max_input_tokens, self.lines = max_calls, max_input_tokens, lines
+        # The egress rule's ceiling, whatever the caller passed.
+        self.max_calls, self.max_input_tokens = max_calls, max_input_tokens
+        self.lines = min(max(int(lines), 1), 40)
         self.url, self.model = url, model
         self._post = post or self._http_post
         self._sleep = sleep
@@ -102,6 +104,11 @@ class Judge:
     def _send(self, body: bytes) -> tuple[dict, dict]:
         last = None
         for attempt in range(3):
+            # EVERY attempt counts against the cap: a retried or timed-out
+            # request may have been processed (and billed) remotely.
+            if self.calls >= self.max_calls:
+                raise JudgeUnavailable(f"judge budget spent ({self.calls} calls; cap {self.max_calls})")
+            self.calls += 1
             try:
                 return self._post(body)
             except urllib.error.HTTPError as exc:
@@ -149,7 +156,6 @@ class Judge:
         t0 = time.monotonic()
         out, headers = self._send(body)
         ms = int((time.monotonic() - t0) * 1000)
-        self.calls += 1
         tokens = int((out.get("usage") or {}).get("input_tokens") or 0)
         self.input_tokens += tokens
         answers = out.get("answers") or {}

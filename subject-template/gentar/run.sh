@@ -340,10 +340,14 @@ EOF
   return 1
 }
 
-# 0 when the suite has no judged turn (a semantic expect), or the judge
-# key is set. A judged suite without it would only refuse (exit 2).
+# 0 when the suite has a judged turn (a semantic expect).
+judged() {
+  grep -Eq '^[[:space:]]*(\[driver\.turns\.judge\]|judge[[:space:]]*=)' "$1"
+}
+# 0 when the suite has no judged turn, or the judge key is set. A judged
+# suite without it would only refuse (exit 2).
 judge_ready() {
-  grep -Eq '^[[:space:]]*(\[driver\.turns\.judge\]|judge[[:space:]]*=)' "$1" || return 0
+  judged "$1" || return 0
   [ -n "${TYPESAFE_API_KEY:-}" ]
 }
 
@@ -361,6 +365,8 @@ if [ "$SWEEP" = 1 ]; then
     s=$(basename "$f" .toml)
     if ! credentials_present "$f"; then
       echo "skipping $s — no credential group of it is fully set" >&2
+    elif [ "${GITHUB_EVENT_NAME:-}" = pull_request ] && judged "$f"; then
+      echo "skipping $s — judged suites never run on a pull request (phase 2 only)" >&2
     elif ! judge_ready "$f"; then
       echo "skipping $s — it has judged turns and TYPESAFE_API_KEY is not set" >&2
     else
@@ -371,6 +377,17 @@ if [ "$SWEEP" = 1 ]; then
   echo "sweep:$runnable" >&2
   set -- $runnable
   SCENARIO=$1; shift
+fi
+# A judged suite sends screens to a judge and gates on probabilities: never
+# on a pull request, whatever picked it (a policy, no policy, a PR's own
+# `gentar:` line). Enforced here, where suites run, not only in plan.py.
+if [ "${GITHUB_EVENT_NAME:-}" = pull_request ]; then
+  for s in "$SCENARIO" "$@"; do
+    if [ -f "$HERE/scenarios/$s.toml" ] && judged "$HERE/scenarios/$s.toml"; then
+      echo "refusing $s — judged suites never run on a pull request (phase 2 only)" >&2
+      exit 2
+    fi
+  done
 fi
 ARENA=${GENTAR_DIR:-$HERE/.arena}
 # Engine version. A RELEASE TAG by default, never a moving branch: the

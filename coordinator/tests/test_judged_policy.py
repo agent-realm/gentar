@@ -68,6 +68,28 @@ class JudgedPolicyTest(unittest.TestCase):
         self.assertEqual(res["suites"], ["fast"])
         self.assertIn("left for phase 2", res["reason"])
 
+    def test_without_a_policy_a_pr_still_never_runs_a_judged_suite(self):
+        env = {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REPOSITORY": "o/r",
+               "PR_HEAD_REPO": "o/r", "PR_BODY": "gentar: semantic fast"}
+        res = self.mod.plan(env, None)
+        self.assertEqual(res["suites"], ["fast"])
+        self.assertIn("left for phase 2", res["reason"])
+
+    def test_run_sh_refuses_a_judged_suite_on_a_pull_request(self):
+        # the invariant is enforced where suites run, whatever picked them
+        import os, shutil, subprocess
+        repo = self.tmp / "repo"
+        shutil.copytree(ROOT / "subject-template" / "gentar", repo / "gentar")
+        first = repo / "gentar" / "scenarios" / "first-suite.toml"
+        first.write_text(first.read_text().replace('"REPLACE-ME"', '"judgedpr"'))
+        (repo / "gentar" / "scenarios" / "semantic.toml").write_text(
+            JUDGED.format(name="semantic", data='data = "synthetic"\nsubject = "judgedpr"'))
+        env = dict(os.environ, GITHUB_EVENT_NAME="pull_request", GENTAR_DIR=str(self.tmp / "no-engine"))
+        r = subprocess.run(["/bin/bash", "gentar/run.sh", "semantic"], cwd=repo, env=env,
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("never run on a pull request", r.stderr)
+
     def test_a_main_push_floor_never_runs_a_judged_suite(self):
         env = {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main"}
         res = self.mod.plan(env, policy(self.mod, ["semantic"]))

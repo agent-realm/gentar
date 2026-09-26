@@ -248,8 +248,8 @@ def plan(env, policy):
                 return {**res, "reason": "fork PR: never on the self-hosted runner"}
             picked = _declared(env.get("PR_BODY"))
             if picked:
-                return targeted([_suite(f, "GENTAR_FLOOR") for f in floor] + picked,
-                                "no policy.toml: PR narrowed by its gentar: line")
+                names, note = _no_judged([_suite(f, "GENTAR_FLOOR") for f in floor] + picked)
+                return targeted(names, "no policy.toml: PR narrowed by its gentar: line" + note)
             return {**res, "bench": "phase2", "reason": "no policy.toml: PR runs every suite"}
         if event == "workflow_dispatch" and dispatch:
             return targeted(dispatch, "no policy.toml: dispatch names suites")
