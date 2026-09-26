@@ -22,6 +22,13 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.7.0 — 2026-09-26
+
+**Semantic turns.** A regex that breaks on rewording can be replaced by a
+typed judgment of the screen, under the pilot's egress rule. Minor bump: the
+scenario schema gains `[scenario] data`, `[judge]` and `[driver.turns.judge]`,
+and the kit gains judged-suite rules (AGENTS.md decision 7).
+
 ### Added
 
 - **Semantic turns — a judged `expect`** (step 1 of the semantic-suites
