@@ -121,6 +121,10 @@ services:
       # "allow" = this arena uses sbx stored secrets on purpose; otherwise
       # an sbx bench-host holding any is refused (credential proxy).
       GENTAR_SBX_SECRETS: ${GENTAR_SBX_SECRETS:-}
+      # Judge key for semantic turns (coordinator/gentar/judge.py). The
+      # COORDINATOR's only: scenario credentials are forwarded into the
+      # bench, this never is. Empty = judged scenarios refuse (exit 2).
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
       # Where a run came from, for the exported trace; empty on a local run.
       GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-}
       GITHUB_RUN_ID: ${GITHUB_RUN_ID:-}

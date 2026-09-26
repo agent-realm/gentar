@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Measure every judged turn against its fixture screens — no bench.
+
+    with-secret TYPESAFE_API_KEY=keychain:typesafe -- bin/judge-eval [scenarios-dir] [fixtures-dir]
+
+Fixtures: <fixtures-dir>/<scenario>/<turn-index>/{yes,no}/*.txt — screens a
+judged turn must answer yes / no to. Each is sent --repeat times (identical
+requests are not guaranteed identical answers), and the turn's own p_min is
+applied. It reports, per turn, the lowest P(yes) over the yes screens, the
+highest over the no screens, and the lowest p_min that keeps every no screen
+out ("recommended"). Exit 1 if any fixture is judged wrong at the turn's
+p_min; 2 on a usage error or a refused judge.
+
+The same rules as a run: the scenario must declare data = "synthetic", the
+screen is prepared and scrubbed exactly as in a run, and nothing of it is
+printed or stored — only file names and numbers.
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+ENGINE = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ENGINE / "coordinator"))
+
+from gentar.judge import KEY_NAME, Judge, JudgeRefused, JudgeUnavailable  # noqa: E402
+from gentar.redaction import scrubber  # noqa: E402
+from gentar.toml_scenario import load_dir  # noqa: E402
+
+
+class _NoSpans:
+    def emit(self, *a, **k):
+        pass
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(prog="judge-eval")
+    ap.add_argument("scenarios", nargs="?", default=str(ENGINE / "coordinator" / "scenarios"))
+    ap.add_argument("fixtures", nargs="?", default=None)
+    ap.add_argument("--repeat", type=int, default=3)
+    ap.add_argument("--only", default="", help="one scenario name")
+    args = ap.parse_args(argv)
+    fixtures = Path(args.fixtures or Path(args.scenarios) / "judge-fixtures")
+    key = os.environ.get(KEY_NAME, "")
+    if not key:
+        print(f"judge-eval: {KEY_NAME} is not set (with-secret {KEY_NAME}=<ref> -- ...)", file=sys.stderr)
+        return 2
+    scrub = scrubber([(KEY_NAME, key)])
+    wrong = 0
+    judged = [s for s in load_dir(args.scenarios).values()
+              if s.uses_judge and (not args.only or s.name == args.only)]
+    if not judged:
+        print("judge-eval: no judged turns found")
+        return 0
+    for s in judged:
+        try:
+            judge = Judge(s, key, scrub, _NoSpans(), s.subject or "arena", "judge-eval",
+                          max_calls=10_000, max_input_tokens=50_000_000, lines=s.judge_lines)
+        except JudgeRefused as exc:
+            print(f"judge-eval: {s.name}: {exc}", file=sys.stderr)
+            return 2
+        for i, t in enumerate(s.turns):
+            if "judge" not in t:
+                continue
+            j, p_min = t["judge"], float(t["judge"].get("p_min", 0.9))
+            base = fixtures / s.name / str(i)
+            seen = {"yes": [], "no": []}
+            for label in ("yes", "no"):
+                for f in sorted((base / label).glob("*.txt")):
+                    ps = []
+                    for _ in range(max(1, args.repeat)):
+                        try:
+                            ps.append(judge.noul(f.read_text(), j["question"], true=j.get("true", ""),
+                                                 false=j.get("false", ""), turn=str(i)))
+                        except JudgeUnavailable as exc:
+                            print(f"judge-eval: {s.name} turn {i}: {exc}", file=sys.stderr)
+                            return 2
+                    ok = all(p >= p_min for p in ps) if label == "yes" else all(p < p_min for p in ps)
+                    wrong += 0 if ok else 1
+                    seen[label].append((min(ps) if label == "yes" else max(ps)))
+                    print(f"  {s.name} turn {i} {label:<3} {'ok ' if ok else 'BAD'} "
+                          f"P(yes)={', '.join(f'{p:.2f}' for p in ps)}  {f.name}")
+            if not seen["yes"] or not seen["no"]:
+                print(f"  {s.name} turn {i}: needs yes AND no fixtures under {base}")
+                wrong += 1
+                continue
+            lo_yes, hi_no = min(seen["yes"]), max(seen["no"])
+            rec = round(min(1.0, hi_no + 0.05), 2)
+            sep = "separated" if lo_yes > hi_no else "OVERLAP"
+            print(f"{s.name} turn {i}: yes >= {lo_yes:.2f}, no <= {hi_no:.2f} ({sep}); "
+                  f"p_min {p_min} {'holds' if lo_yes >= p_min > hi_no else 'MISJUDGES'}; "
+                  f"recommended p_min >= {rec}  [{len(seen['yes'])} yes, {len(seen['no'])} no, "
+                  f"x{args.repeat}; {judge.calls} calls, {judge.input_tokens} input tokens]")
+    return 1 if wrong else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

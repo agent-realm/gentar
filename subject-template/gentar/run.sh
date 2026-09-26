@@ -340,6 +340,13 @@ EOF
   return 1
 }
 
+# 0 when the suite has no judged turn (a semantic expect), or the judge
+# key is set. A judged suite without it would only refuse (exit 2).
+judge_ready() {
+  grep -Eq '^[[:space:]]*(\[driver\.turns\.judge\]|judge[[:space:]]*=)' "$1" || return 0
+  [ -n "${TYPESAFE_API_KEY:-}" ]
+}
+
 # --sweep: every suite this environment can run. A suite whose
 # credentials are absent is SKIPPED with its reason, not run into an
 # exit-2 refusal that would turn the whole sweep red for a key nobody
@@ -352,10 +359,12 @@ if [ "$SWEEP" = 1 ]; then
   for f in "$HERE"/scenarios/*.toml; do
     [ -f "$f" ] || continue
     s=$(basename "$f" .toml)
-    if credentials_present "$f"; then
-      runnable="$runnable $s"
-    else
+    if ! credentials_present "$f"; then
       echo "skipping $s — no credential group of it is fully set" >&2
+    elif ! judge_ready "$f"; then
+      echo "skipping $s — it has judged turns and TYPESAFE_API_KEY is not set" >&2
+    else
+      runnable="$runnable $s"
     fi
   done
   [ -n "$runnable" ] || { echo "no runnable suites in gentar/scenarios" >&2; exit 2; }
@@ -833,7 +842,7 @@ done
 # file is passed through the engine's bin/redact, which replaces the VALUES
 # of these variables: the bench-host identity, plus every credential a
 # suite here declares.
-REDACT_NAMES="GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_JUMP GENTAR_TART_HOST GENTAR_TART_USER GENTAR_DAYTONA_API_KEY GENTAR_OSB_API_KEY GENTAR_OTLP_KEY GENTAR_OTLP_EXPORT"
+REDACT_NAMES="GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_JUMP GENTAR_TART_HOST GENTAR_TART_USER GENTAR_DAYTONA_API_KEY GENTAR_OSB_API_KEY GENTAR_OTLP_KEY GENTAR_OTLP_EXPORT TYPESAFE_API_KEY"
 for f in ${SCENARIO_FILES[@]+"${SCENARIO_FILES[@]}"}; do
   REDACT_NAMES="$REDACT_NAMES $(credential_groups "$f" | tr '\n' ' ')"
 done

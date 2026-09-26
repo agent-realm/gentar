@@ -231,6 +231,39 @@ def _run(name: str, cfg: Config | None = None) -> int:
             _write_report(report, cfg)
             return 2
 
+    # -- judge guard: refuse before any bench exists ---------------------
+    # A semantic turn sends the current screen to a judge (TypeSafe). That
+    # is allowed only for a scenario that declares its data synthetic
+    # (pilot, 2026-09-26) — refusing here, not mid-run, means no bench and
+    # no screen ever exists for a scenario that may not use one. A missing
+    # key is refused the same way: a semantic suite without its judge is
+    # a usage error, never a pass. Names only; the key never reaches a log.
+    if scenario and getattr(scenario, "uses_judge", False):
+        from gentar.judge import KEY_NAME, SYNTHETIC
+        problem = ""
+        if scenario.data != SYNTHETIC:
+            problem = (f"judge guard: scenario {name!r} uses a judged turn but does "
+                       f"not declare [scenario] data = \"synthetic\" — no screen may "
+                       f"leave the arena (refusing before any bench exists)")
+        elif not os.environ.get(KEY_NAME):
+            problem = (f"judge guard: scenario {name!r} uses a judged turn and "
+                       f"{KEY_NAME} is not set (refusing before any bench exists)")
+        if problem:
+            print(f"Error: {problem}")
+            spans = Spans(cfg)
+            spans.emit(ARENA_SUBJECT, "", name, "judge.refuse", "error",
+                       attrs={"data": scenario.data or "(undeclared)"},
+                       detail="run refused: judge guard")
+            report = RunReport(
+                scenario=name,
+                run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+                subject=(scenario.subject or ARENA_SUBJECT),
+                reproduce=f"docker compose run --rm coordinator run {name}",
+                error=problem)
+            report.mark("refuse", 2)
+            _write_report(report, cfg)
+            return 2
+
     # A declared credential that is SET but sits outside the winning group
     # is dropped — correctly — but never silently: see dropped_credentials.
     # Names only; a value never reaches a log line.

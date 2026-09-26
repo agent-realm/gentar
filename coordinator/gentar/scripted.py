@@ -4,11 +4,12 @@ danger gate fires. The same PtyDriver serves the agent adapters; only
 the turn source differs (scripted TOML vs a live agent's choices).
 """
 
+import os
 import re
 import time
 
 from gentar.benchhost import BenchHost
-from gentar.pty_driver import _KEYS, DriverAbort, PtyDriver
+from gentar.pty_driver import _KEYS, APPROVAL_RE, DANGER_RE, DriverAbort, PtyDriver, _tail
 from gentar.spans import Spans
 
 
@@ -21,6 +22,16 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
               env: dict[str, str] | None = None,
               report=None) -> str:
     name = scenario.name
+    judge = None
+    if getattr(scenario, "uses_judge", False):
+        # The coordinator already refused a non-synthetic scenario or a
+        # missing key before any bench existed; Judge re-checks both.
+        from gentar.judge import KEY_NAME, Judge
+        judge = Judge(scenario, os.environ.get(KEY_NAME, ""), spans.redactor.scrub,
+                      spans, subject, run_id,
+                      max_calls=scenario.judge_max_calls,
+                      max_input_tokens=scenario.judge_max_input_tokens,
+                      lines=scenario.judge_lines)
     driver = PtyDriver(bench, run_id)
     driver.start(scenario.driver_command, env=env)
     spans.emit(subject, run_id, name, "driver.start",
@@ -34,6 +45,9 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                     raise TurnFailure(f"turn {i}: prompt {prompt!r} never appeared")
                 driver.send_line(turn.get("send", ""))
                 _ok(spans, subject, run_id, name, i, f"answer {prompt!r}")
+            elif kind == "expect" and "judge" in turn:
+                verdict = _judged(driver, judge, turn, i)
+                _ok(spans, subject, run_id, name, i, verdict)
             elif kind == "expect":
                 pattern = turn["pattern"]
                 if not driver.drive_until(pattern, turn.get("timeout", 90)):
@@ -112,6 +126,41 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
         if report is not None:
             report.transcript = driver.transcript
         driver.close()
+
+
+def _judged(driver: PtyDriver, judge, turn: dict, i: int, sleep=time.sleep) -> str:
+    """A semantic expect: poll the screen until the judge says yes with
+    P(yes) >= p_min on `hold` consecutive polls. Never presses anything —
+    unlike a regex expect, it does not auto-approve ordinary prompts — and
+    the deterministic danger gate is checked on every poll, before the
+    judge is asked. A timeout fails, naming the last P(yes) and whether it
+    was a clear no (<= p_max_no) or undecided."""
+    from gentar.judge import JudgeUnavailable
+    j = turn["judge"]
+    p_min, p_no = float(j.get("p_min", 0.9)), float(j.get("p_max_no", 0.2))
+    hold, every = int(j.get("hold", 2)), float(j.get("every", 3))
+    limit = float(turn.get("timeout", 90))
+    waited, streak, p = 0.0, 0, None
+    while True:
+        scr = driver.screen()
+        if APPROVAL_RE.search(scr) and DANGER_RE.search(scr):
+            driver.abort("a prompt matching the danger gate appeared during a judged turn")
+            raise DriverAbort("danger gate: " + _tail(scr, 300))
+        try:
+            p = judge.noul(scr, j["question"], true=j.get("true", ""),
+                           false=j.get("false", ""), turn=str(i))
+        except JudgeUnavailable as exc:
+            raise TurnFailure(f"turn {i}: judge unavailable — {exc}") from None
+        streak = streak + 1 if p >= p_min else 0
+        if streak >= hold:
+            return f"judge yes (P={p:.2f}, held {hold}) {j['question'][:80]!r}"
+        if waited >= limit:
+            band = "a clear no" if p <= p_no else "undecided"
+            raise TurnFailure(
+                f"turn {i}: judge never held yes within {limit:.0f}s — last "
+                f"P(yes)={p:.2f} ({band}; needs >= {p_min} x{hold}): {j['question'][:120]!r}")
+        sleep(every)
+        waited += every
 
 
 def _await(driver: PtyDriver, pattern: re.Pattern, max_seconds: int) -> bool:
