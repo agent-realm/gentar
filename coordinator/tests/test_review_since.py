@@ -120,6 +120,25 @@ class ReviewSinceTest(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("--since needs a ref", r.stderr)
 
+    def test_an_uncommitted_suite_edit_does_not_cover_a_gap(self):
+        # the diff is from commits; the suites must be too (Codex, P1)
+        s = self.repo / "gentar" / "scenarios" / "first-suite.toml"
+        s.write_text(s.read_text() + 'run2 = "cat lib.py"\n')
+        (self.repo / "gentar" / "scenarios" / "new-suite.toml").write_text('run = "lib.py"\n')
+        out = self.review().stdout
+        unmentioned = out.split("changed paths no suite mentions:")[1]
+        self.assertIn("lib.py", unmentioned)
+        self.assertNotIn("new-suite.toml", out.split("suites that mention")[1])
+
+    def test_a_repo_with_no_executables_still_reports(self):
+        # empty candidate list: grep exits 1 under pipefail (Codex, P2)
+        for p in ("install.sh", "bin/tool", "bin/fresh"):
+            git(self.repo, "rm", "-q", p)
+        git(self.repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "lib only")
+        r = self.review()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("removed  bin/tool", r.stdout)
+
     def test_a_broken_policy_does_not_hide_the_diff(self):
         (self.repo / "gentar" / "policy.toml").write_text("[phase1]\nbenh = 1\n")
         r = self.review()

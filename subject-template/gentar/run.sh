@@ -452,7 +452,7 @@ if [ "$REVIEW_ONLY" = 1 ]; then
   # `bin/tool`, and comparing those whole against a basename never
   # matches — the first version of this check reported install.sh as
   # unasserted for a suite whose very first step runs it.
-  mentions=$(cat $sc | grep -vE '^[[:space:]]*#' \
+  mentions=$(cat $sc | { grep -vE '^[[:space:]]*#' || true; } \
     | tr -c 'A-Za-z0-9_.-' '\n' | sort -u)
 
   echo "suites:"
@@ -474,7 +474,9 @@ if [ "$REVIEW_ONLY" = 1 ]; then
   # "this is run, not imported", in any language.
   cands=$( { git ls-files -s 2>/dev/null | awk '$1 == "100755" { print $4 }' || true
              git ls-files 2>/dev/null | grep -E '^bin/' || true
-           } | grep -vE '^(gentar|test|tests|\.github)/' | sort -u)
+           } | { grep -vE '^(gentar|test|tests|\.github)/' || true; } | sort -u)
+  # (|| true: a library-only repo ships no executable, grep then exits 1,
+  # and pipefail made --review die here instead of reporting.)
 
   gaps=0
   for c in $cands; do

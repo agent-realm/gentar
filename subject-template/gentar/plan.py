@@ -532,7 +532,14 @@ def review(repo, since):
             i += 2
     ours = [c for c in changes if not c[1].startswith("gentar/")]
     was, now = _executables(repo, old), _executables(repo, new)
-    suites = {f.name: suite_mentions(f.read_text()) for f in sorted(SCENARIOS.glob("*.toml"))}
+    # The suites as committed at HEAD, like the diff: an uncommitted edit to a
+    # scenario must not move a changed path into "covered" (Codex).
+    rel = "./" + os.path.relpath(SCENARIOS, repo).replace(os.sep, "/")
+    # not -r: the scenarios directory's own files, as run.sh globs them
+    names = sorted(n for n in _git(repo, "ls-tree", "-z", "--name-only", new, rel + "/")
+                   .split("\0") if n.endswith(".toml"))
+    suites = {n.rsplit("/", 1)[-1]: suite_mentions(_git(repo, "show", f"{new}:./{n}"))
+              for n in names}
 
     label = old[:12] if old.startswith(since) else f"{since} ({old[:12]})"
     lines = [f"since {label} .. HEAD ({new[:12]})", ""]
