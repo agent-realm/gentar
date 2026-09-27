@@ -3,6 +3,7 @@
 
     gentar/plan.py plan     # what should THIS CI event run?  (the kit's plan job)
     gentar/plan.py lint     # bench-free adaptation checks    (part of run.sh --check)
+    gentar/plan.py review <ref>   # what changed since <ref>      (part of run.sh --review)
 
 The policy is declared in gentar/policy.toml at adaptation (AGENTS.md,
 decision 5) and read here, and only here. The workflow does what `plan`
@@ -459,9 +460,124 @@ def lint(policy, engine_root):
     return problems
 
 
+# --- review: what changed since <ref> ------------------------------------
+#
+# run.sh --review's second half. The first half (in run.sh) compares names:
+# what the repo ships against what the suites mention. Its blind spot is a
+# change INSIDE a file a suite already names -- a new statement in an
+# existing binary. This half closes that from the other side: it starts from
+# the commits, not the names, so every changed path is listed whether or not
+# a suite mentions it, and each suite that mentions one is named for
+# re-reading. Deterministic: git objects only (the ref and HEAD, never the
+# working tree), sorted output, no network, no bench. It reports; it never
+# fails a build.
+REF_SAFE = re.compile(r"[A-Za-z0-9._/~^@{}-]+")
+# Same exclusions as run.sh's candidate list: the kit and the tests are not
+# what a fresh machine runs.
+NOT_SHIPPED = re.compile(r"^(gentar|test|tests|\.github)/")
+
+
+def _git(repo, *args):
+    import subprocess
+    r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise Refuse(f"git {' '.join(args[:2])}: {r.stderr.strip() or 'failed'}")
+    return r.stdout
+
+
+def _executables(repo, rev):
+    """Paths at `rev` a fresh machine can RUN: the executable bit, or bin/."""
+    out = set()
+    for rec in _git(repo, "ls-tree", "-r", "-z", rev).split("\0"):
+        if not rec:
+            continue
+        meta, path = rec.split("\t", 1)
+        mode = meta.split()[0]
+        if (mode == "100755" or path.startswith("bin/")) and not NOT_SHIPPED.match(path):
+            out.add(path)
+    return out
+
+
+def suite_mentions(text):
+    """Every token a suite uses, split on path separators -- run.sh's rule,
+    so `./install.sh` and `bin/tool` count as mentions of their basenames."""
+    lines = [l for l in text.splitlines() if not l.lstrip().startswith("#")]
+    return set(t for t in re.split(r"[^A-Za-z0-9_.-]+", "\n".join(lines)) if t)
+
+
+def _mentioned(path, tokens):
+    base = path.rsplit("/", 1)[-1]
+    return bool(base) and (base in tokens or base.rsplit(".", 1)[0] in tokens)
+
+
+def review(repo, since):
+    if since.startswith("-") or not REF_SAFE.fullmatch(since):
+        raise Refuse(f"bad ref: {since!r}")
+    try:
+        old = _git(repo, "rev-parse", "-q", "--verify", f"{since}^{{commit}}").strip()
+    except Refuse:
+        raise Refuse(f"ref {since!r} not found here (a shallow CI checkout needs "
+                     f"fetch-depth: 0)") from None
+    new = _git(repo, "rev-parse", "HEAD").strip()
+    changes = []                                   # (status, path, old path)
+    recs = _git(repo, "diff", "--name-status", "-z", "-M", old, new).split("\0")
+    i = 0
+    while i < len(recs) and recs[i]:
+        st = recs[i][0]
+        if st in "RC":
+            changes.append((st, recs[i + 2], recs[i + 1]))
+            i += 3
+        else:
+            changes.append((st, recs[i + 1], None))
+            i += 2
+    ours = [c for c in changes if not c[1].startswith("gentar/")]
+    was, now = _executables(repo, old), _executables(repo, new)
+    # The suites as committed at HEAD, like the diff: an uncommitted edit to a
+    # scenario must not move a changed path into "covered" (Codex).
+    rel = "./" + os.path.relpath(SCENARIOS, repo).replace(os.sep, "/")
+    # not -r: the scenarios directory's own files, as run.sh globs them
+    names = sorted(n for n in _git(repo, "ls-tree", "-z", "--name-only", new, rel + "/")
+                   .split("\0") if n.endswith(".toml"))
+    suites = {n.rsplit("/", 1)[-1]: suite_mentions(_git(repo, "show", f"{new}:./{n}"))
+              for n in names}
+
+    label = old[:12] if old.startswith(since) else f"{since} ({old[:12]})"
+    lines = [f"since {label} .. HEAD ({new[:12]})", ""]
+    lines.append(f"changed paths outside gentar/: {len(ours)}")
+    for st, path, frm in sorted(ours, key=lambda c: c[1]):
+        lines.append(f"  {st}  {frm} -> {path}" if frm else f"  {st}  {path}")
+    added, removed = sorted(now - was), sorted(was - now)
+    lines += ["", "executables:"]
+    lines += [f"  added    {p}" for p in added] + [f"  removed  {p}" for p in removed]
+    changed_exe = sorted(p for st, p, _ in ours if p in now and p in was and st == "M")
+    lines += [f"  changed  {p}" for p in changed_exe]
+    if not (added or removed or changed_exe):
+        lines.append("  (none)")
+    touched = {p for _, p, _ in ours} | {f for _, _, f in ours if f}
+    lines += ["", "suites that mention a changed path (re-read them):"]
+    unmentioned = set(touched)
+    hits = 0
+    for name, tokens in suites.items():
+        paths = sorted(p for p in touched if _mentioned(p, tokens))
+        unmentioned -= set(paths)
+        if paths:
+            hits += 1
+            lines.append(f"  {name:<28} {', '.join(paths)}")
+    if not hits:
+        lines.append("  (none)")
+    lines += ["", "changed paths no suite mentions:"]
+    lines += [f"  {p}" for p in sorted(unmentioned)] or ["  (none)"]
+    lines += ["", "not covered here: --help output per executable (it needs the binaries",
+              "run, which belongs on a bench, not on this host)."]
+    return "\n".join(lines)
+
+
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else ""
     try:
+        if cmd == "review" and len(argv) == 3:    # needs no policy: a broken
+            print(review(HERE.parent, argv[2]))   # one must not hide the diff
+            return 0
         policy = load_policy()
         if cmd == "plan":
             emit(plan(os.environ, policy))
@@ -482,7 +598,7 @@ def main(argv):
     except Refuse as exc:
         print(f"plan: {exc}", file=sys.stderr)
         return 2
-    print("usage: gentar/plan.py plan | lint [engine-root] | gate-config", file=sys.stderr)
+    print("usage: gentar/plan.py plan | lint [engine-root] | gate-config | review <ref>", file=sys.stderr)
     return 2
 
 

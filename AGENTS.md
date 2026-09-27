@@ -212,21 +212,31 @@ with the arena. **The arena cannot go stale**: it is rebuilt from scratch on
 every run, every container is `--rm`, and benches are disposable. What goes
 stale is the *adaptation* — the suites versus what the repo now does.
 
-Start with `gentar/run.sh --review`. It needs no engine, no Docker and no
-bench, and it prints what the repo ships that no suite mentions, plus the
-diff since the scenarios last changed.
+Start with `gentar/run.sh --review` (`--since <ref>` to diff from a release
+or from the last time you reviewed). It needs no engine, no Docker and no
+bench. It prints what the repo ships that no suite mentions, then a
+deterministic diff since the ref: changed paths, executables added, removed
+or changed, which suites mention a changed path, and which changed paths no
+suite mentions. See
+[`docs/guides/review-an-adaptation.md`](docs/guides/review-an-adaptation.md).
 
-Then do the part it deliberately does not: **read that diff and decide.** A
-gap is a question, not a defect — a new internal helper may deserve nothing,
-while a new install step or user-facing command probably deserves a suite.
-Propose specific assertions, in the same shape as decision 4, and confirm
-them with the pilot before writing.
+Then do the part it deliberately does not:
 
-Two honesty rules carry over. The check's blind spot is real: it compares
-names, so a behaviour change *inside* a file some suite already mentions
-will not appear — say so rather than implying the review was exhaustive.
-And adding a suite is not the same as running one: until it has exited 0,
-report it as written, not working.
+1. **Read** the repo's README and docs for what changed, the diff it names,
+   and each changed executable's `--help` (its own `--help` is not diffed:
+   that means running the binaries, which belongs on a bench).
+2. **Decide per gap.** A gap is a question, not a defect: a new internal
+   helper may deserve nothing, while a new install step or user-facing
+   command probably deserves a suite. Each suite that mentions a changed
+   path needs re-reading, because its assertions may now be too weak.
+3. **Propose** specific assertions, in the shape of decision 4, and a
+   semantic suite (decision 7) only where a regex would be brittle.
+   Confirm them with the pilot before writing.
+
+Two honesty rules carry over. The review reads committed history, not the
+working tree, and it does not run anything: say so rather than implying it
+was exhaustive. And adding a suite is not the same as running one: until it
+has exited 0, report it as written, not working.
 
 ## Deploying an arena
 
