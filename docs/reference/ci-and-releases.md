@@ -13,12 +13,22 @@ that exists today ([`.github/workflows/gentar.yml`](../../.github/workflows/gent
 |---|---|---|
 | gate | every PR, every push to `main` | six deterministic bench-only suites: `smoke`, `bench-template-verify`, `otlp-selfreport`, `budget-sim`, `scripted-onboarding`, `scripted-danger` |
 | keyword tag | a tag pushed at **any** commit | `arena` → every gate suite at that commit, unmerged branches included; `arena-<scenario>` → that one suite (an unknown name refuses with exit 2, no bench spent); `v*` → **release proof**, the full gate. Re-run by deleting and re-pushing the tag |
-| nightly | cron, post-merge | the scripted and real-agent suites plus every subject suite, behind a budget cap and a read token |
+| nightly | cron (00:17 UTC), post-merge | the scripted and real-agent suites plus every subject suite, behind a budget cap and a read token; **skipped** when it actually starts inside another arena's reserved slot (below) |
 | dispatch | manual, or from another repo | one named scenario at an arbitrary engine ref and subject ref |
 
 The gate runs one bench at a time on purpose: concurrent `sbx create`
 calls on a shared bench-host contend on a cross-process auth lock and
 wedge each other.
+
+The bench-host is shared with adopters' own nightlies, so the nightly
+checks the time it **actually starts**, not its cron time: GitHub starts
+scheduled runs late under load (the 00:17 cron once started at 05:14Z).
+`bin/reserved-window` holds the windows, `02:00-03:30,04:00-05:30` UTC by
+default (claude-playbooks at 02:17, cockpit at 04:17), and the repo
+variable `GENTAR_RESERVED_UTC` overrides them. Inside one, the
+`nightly / reserved-window check` job posts a notice and the nightly is
+skipped, not failed. The check runs on the self-hosted runner and touches
+no bench.
 
 Two coordinator-side guards keep a scheduled arena from running away:
 a **budget guard** (`GENTAR_BUDGET_CAP` against each scenario's declared

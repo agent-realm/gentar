@@ -170,9 +170,38 @@ jobs:
           bin/bench-reap || true
           rm -f /tmp/gentar_ci_bench_key
 
+  # GitHub starts scheduled runs late under load: the 00:17 cron below
+  # started at 05:14Z on 2026-09-27, inside cockpit's nightly slot on the
+  # shared bench-host. The time a run actually STARTS is what counts, so it
+  # is checked here, on the self-hosted runner (it touches no bench, and
+  # needs no GitHub-hosted minutes). Windows: bin/reserved-window, repo var
+  # GENTAR_RESERVED_UTC to change them.
+  nightly-window:
+    name: nightly / reserved-window check
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.scenario == 'nightly')
+    runs-on: [self-hosted, gentar-bench]
+    outputs:
+      clear: ${{ steps.check.outputs.clear }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          GENTAR_RESERVED_UTC: ${{ vars.GENTAR_RESERVED_UTC || '02:00-03:30,04:00-05:30' }}
+        run: |
+          set +e
+          why=$(bin/reserved-window); rc=$?
+          set -e
+          case $rc in
+            0) echo "::notice::nightly skipped: $why (another arena's nightly slot on the shared bench-host)"
+               echo clear=false >> "$GITHUB_OUTPUT" ;;
+            1) echo clear=true >> "$GITHUB_OUTPUT" ;;
+            *) exit 2 ;;       # a bad GENTAR_RESERVED_UTC is an error, not a skip
+          esac
+
   nightly:
     name: nightly / subject suites
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.scenario == 'nightly')
+    needs: nightly-window
+    if: needs.nightly-window.outputs.clear == 'true'
     runs-on: [self-hosted, gentar-bench]
     env:
       COMPOSE_PROJECT_NAME: gentar-nightly
