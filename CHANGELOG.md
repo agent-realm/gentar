@@ -22,6 +22,21 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.8.1 — 2026-09-27
+
+### Fixed
+
+- **A goal pilot hung `run.sh --check`** (claude-playbooks' first subject
+  goal pilot). The dry run started the driver of a suite with no turns and
+  waited on an interactive program forever. A goal suite is now UNVERIFIED
+  in the dry run: its driver is not started and its assertions are not run,
+  since nothing was driven. `--check` accepts it, and the arena proves it.
+- **A judged `expect` crashed the dry run** (`KeyError: 'pattern'`, since
+  0.7.0). It is UNVERIFIED now.
+- **The kit's pull-request guard covers `pull_request_target`,** so a repo
+  on that trigger no longer bypasses the refusal of judged suites.
+- `plan.py`: a dead `JUDGED` regex is removed.
+
 ### Added
 
 - **The docs standard** (pilot, 2026-09-26: no release without it):

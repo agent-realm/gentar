@@ -168,3 +168,61 @@ class TemplateStagingTest(_ScratchAdoption):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+GOAL_SUITE = """[scenario]
+name = "{name}"
+subject = "fid"
+data = "synthetic"
+[driver]
+command = "sh -c 'read x; read y'"
+goal = "Do the thing."
+[[driver.actions]]
+id = "go"
+key = "enter"
+when = "always"
+[[verify.commands]]
+command = "false"
+"""
+
+JUDGED_SUITE = """[scenario]
+name = "{name}"
+subject = "fid"
+data = "synthetic"
+[driver]
+command = "sh -c 'echo ready; sleep 1'"
+[[driver.turns]]
+type = "expect"
+[driver.turns.judge]
+question = "Does `screen` say ready?"
+"""
+
+
+@unittest.skipUnless(KIT.exists(), "the kit is not in the image build context")
+class SemanticSuitesInTheDryRunTest(_ScratchAdoption):
+    """claude-playbooks' first goal pilot hung run.sh --check: the dry run
+    started the driver of a suite with no turns and waited forever."""
+
+    def write(self, name, text):
+        (self.repo / "gentar" / "scenarios" / f"{name}.toml").write_text(text.format(name=name))
+
+    def test_a_goal_pilot_is_unverified_and_never_started(self):
+        self.write("goal", GOAL_SUITE)
+        try:
+            r = subprocess.run([sys.executable, "gentar/dryrun.py", "gentar/scenarios/goal.toml"],
+                               cwd=self.repo, capture_output=True, text=True, timeout=30,
+                               env=dict(os.environ, GENTAR_ENGINE=str(ENGINE),
+                                        GENTAR_DRYRUN_SYSTEM_DIRS=str(self.tmp / "none")))
+        except subprocess.TimeoutExpired:
+            self.fail("the dry run started the goal pilot's driver and hung")
+        self.assertIn("UNVERIFIED", r.stdout, r.stdout + r.stderr)
+        self.assertNotEqual(r.returncode, 0)          # not proven is not a pass
+        self.assertNotIn("verify 0 FAIL", r.stdout)   # nothing driven, nothing verified
+        ok = self.dryrun("gentar/scenarios/goal.toml", GENTAR_DRYRUN_UNVERIFIED="ok")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)   # run.sh --check
+
+    def test_a_judged_expect_is_unverified_not_a_crash(self):
+        self.write("judged", JUDGED_SUITE)
+        r = self.dryrun("gentar/scenarios/judged.toml")
+        self.assertNotIn("Traceback", r.stderr, r.stderr)
+        self.assertIn("UNVERIFIED", r.stdout, r.stdout + r.stderr)

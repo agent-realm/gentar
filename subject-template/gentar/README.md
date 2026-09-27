@@ -14,7 +14,7 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.8.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.8.1` |
 
 ## Quickstart (local)
 
@@ -332,9 +332,12 @@ It is not a substitute for the arena. There is no sandbox, no template and no
 network policy, so it proves the shell and the assertions while the arena
 proves the isolation. Two kinds of suite it will not claim to have checked:
 those declaring `credentials` are skipped (they need a real agent and a real
-key), and those whose `[driver]` uses `pick` or `abort` turns come back
-`UNVERIFIED` with a nonzero exit — those need the real driver, and a picker
-that never matched must not read as a pass.
+key), and those whose `[driver]` uses `pick` or `abort` turns, a judged
+`expect`, or a `goal` come back `UNVERIFIED` with a nonzero exit — those need
+the real driver (or the judge), and a picker that never matched must not read
+as a pass. A goal pilot's driver is not even started, and its assertions are
+not run, since nothing was driven. `run.sh --check` accepts UNVERIFIED (it is
+not a defect the dry run can see); the arena is where these suites are proven.
 
 Add a suite = add a TOML here. The schema is the engine's
 `coordinator/gentar/toml_scenario.py` — read the pinned copy under

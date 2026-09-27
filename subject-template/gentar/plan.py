@@ -194,7 +194,6 @@ def _dedup(names):
     return out
 
 
-JUDGED = re.compile(r"^\s*(\[driver\.turns\.judge\]|judge\s*=)", re.MULTILINE)
 FIXTURES = HERE / "judge-fixtures"
 MIN_FIXTURES = 3
 

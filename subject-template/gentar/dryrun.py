@@ -15,8 +15,8 @@ same way.
 What it is NOT: a bench. There is no sandbox, no template, no network policy,
 no real agent. It proves the shell and the assertions; the arena still proves
 the isolation. Suites declaring `credentials` are skipped -- they need a real
-agent and a real key. Suites whose [driver] uses `pick` or `abort` turns come
-back UNVERIFIED with a nonzero exit: those turns need the real driver, and a
+agent and a real key. Suites whose [driver] uses `pick` or `abort` turns, a judged `expect`, or a
+goal pilot come back UNVERIFIED with a nonzero exit: those turns need the real driver, and a
 picker that never matched or a danger gate that never fired must not read as
 a pass.
 
@@ -277,8 +277,20 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
             log.append(f"  step {i} EXIT {r.returncode}\n    {step[:160]}\n    {(r.stderr or r.stdout).strip()[:300]}")
 
     unreplayed: list[str] = []
-    if sc.driver_command:
-        fails += drive(sc, env, workspace, log, unreplayed)
+    if getattr(sc, "goal", ""):
+        # A goal pilot is driven by the judge in the arena: here there is
+        # nothing to replay, and starting its command would block on an
+        # interactive program forever (claude-playbooks: `run.sh --check`
+        # hung). Its assertions describe the end of a drive that did not
+        # happen, so they are not run either. UNVERIFIED, not a pass.
+        unreplayed.append("goal")
+        fails += 1
+        log.append("  goal pilot: driven by the judge in the arena — NOT verified here")
+        verify_files, verify_commands = [], []
+    else:
+        verify_files, verify_commands = sc.files, sc.commands
+        if sc.driver_command:
+            fails += drive(sc, env, workspace, log, unreplayed)
 
     # File assertions go through the same shell as the steps, for the
     # same reason the engine runs them inside the bench: `test -e` and
@@ -286,7 +298,7 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
     # checking from the harness's own cwd would answer a different
     # question than the arena does. `~` is expanded to the scratch home
     # exactly as check_files expands it to the bench pilot's.
-    for f in sc.files:
+    for f in verify_files:
         p = f["path"].replace("~", home, 1) if f["path"].startswith("~") else f["path"]
         contains = f.get("contains")
         if contains is None:
@@ -303,7 +315,7 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
                 fails += 1
                 log.append(f"  file {f['path']} LACKS {contains!r} (or is missing)")
 
-    for i, c in enumerate(sc.commands):
+    for i, c in enumerate(verify_commands):
         r = sh(c["command"])
         ok = r.returncode == 0 and c.get("contains", "") in (r.stdout + r.stderr)
         if not ok:
@@ -374,6 +386,13 @@ def drive(sc, env, cwd, log, unreplayed) -> int:
                 buf = ""   # consumed, so the next turn matches a fresh prompt
             if not ok:
                 log.append(f"  turn {i} answer /{t['prompt']}/: prompt never appeared")
+        elif kind == "expect" and "judge" in t:
+            # A judged expect asks a judge about the screen — only in the
+            # arena. It must not crash here (it has no `pattern`) and must
+            # not pass either: not verified.
+            ok = False
+            unreplayed.append("judge")
+            log.append(f"  turn {i}: judged expect needs the judge — NOT verified here")
         elif kind == "expect":
             ok = pump(t["pattern"], t.get("timeout", 60))
             if not ok:
