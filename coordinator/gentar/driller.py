@@ -11,7 +11,9 @@ This module is the bench-free core. Everything here is decided from data
 (the environment, the sbx policy table, the sbx policy log, the transcript)
 so it is tested without a bench:
 
-  start_refusals   what stops a driller run before any bench exists (exit 2)
+  start_refusals   what stops a driller run before any bench exists (exit 2),
+                   from `sbx policy ls --json` (host_problems)
+  sandbox_problems per-sandbox rules the brief did not ask for (sbx kits)
   policy_argv      the per-sandbox allow rule for a deny-by-default host
                    (none at all by default: the model is called by the
                    coordinator, never from inside the bench)
@@ -122,33 +124,47 @@ def allow_problems(entry: str) -> str | None:
     return None
 
 
-def host_allows_all(rules: list[dict]) -> bool:
-    """True when the bench host's policy lets every sandbox reach anything:
-    an active network `allow **` that applies to all sandboxes."""
-    return any(r.get("decision") == "allow" and r.get("resource") == "**"
-               and r.get("type") == "network" and r.get("status", "active") == "active"
-               for r in rules)
+def policy_rules(ls_json) -> list[dict]:
+    """The rules of `sbx policy ls --json` (every policy, every scope). JSON,
+    not the `inspect` table: sbx 0.45 added METHOD/PATH/PROTOCOLS columns,
+    and a fixed-column parse then read `-` as the status, so an active
+    global `allow **` looked inactive and the host was NOT refused."""
+    data = json.loads(ls_json) if isinstance(ls_json, str) else ls_json
+    return list(data.get("rules") or [])
 
 
-def parse_policy_inspect(text: str) -> list[dict]:
-    """The rules table of `sbx policy inspect <policy>` (sbx 0.39):
+def _net(r: dict, decision: str, applies_to: str) -> bool:
+    return (r.get("resource_type") == "network" and r.get("decision") == decision
+            and r.get("status") == "active" and r.get("applies_to") == applies_to)
 
-        DECISION   RESOURCE   TYPE      RULE   STATUS
-        allow      **         network   -      active
-    """
-    rules, inside = [], False
-    for line in text.splitlines():
-        cols = line.split()
-        if cols[:3] == ["DECISION", "RESOURCE", "TYPE"]:
-            inside = True
-            continue
-        if inside:
-            if not cols:
-                break
-            if len(cols) >= 5 and cols[0] in ("allow", "deny"):
-                rules.append({"decision": cols[0], "resource": cols[1], "type": cols[2],
-                              "rule": cols[3], "status": cols[4]})
-    return rules
+
+def host_problems(rules: list[dict]) -> list[str]:
+    """Why this bench host cannot contain a driller. It must DENY `**` for
+    every sandbox (sbx `policy init deny-all`) and allow nothing globally:
+    one sandbox cannot be narrowed below a global allow (deny beats allow)."""
+    out = []
+    if not any(_net(r, "deny", "all") and "**" in (r.get("resources") or []) for r in rules):
+        out.append("the bench host's global network policy does not deny '**' "
+                   "(sbx policy init deny-all): a driller needs a deny-by-default host")
+    for r in rules:
+        if _net(r, "allow", "all"):
+            out.append(f"the bench host globally allows {', '.join(r.get('resources') or [])} "
+                       f"(rule {r.get('id')}): one sandbox cannot be narrowed below that")
+    return out
+
+
+def sandbox_problems(rules: list[dict], sandbox: str, allow: list[str]) -> list[str]:
+    """Rules scoped to the driller's own sandbox that the brief did not ask
+    for. sbx kits add per-sandbox rules on their own (`source: kit`); checked
+    after the sandbox exists and before the driller types anything."""
+    out = []
+    for r in rules:
+        if _net(r, "allow", f"sandbox:{sandbox}"):
+            extra = [h for h in (r.get("resources") or []) if h not in allow]
+            if extra:
+                out.append(f"sandbox rule {r.get('id')} ({r.get('origin', '?')}) allows "
+                           f"{', '.join(extra)}, which the brief does not name")
+    return out
 
 
 def start_refusals(env: dict, host_rules: list[dict], allow: list[str],
@@ -159,10 +175,7 @@ def start_refusals(env: dict, host_rules: list[dict], allow: list[str],
         if name in env:
             out.append(f"{name} is set: it sends BAML prompts and outputs to Boundary's "
                        f"hosted Studio. Unset it; drillers never use it")
-    if host_allows_all(host_rules):
-        out.append("the bench host's global network policy allows '**': one sandbox "
-                   "cannot be narrowed below that (sbx: deny beats allow), so a driller "
-                   "needs a deny-by-default bench host")
+    out += host_problems(host_rules)
     for entry in allow:
         why = allow_problems(entry)
         if why:

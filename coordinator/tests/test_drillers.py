@@ -3,8 +3,8 @@
 The boundary must hold whatever the driller does, so each layer that can be
 decided from data is tested from data: the refusals before any bench, the
 sbx policy log audit after the run, and the evidence rule for findings. The
-sbx shapes below are copied from sbx 0.39 on VM 142 (read-only probe,
-2026-09-27).
+sbx shapes below are copied from sbx 0.39 on VM 142 and sbx 0.45.1 on
+VM 151 (2026-09-27/28).
 """
 
 import json
@@ -17,25 +17,20 @@ from gentar import driller as d
 
 HERE = Path(__file__).resolve().parent.parent          # coordinator/
 
-INSPECT_ALLOW_ALL = """Policy:      local-policy
-Policy ID:   local-policy
-Source:      local
-Applies to:  all
-Status:      active
-
-Rules in this policy:
-DECISION   RESOURCE   TYPE               RULE   STATUS
-allow      **         network            -      active
-allow      **         filesystem:read    -      active
-allow      **         filesystem:write   -      active
-
-Rule IDs:
-RULE   RULE_ID                      EDITABLE   ACTION
--      default-allow-all            yes        sbx policy rm network --id default-allow-all
-"""
-
-INSPECT_DENY_DEFAULT = INSPECT_ALLOW_ALL.replace(
-    "allow      **         network            -      active\n", "")
+# `sbx policy ls --json --type network`, verbatim shapes:
+#   VM 142, sbx 0.39.0, `policy init allow-all`  (the shared bench-host)
+#   VM 151, sbx 0.45.1, `policy init deny-all`   (the driller host)
+ALLOW_ALL = {"rules": [{
+    "id": "default-allow-all", "name": "default-allow-all", "policy_id": "local-policy",
+    "scope": "global", "applies_to": "all", "resource_type": "network", "decision": "allow",
+    "resources": ["**"], "origin": "local", "layer": "local", "status": "active",
+    "editable": True}]}
+DENY_ALL = {"rules": [{
+    "id": "default-deny-all", "name": "default-deny-all", "policy_name": "default-deny-all",
+    "scope": "global", "applies_to": "all", "resource_type": "network", "decision": "deny",
+    "resources": ["**"], "origin": "local", "layer": "local", "status": "active",
+    "editable": False, "actions": ["net:connect:tcp", "net:connect:udp"]}]}
+DENY = d.policy_rules(json.dumps(DENY_ALL))
 
 SB = "g1-driller-white-hat-0"
 ENV = {"GENTAR_DRILLER_MODEL_URL": "http://tr0:20128/v1", "GENTAR_DRILLER_MODEL": "m"}
@@ -59,19 +54,38 @@ class RefusalsTest(unittest.TestCase):
 
     def test_the_shared_allow_all_host_is_refused(self):
         # VM 142 today: a sandbox cannot be narrowed below a global `allow **`
-        rules = d.parse_policy_inspect(INSPECT_ALLOW_ALL)
-        self.assertTrue(d.host_allows_all(rules))
-        why = d.start_refusals(ENV, rules, [], [])
-        self.assertTrue(any("deny-by-default bench host" in w for w in why), why)
+        why = d.start_refusals(ENV, d.policy_rules(json.dumps(ALLOW_ALL)), [], [])
+        self.assertTrue(any("does not deny '**'" in w for w in why), why)
+        self.assertTrue(any("globally allows **" in w for w in why), why)
 
-    def test_a_deny_by_default_host_with_a_clean_brief_goes(self):
-        rules = d.parse_policy_inspect(INSPECT_DENY_DEFAULT)
-        self.assertFalse(d.host_allows_all(rules))
-        self.assertEqual(d.start_refusals(ENV, rules, ["registry.npmjs.org:443"], ["DEMO_TOKEN"]), [])
+    def test_the_deny_all_host_with_a_clean_brief_goes(self):
+        self.assertEqual(d.start_refusals(ENV, DENY, ["registry.npmjs.org:443"], ["DEMO_TOKEN"]), [])
+
+    def test_no_rules_at_all_is_not_deny_by_default(self):
+        # an unreadable or empty policy must refuse, never pass by default
+        self.assertTrue(d.host_problems([]))
+
+    def test_a_global_allow_next_to_the_deny_is_still_refused(self):
+        rules = DENY + [dict(ALLOW_ALL["rules"][0], resources=["github.com"])]
+        self.assertEqual(len(d.host_problems(rules)), 1)
+
+    def test_inactive_rules_do_not_count(self):
+        inactive = [dict(DENY[0], status="inactive")]
+        self.assertTrue(d.host_problems(inactive))
+        self.assertEqual(d.host_problems(DENY + [dict(ALLOW_ALL["rules"][0], status="inactive")]), [])
+
+    def test_a_kit_rule_on_the_driller_sandbox_is_named(self):
+        kit = dict(ALLOW_ALL["rules"][0], id="k1", origin="kit", applies_to=f"sandbox:{SB}",
+                   resources=["proxy.golang.org", "registry.npmjs.org:443"])
+        other = dict(kit, applies_to="sandbox:someone-else")
+        why = d.sandbox_problems(DENY + [kit, other], SB, ["registry.npmjs.org:443"])
+        self.assertEqual(len(why), 1)
+        self.assertIn("proxy.golang.org", why[0])
+        self.assertNotIn("registry.npmjs.org", why[0])
 
     def test_boundary_api_key_refuses_whatever_its_value(self):
         for v in ("x", ""):
-            why = d.start_refusals(dict(ENV, BOUNDARY_API_KEY=v), [], [], [])
+            why = d.start_refusals(dict(ENV, BOUNDARY_API_KEY=v), DENY, [], [])
             self.assertTrue(any("BOUNDARY_API_KEY" in w for w in why))
         with self.assertRaises(d.DrillerRefusal):
             d.extract("hat", "notes", "t", env={"BOUNDARY_API_KEY": ""}, raw="[]")
@@ -81,12 +95,12 @@ class RefusalsTest(unittest.TestCase):
         for name in ("TYPESAFE_API_KEY", "BENCH_SSH_KEY", "GENTAR_DRILLER_MODEL_KEY",
                      "GENTAR_DAYTONA_API_KEY", "GENTAR_OSB_API_KEY", "GENTAR_OTLP_KEY",
                      "GENTAR_SOME_FUTURE_KEY", "gentar_bench_key", "BOUNDARY_API_KEY"):
-            why = d.start_refusals(ENV, [], [], [name])
+            why = d.start_refusals(ENV, DENY, [], [name])
             self.assertTrue(any(name in w for w in why), name)
-        self.assertEqual(d.start_refusals(ENV, [], [], ["DEMO_TOKEN", "MY_GENTAR_X"]), [])
+        self.assertEqual(d.start_refusals(ENV, DENY, [], ["DEMO_TOKEN", "MY_GENTAR_X"]), [])
 
     def test_the_model_route_must_be_set(self):
-        why = d.start_refusals({}, [], [], [])
+        why = d.start_refusals({}, DENY, [], [])
         self.assertEqual(sum("GENTAR_DRILLER_MODEL" in w for w in why), 2)
 
     def test_allowlist_entries(self):

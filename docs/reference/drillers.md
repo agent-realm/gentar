@@ -30,7 +30,8 @@ white hat conduct, but the prompt is not the control.
 
 | Layer | How | Where in `gentar/driller.py` |
 |---|---|---|
-| network | a deny-by-default bench host; one per-sandbox allow rule for the brief's exact hosts (no wildcards, no IPs), or none | `start_refusals`, `allow_problems`, `policy_argv` |
+| network | a deny-by-default bench host (`sbx policy ls --json` must show an active global deny `**` and no global allow); one per-sandbox allow rule for the brief's exact hosts (no wildcards, no IPs), or none | `host_problems`, `allow_problems`, `policy_argv` |
+| kit rules | sbx kits add per-sandbox rules on their own; any allow on the driller's sandbox that the brief did not name refuses the run before the driller types | `sandbox_problems` |
 | credentials | only the brief's; any `GENTAR_`, `BENCH_`, `TYPESAFE_` or `BOUNDARY_` name is refused, by class | `never_forward` |
 | hosted services | `BOUNDARY_API_KEY` present, with any value, refuses the run (exit 2) | `FORBIDDEN_ENV`, `extract` |
 | after the run | `sbx policy log --json` for the sandbox: a blocked host is a finding; an allowed host off the allowlist **fails the run** | `audit`, `verdict` |
@@ -46,7 +47,9 @@ sbx cannot narrow one sandbox below its host's global policy: a deny rule
 always beats an allow rule. A host whose global policy allows `**`, such as
 a shared bench host that others' suites rely on, can therefore not contain
 a driller. A driller refuses such a host (`start_refusals`), so it needs a
-bench host whose global network policy is deny-by-default.
+bench host whose global network policy is deny-by-default: VM 151
+`gentar-driller-host` on arf, initialised with `sbx policy init deny-all`
+(its global rule denies `**` for TCP and UDP).
 
 ## Findings
 
