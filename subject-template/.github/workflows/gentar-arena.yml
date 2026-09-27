@@ -55,12 +55,24 @@ permissions:
 
 jobs:
   plan:
-    runs-on: ubuntu-latest
+    # GitHub-hosted by default. GENTAR_CI_RUNNER (a repository or
+    # organisation variable, JSON: ["self-hosted", "linux-ci"]) moves plan
+    # and checks to a self-hosted runner, for an organisation without hosted
+    # minutes or one that keeps CI in-house. Never the `arena` runner:
+    # plan.py refuses that label. The bench job below is unaffected.
+    runs-on: ${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER) || 'ubuntu-latest' }}
+    # A fork's PR never reaches a self-hosted runner, not even to plan: with
+    # GENTAR_CI_RUNNER set, plan (and so everything after it) is skipped for
+    # it. Unset, forks keep the hosted checks as before.
+    if: >-
+      ${{ !vars.GENTAR_CI_RUNNER || github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository }}
     outputs:
       checks: ${{ steps.plan.outputs.checks }}
       bench: ${{ steps.plan.outputs.bench }}
       suites: ${{ steps.plan.outputs.suites }}
       os: ${{ steps.plan.outputs.os }}
+      runner: ${{ steps.plan.outputs.runner }}
       setup_go: ${{ steps.plan.outputs.setup_go }}
       setup_node: ${{ steps.plan.outputs.setup_node }}
       setup_python: ${{ steps.plan.outputs.setup_python }}
@@ -76,18 +88,21 @@ jobs:
           SCENARIO_INPUT: ${{ github.event.inputs.scenario }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GENTAR_FLOOR: ${{ vars.GENTAR_FLOOR }}   # only read without a policy.toml
+          GENTAR_CI_RUNNER: ${{ vars.GENTAR_CI_RUNNER }}   # validated, and logged as runner=
 
   checks:
     needs: plan
     if: needs.plan.outputs.checks == 'true'
     # [phase1] os: GitHub-hosted runners only (plan.py refuses anything
     # else). On macOS this is the dry-run on macOS userland — bash 3.2, BSD
-    # tools — not a macOS bench; that is gentar's tart tier.
+    # tools — not a macOS bench; that is gentar's tart tier. With
+    # GENTAR_CI_RUNNER set, the one runner it names instead (plan.py refuses
+    # macOS in [phase1] os then, rather than quietly running Linux).
     strategy:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(needs.plan.outputs.os) }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER) || matrix.os }}
     steps:
       - uses: actions/checkout@v4
       # Toolchains the dry-run's prepare() needs, declared in the policy
@@ -111,7 +126,10 @@ jobs:
         # writable there. On a hosted runner they are, and an install a suite
         # runs would land in /usr/local/bin instead of ~/.local/bin — passing
         # or failing for the runner's reasons, not the bench's. After the
-        # toolchain setup above, which may still need them.
+        # toolchain setup above, which may still need them. Hosted runners
+        # only: on a persistent self-hosted runner this would change the
+        # host itself, and its unprivileged user cannot write there anyway.
+        if: runner.environment == 'github-hosted'
         run: |
           group=root; [ "$(uname)" = Darwin ] && group=wheel
           for d in /usr/local/bin /usr/local/sbin; do

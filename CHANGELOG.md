@@ -22,6 +22,27 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.9.0 — 2026-09-28
+### Added
+- **`GENTAR_CI_RUNNER`** (kit): an optional repository or organisation
+  variable, a JSON runs-on value such as `["self-hosted", "linux-ci"]`.
+  With it set, the kit workflow's bench-free `plan` and `checks` jobs run
+  on that runner instead of GitHub-hosted ones. That is for an
+  organisation without hosted minutes (agent-realm, September 2026) or one
+  that keeps CI in-house. Unset, nothing changes.
+  - The resolved runner is in the plan output (`runner=`).
+  - `plan.py` refuses a malformed value, a value naming the `arena` label
+    (the checks run pull request code), and macOS in `[phase1] os` with the
+    variable set.
+  - With it set, a fork's pull request runs nothing, not even the plan: its
+    code never reaches a self-hosted runner.
+  - The `bench` job is unchanged, on `arena`. The release-gate snippet in
+    the docs uses the same expression.
+### Changed
+- Kit workflow: the "make the runner bench-like" step (`sudo chown` of
+  `/usr/local/bin`) runs on GitHub-hosted runners only; on a persistent
+  self-hosted runner it would change the host.
+
 ## 0.8.1 — 2026-09-27
 
 ### Fixed

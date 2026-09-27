@@ -40,6 +40,11 @@ GitHub-hosted runner cannot reach an internal bench-host.
 Several repositories can share one runner machine: register one runner
 per repository.
 
+The `arena` runner only drives benches. The bench-free `plan` and `checks`
+jobs run on GitHub-hosted runners unless `GENTAR_CI_RUNNER` names a
+self-hosted one (section 3); that runner needs `git`, `python3` and
+`bash`, and must not carry the `arena` label.
+
 ## 3. Secrets and variables
 
 | Name | Kind | Needed when |
@@ -53,6 +58,7 @@ per repository.
 | `TYPESAFE_API_KEY` | secret | the repository has judged suites (semantic turns, goal pilots, soft checks); unset, they are skipped by name |
 | `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` | secret / variable | agent-in-the-loop suites only |
 | `GENTAR_CLICKHOUSE_HOST_PORT`, `GENTAR_OTLP_HOST_PORT` | variables | another arena already uses the default ports on the runner machine |
+| `GENTAR_CI_RUNNER` | variable (repository or organisation) | the `plan` and `checks` jobs should run on a self-hosted runner instead of GitHub-hosted ones: a JSON runs-on value such as `["self-hosted", "linux-ci"]`, never the `arena` label. Fork PRs then run nothing |
 
 The bench-host values are **secrets, not variables**, because a public
 repository's Actions logs are public. Set every secret from a reference,
