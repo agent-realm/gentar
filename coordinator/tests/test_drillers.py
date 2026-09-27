@@ -77,17 +77,24 @@ class RefusalsTest(unittest.TestCase):
             d.extract("hat", "notes", "t", env={"BOUNDARY_API_KEY": ""}, raw="[]")
 
     def test_arena_keys_never_reach_a_driller_bench(self):
-        for name in ("TYPESAFE_API_KEY", "BENCH_SSH_KEY", "GENTAR_DRILLER_MODEL_KEY"):
+        # by class: a list missed GENTAR_DAYTONA_API_KEY and GENTAR_OSB_API_KEY (Codex)
+        for name in ("TYPESAFE_API_KEY", "BENCH_SSH_KEY", "GENTAR_DRILLER_MODEL_KEY",
+                     "GENTAR_DAYTONA_API_KEY", "GENTAR_OSB_API_KEY", "GENTAR_OTLP_KEY",
+                     "GENTAR_SOME_FUTURE_KEY", "gentar_bench_key", "BOUNDARY_API_KEY"):
             why = d.start_refusals(ENV, [], [], [name])
             self.assertTrue(any(name in w for w in why), name)
+        self.assertEqual(d.start_refusals(ENV, [], [], ["DEMO_TOKEN", "MY_GENTAR_X"]), [])
 
     def test_the_model_route_must_be_set(self):
         why = d.start_refusals({}, [], [], [])
         self.assertEqual(sum("GENTAR_DRILLER_MODEL" in w for w in why), 2)
 
     def test_allowlist_entries(self):
-        ok = ["registry.npmjs.org", "registry.npmjs.org:443", "*.npmjs.org", "tr0:20128"]
-        bad = ["**", "*", "*.org", "10.10.10.52", "10.10.10.52:22", "::1", "a b",
+        ok = ["registry.npmjs.org", "registry.npmjs.org:443", "tr0:20128"]
+        # no wildcard at all: *.co.uk / *.github.io admit hosts anyone can
+        # register, and no suffix list is complete (Codex)
+        bad = ["**", "*", "*.org", "*.npmjs.org", "*.co.uk", "*.github.io", "x.*.org",
+               "10.10.10.52", "10.10.10.52:22", "::1", "a b",
                "http://x.org", "x.org/path", "*.*.org", "x.org:99999999"]
         for e in ok:
             self.assertIsNone(d.allow_problems(e), e)
@@ -125,10 +132,10 @@ class AuditTest(unittest.TestCase):
         self.assertEqual((a.breaches, a.allowed, a.denied), ([], [], []))
 
     def test_host_matching(self):
-        allow = ["a.org", "b.org:443", "*.c.org"]
+        allow = ["a.org", "b.org:443", "*.c.org"]    # a wildcard never matches
         cases = {"a.org:80": True, "a.org:443": True, "b.org:443": True, "b.org:80": False,
-                 "x.c.org:443": True, "c.org:443": False, "xa.org:80": False,
-                 "a.org.evil:80": False, "evilc.org:443": False}
+                 "x.c.org:443": False, "c.org:443": False, "xa.org:80": False,
+                 "a.org.evil:80": False, "sub.a.org:80": False}
         for host, want in cases.items():
             self.assertEqual(d.host_allowed(host, allow), want, host)
 
@@ -154,7 +161,7 @@ class FindingsTest(unittest.TestCase):
 
     def test_frequency_counts_runs_not_mentions(self):
         runs = [[finding(), finding()],                      # one run, said twice
-                [finding(ev="-rw-r--r-- 1 u u 57 token")],   # sizes differ: same finding
+                [finding(ev="-rw-r--r-- 1 u u 41 token")],   # the same finding
                 [finding(cat="UNSAFE_DEFAULT", ev="debug=true", sev="LOW")],
                 []]
         cl = d.cluster(runs)
@@ -169,6 +176,29 @@ class FindingsTest(unittest.TestCase):
         f = finding(ev="token=sk-SECRETVALUE123")
         text = d.render(d.cluster([[f]]), 1, [], scrub=lambda s: s.replace("sk-SECRETVALUE123", "[redacted]"))
         self.assertNotIn("SECRETVALUE", text)
+
+    def test_volatile_numbers_merge_meaningful_ones_do_not(self):
+        # Codex: "port 22" vs "port 443" are two findings; a timestamp or a
+        # pid differing between runs is the same finding
+        same = [[finding(cat="SECRET_EXPOSURE", ev="2026-09-27T13:21:06Z pid 48213 token=x")],
+                [finding(cat="SECRET_EXPOSURE", ev="2026-09-28T01:02:03Z pid 51007 token=x")],
+                [finding(cat="SECRET_EXPOSURE", ev="Sep 27 13:21 token=x")],
+                [finding(cat="SECRET_EXPOSURE", ev="Oct 3 09:05 token=x")]]
+        self.assertEqual([c.runs for c in d.cluster(same)], [2, 2])
+        ports = [[finding(cat="UNSAFE_DEFAULT", ev="listening on 0.0.0.0:22")],
+                 [finding(cat="UNSAFE_DEFAULT", ev="listening on 0.0.0.0:443")]]
+        self.assertEqual([c.runs for c in d.cluster(ports)], [1, 1])
+
+    def test_hosts_in_the_report_and_verdict_are_scrubbed(self):
+        # a driller can put a token into a hostname it looks up; blocked or
+        # not, the name reaches the policy log (Codex)
+        leak = "sk-SECRETVALUE123.attacker.example:443"
+        scrub = lambda s: s.replace("sk-SECRETVALUE123", "[redacted]")
+        a = d.audit(log(blocked=[leak], allowed=[leak]), SB, [])
+        self.assertNotIn("SECRETVALUE", d.render([], 1, [a], scrub=scrub))
+        code, why = d.verdict(a, ["sandboxes: sk-SECRETVALUE123 appeared"], scrub=scrub)
+        self.assertEqual(code, 1)
+        self.assertNotIn("SECRETVALUE", " ".join(why))
 
     def test_the_order_is_deterministic(self):
         runs = [[finding(cat=c, ev=c.lower(), sev="LOW")] for c in ("B_CAT", "A_CAT")]

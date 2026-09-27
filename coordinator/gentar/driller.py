@@ -41,13 +41,16 @@ from dataclasses import dataclass, field
 # their cloud. Never set, and its presence refuses the run, whatever value.
 FORBIDDEN_ENV = ("BOUNDARY_API_KEY",)
 
-# Names that must never reach a driller's bench, whatever a brief says: the
-# arena's own keys, the judge's key, and the driller model's key (the model
-# is called from the coordinator, not from inside the bench).
-NEVER_FORWARD = frozenset({
-    "TYPESAFE_API_KEY", "BENCH_SSH_KEY", "GENTAR_CLONE_KEY", "GENTAR_CLONE_SSH_KEY",
-    "GENTAR_OTLP_KEY", "GENTAR_DRILLER_MODEL_KEY", "BOUNDARY_API_KEY",
-})
+# Names that must never reach a driller's bench, whatever a brief says. By
+# CLASS, not by list: every coordinator-owned name carries one of these
+# prefixes (bench, clone, OTLP, Daytona, OSB, driller model, judge), and a
+# list missed GENTAR_DAYTONA_API_KEY and GENTAR_OSB_API_KEY (Codex). A new
+# arena key is covered the day it is added.
+NEVER_FORWARD_PREFIXES = ("GENTAR_", "BENCH_", "TYPESAFE_", "BOUNDARY_")
+
+
+def never_forward(name: str) -> bool:
+    return name.upper().startswith(NEVER_FORWARD_PREFIXES)
 
 SEVERITY_ORDER = {"INFO": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
@@ -98,25 +101,24 @@ def brief(persona: Persona, readme: str, helps: dict[str, str], installed: list[
 
 # --- refusals before any bench ----------------------------------------------
 
-_HOST = re.compile(r"^(\*\.)?([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+(:[0-9]{1,5})?$")
+_HOST = re.compile(r"^([A-Za-z0-9-]+\.)*[A-Za-z0-9-]+(:[0-9]{1,5})?$")
 
 
 def allow_problems(entry: str) -> str | None:
-    """Why a brief's allowlist entry is refused, or None. Hostnames only:
-    no `**`, no bare `*`, no wildcard over a public suffix (`*.org`), and no
-    IP literal (an address is how a driller would reach arf's internal range;
-    a brief names the hosts the subject actually needs)."""
+    """Why a brief's allowlist entry is refused, or None. Exact hostnames
+    only, each with an optional port. No wildcard of any kind: `*.co.uk` or
+    `*.github.io` admits hosts anyone can register, and no suffix list is
+    complete enough to tell those from a safe one (Codex). No IP literal
+    either: an address is how a driller would reach arf's internal range."""
+    if "*" in entry:
+        return f"{entry!r}: a wildcard; name each host the subject needs"
     if not _HOST.match(entry):
-        return f"{entry!r}: not a host[:port] (wildcards only as a leading '*.')"
-    host = entry.split(":", 1)[0]
-    bare = host[2:] if host.startswith("*.") else host
+        return f"{entry!r}: not a host[:port]"
     try:
-        ipaddress.ip_address(bare)
+        ipaddress.ip_address(entry.split(":", 1)[0])
         return f"{entry!r}: an IP literal; name the host instead"
     except ValueError:
         pass
-    if host.startswith("*.") and bare.count(".") < 1:
-        return f"{entry!r}: a wildcard over a whole top-level domain"
     return None
 
 
@@ -165,7 +167,7 @@ def start_refusals(env: dict, host_rules: list[dict], allow: list[str],
         why = allow_problems(entry)
         if why:
             out.append(f"allowlist {why}")
-    for name in sorted(set(credentials) & NEVER_FORWARD):
+    for name in sorted(n for n in set(credentials) if never_forward(n)):
         out.append(f"credential {name} can never reach a driller's bench")
     for key in ("GENTAR_DRILLER_MODEL_URL", "GENTAR_DRILLER_MODEL"):
         if not env.get(key):
@@ -193,18 +195,15 @@ class Audit:
 
 
 def host_allowed(host: str, allow: list[str]) -> bool:
-    """`host` is sbx's `name:port`. An entry without a port allows any port;
-    `*.d` allows subdomains of d, not d itself."""
+    """`host` is sbx's `name:port`. An entry without a port allows any port.
+    Exact names only; allow_problems refuses wildcards before any run."""
     name, _, port = host.rpartition(":") if ":" in host else (host, "", "")
     name = name.lower()
     for entry in allow:
         e_name, _, e_port = entry.lower().partition(":")
         if e_port and e_port != port:
             continue
-        if e_name.startswith("*."):
-            if name.endswith(e_name[1:]):         # ".c.org": never c.org itself
-                return True
-        elif name == e_name:
+        if "*" not in e_name and name == e_name:
             return True
     return False
 
@@ -237,11 +236,12 @@ def outside_changes(before: dict[str, set], after: dict[str, set], own: set) -> 
     return out
 
 
-def verdict(result: Audit, outside: list[str]) -> tuple[int, list[str]]:
-    """Hard facts only. 1 on any breach or outside change; else 0."""
-    reasons = [f"boundary breach: reached {e.get('host')} ({e.get('proxy_type', '?')})"
-               for e in result.breaches]
-    reasons += [f"boundary breach: {c}" for c in outside]
+def verdict(result: Audit, outside: list[str], scrub=lambda s: s) -> tuple[int, list[str]]:
+    """Hard facts only. 1 on any breach or outside change; else 0. Hosts are
+    scrubbed: a driller can put a credential into a hostname it looks up."""
+    reasons = [f"boundary breach: reached {scrub(str(e.get('host')))} "
+               f"({e.get('proxy_type', '?')})" for e in result.breaches]
+    reasons += [f"boundary breach: {scrub(c)}" for c in outside]
     return (1 if reasons else 0), reasons
 
 
@@ -279,9 +279,23 @@ def supported(findings, transcript: str):
     return kept, dropped
 
 
+# Numbers that differ between runs of the SAME finding: timestamps, clock
+# times, month-day dates, and long ids (pids, inodes, byte counts). Other
+# numbers carry meaning: "port 22" and "port 443" are two findings (Codex).
+_VOLATILE = [
+    re.compile(r"\b\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?z?\b"),
+    re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
+    re.compile(r"\b\d{1,2}:\d{2}(:\d{2})?\b"),
+    re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec) +\d{1,2}\b"),
+    re.compile(r"\b\d{5,}\b"),
+]
+
+
 def _key(f) -> tuple[str, str]:
     cat = getattr(getattr(f, "category", None), "value", str(getattr(f, "category", "")))
-    ev = re.sub(r"[0-9]+", "#", _norm(getattr(f, "evidence", "")).lower())
+    ev = _norm(getattr(f, "evidence", "")).lower()
+    for rx in _VOLATILE:
+        ev = rx.sub("#", ev)
     return cat, ev
 
 
@@ -325,7 +339,9 @@ def render(clusters: list[Cluster], n_runs: int, audits: list[Audit], scrub=lamb
         lines += [f"- **{c.runs}/{n_runs}**{mark} {c.severity} {c.category}: {scrub(f.title)}",
                   f"  - evidence: `{scrub(_norm(f.evidence))}`",
                   f"  - reproduce: `{scrub(_norm(f.reproduce))}`"]
-    denied = sorted({e.get("host", "?") for a in audits for e in a.denied})
+    # A blocked host is still driller-chosen text: `<token>.attacker.example`
+    # is denied by the policy and would leak through the report (Codex).
+    denied = sorted({scrub(str(e.get("host", "?"))) for a in audits for e in a.denied})
     lines += ["", "### Boundary", ""]
     lines.append("Blocked attempts (the wall held): " + (", ".join(denied) if denied else "none"))
     return "\n".join(lines)

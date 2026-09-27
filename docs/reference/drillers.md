@@ -30,8 +30,8 @@ white hat conduct, but the prompt is not the control.
 
 | Layer | How | Where in `gentar/driller.py` |
 |---|---|---|
-| network | a deny-by-default bench host; one per-sandbox allow rule for the brief's hosts, or none | `start_refusals`, `allow_problems`, `policy_argv` |
-| credentials | only the brief's; the arena's keys can never be forwarded | `NEVER_FORWARD` |
+| network | a deny-by-default bench host; one per-sandbox allow rule for the brief's exact hosts (no wildcards, no IPs), or none | `start_refusals`, `allow_problems`, `policy_argv` |
+| credentials | only the brief's; any `GENTAR_`, `BENCH_`, `TYPESAFE_` or `BOUNDARY_` name is refused, by class | `never_forward` |
 | hosted services | `BOUNDARY_API_KEY` present, with any value, refuses the run (exit 2) | `FORBIDDEN_ENV`, `extract` |
 | after the run | `sbx policy log --json` for the sandbox: a blocked host is a finding; an allowed host off the allowlist **fails the run** | `audit`, `verdict` |
 | outside the bench | the host's sandboxes and templates before and after: any change **fails the run** | `outside_changes` |
@@ -62,10 +62,12 @@ bench host whose global network policy is deny-by-default.
   verbatim in the transcript (`supported`). A claim the screen never
   showed is dropped.
 - **Frequency:**
-  - findings are clustered across N runs by category and normalized
-    evidence (`cluster`);
+  - findings are clustered across N runs by category and evidence, with
+    only volatile numbers normalized: timestamps, clock times, dates and
+    long ids. A port or a mode is meaningful and is kept (`cluster`);
   - they are counted by runs, not by mentions, and ranked by that count;
   - a single-run finding is marked as such.
 - **Reported, never a verdict:** `render` writes the report section,
-  scrubbed by the run's redactor. The run's exit code comes from `verdict`
-  alone.
+  scrubbed by the run's redactor, and so is every host `verdict`
+  names: a driller can put a credential into a hostname it looks up.
+  The run's exit code comes from `verdict` alone.
