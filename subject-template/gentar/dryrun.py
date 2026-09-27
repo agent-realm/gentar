@@ -46,7 +46,7 @@ Needs a checkout of the engine for its scenario parser (no Docker, no
 bench): `gentar/run.sh --stage-engine` once, or GENTAR_ENGINE pointing
 at an existing one.
 """
-import os, pty, re, select, shlex, shutil, subprocess, sys, tempfile, time
+import os, pty, re, select, shlex, shutil, signal, subprocess, sys, tempfile, time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -277,7 +277,17 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
             log.append(f"  step {i} EXIT {r.returncode}\n    {step[:160]}\n    {(r.stderr or r.stdout).strip()[:300]}")
 
     unreplayed: list[str] = []
-    if getattr(sc, "goal", ""):
+    judged_turns = any(isinstance(t, dict) and "judge" in t for t in sc.turns)
+    if judged_turns and not getattr(sc, "goal", ""):
+        # A judged turn waits on a judge that only the arena has; the turns
+        # after it would drive a screen nobody confirmed. Not started, not
+        # verified — as for a goal pilot (Codex: an interactive driver
+        # still hung here).
+        unreplayed.append("judge")
+        fails += 1
+        log.append("  judged turns: need the judge in the arena — NOT verified here")
+        verify_files, verify_commands = [], []
+    elif getattr(sc, "goal", ""):
         # A goal pilot is driven by the judge in the arena: here there is
         # nothing to replay, and starting its command would block on an
         # interactive program forever (claude-playbooks: `run.sh --check`
@@ -411,13 +421,29 @@ def drive(sc, env, cwd, log, unreplayed) -> int:
                        f"— NOT verified here (run it in the arena)")
         if not ok:
             fails += 1
+    # Drain what is left, but never wait forever: a driver still waiting for
+    # input nobody will send (an interactive program after an unreplayed
+    # turn) is ended, so the dry run — and `run.sh --check` — cannot hang.
+    end = time.time() + 10
     try:
-        while select.select([fd], [], [], 1.0)[0]:
+        while time.time() < end and select.select([fd], [], [], 1.0)[0]:
             if not os.read(fd, 4096):
                 break
     except OSError:
         pass
-    os.waitpid(pid, 0)
+    done, _ = os.waitpid(pid, os.WNOHANG)
+    if not done:
+        log.append("  driver still running after its turns — ended (not a verdict)")
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                break
+            time.sleep(0.5)
+            if os.waitpid(pid, os.WNOHANG)[0]:
+                break
+        else:
+            os.waitpid(pid, 0)
     return fails
 
 

@@ -221,6 +221,37 @@ class SemanticSuitesInTheDryRunTest(_ScratchAdoption):
         ok = self.dryrun("gentar/scenarios/goal.toml", GENTAR_DRYRUN_UNVERIFIED="ok")
         self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)   # run.sh --check
 
+    def run_bounded(self, name):
+        try:
+            return subprocess.run([sys.executable, "gentar/dryrun.py", f"gentar/scenarios/{name}.toml"],
+                                  cwd=self.repo, capture_output=True, text=True, timeout=40,
+                                  env=dict(os.environ, GENTAR_ENGINE=str(ENGINE),
+                                           GENTAR_DRYRUN_SYSTEM_DIRS=str(self.tmp / "none")))
+        except subprocess.TimeoutExpired:
+            self.fail(f"the dry run of {name} hung")
+
+    def test_a_judged_suite_with_an_interactive_driver_does_not_hang(self):
+        # Codex: the driver was started before the judged turn was seen,
+        # then waited on forever
+        self.write("judgedi", JUDGED_SUITE.replace("sh -c 'echo ready; sleep 1'", "sh -c 'read x'"))
+        r = self.run_bounded("judgedi")
+        self.assertIn("UNVERIFIED", r.stdout, r.stdout + r.stderr)
+
+    def test_an_unreplayed_turn_never_leaves_the_dry_run_waiting(self):
+        # a pick turn cannot be replayed; the interactive driver behind it
+        # is ended instead of waited on
+        self.write("pick", """[scenario]
+name = "{name}"
+subject = "fid"
+[driver]
+command = "sh -c 'read x'"
+[[driver.turns]]
+type = "pick"
+label = "One"
+""")
+        r = self.run_bounded("pick")
+        self.assertIn("UNVERIFIED", r.stdout, r.stdout + r.stderr)
+
     def test_a_judged_expect_is_unverified_not_a_crash(self):
         self.write("judged", JUDGED_SUITE)
         r = self.dryrun("gentar/scenarios/judged.toml")
