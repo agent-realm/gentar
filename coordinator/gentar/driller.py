@@ -12,7 +12,8 @@ This module is the bench-free core. Everything here is decided from data
 so it is tested without a bench:
 
   start_refusals   what stops a driller run before any bench exists (exit 2),
-                   from `sbx policy ls --json` (host_problems)
+                   from `sbx policy ls --json` and `sbx policy check
+                   network <canary> --json` (host_problems)
   sandbox_problems per-sandbox rules the brief did not ask for (sbx kits)
   policy_argv      the per-sandbox allow rule for a deny-by-default host
                    (none at all by default: the model is called by the
@@ -25,10 +26,10 @@ so it is tested without a bench:
   cluster          the same finding across N runs, ranked by frequency
 
 The boundary is enforced by infrastructure, not by the persona prompt: sbx
-cannot express "deny everything but this list" for one sandbox on a host
-whose global policy allows `**` (deny always beats allow), so a driller
-refuses to run on such a host at all. It needs a bench host whose global
-network policy is deny-by-default.
+cannot narrow one sandbox below a global `allow **`, so a driller refuses
+such a host. On a deny-by-default host (`sbx policy init deny-all`) a
+per-sandbox allow does open exactly its hosts (proven on VM 151: the allowed
+host answered 200, every other host got sbx's 403).
 """
 
 from __future__ import annotations
@@ -138,14 +139,29 @@ def _net(r: dict, decision: str, applies_to: str) -> bool:
             and r.get("status") == "active" and r.get("applies_to") == applies_to)
 
 
-def host_problems(rules: list[dict]) -> list[str]:
-    """Why this bench host cannot contain a driller. It must DENY `**` for
-    every sandbox (sbx `policy init deny-all`) and allow nothing globally:
-    one sandbox cannot be narrowed below a global allow (deny beats allow)."""
+# Hosts whose GLOBAL policy check must come back denied: an ordinary public
+# name, a public address, arf's gateway and the other bench-host. Checked
+# with `sbx policy check network <canary> --json`.
+CANARIES = ("gentar-canary.invalid:443", "1.1.1.1:443", "10.10.10.1:22", "10.10.10.52:22")
+
+
+def host_problems(rules: list[dict], checks: list[dict]) -> list[str]:
+    """Why this bench host cannot contain a driller.
+
+    Deny-by-default is proven by asking sbx, not by finding a rule: on sbx
+    0.45.1 `policy init deny-all` lists a `default-deny-all` rule only while
+    no other network rule exists, and it vanishes from `policy ls --json`
+    the moment any per-sandbox rule is added, with the default still denying
+    (VM 151, 2026-09-28). So every canary's global `policy check` must say
+    allowed=false, and no rule may allow anything for all sandboxes (a
+    global allow cannot be narrowed per sandbox)."""
     out = []
-    if not any(_net(r, "deny", "all") and "**" in (r.get("resources") or []) for r in rules):
-        out.append("the bench host's global network policy does not deny '**' "
-                   "(sbx policy init deny-all): a driller needs a deny-by-default host")
+    if not checks:
+        out.append("no `sbx policy check` answers: deny-by-default is unproven")
+    for c in checks:
+        if c.get("allowed") is not False or c.get("context") != "global":
+            out.append(f"the bench host's global policy allows {c.get('target', '?')} "
+                       f"({c.get('reason', '?')}): a driller needs a deny-by-default host")
     for r in rules:
         if _net(r, "allow", "all"):
             out.append(f"the bench host globally allows {', '.join(r.get('resources') or [])} "
@@ -168,14 +184,14 @@ def sandbox_problems(rules: list[dict], sandbox: str, allow: list[str]) -> list[
 
 
 def start_refusals(env: dict, host_rules: list[dict], allow: list[str],
-                   credentials: list[str]) -> list[str]:
+                   credentials: list[str], host_checks: list[dict]) -> list[str]:
     """Every reason this driller run must not start. Empty means go."""
     out = []
     for name in FORBIDDEN_ENV:
         if name in env:
             out.append(f"{name} is set: it sends BAML prompts and outputs to Boundary's "
                        f"hosted Studio. Unset it; drillers never use it")
-    out += host_problems(host_rules)
+    out += host_problems(host_rules, host_checks)
     for entry in allow:
         why = allow_problems(entry)
         if why:

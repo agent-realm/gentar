@@ -30,7 +30,7 @@ white hat conduct, but the prompt is not the control.
 
 | Layer | How | Where in `gentar/driller.py` |
 |---|---|---|
-| network | a deny-by-default bench host (`sbx policy ls --json` must show an active global deny `**` and no global allow); one per-sandbox allow rule for the brief's exact hosts (no wildcards, no IPs), or none | `host_problems`, `allow_problems`, `policy_argv` |
+| network | a deny-by-default bench host, proven by asking sbx: `sbx policy check network <canary> --json` must answer `allowed: false` in the global context for every canary, and `sbx policy ls --json` must hold no global allow; then one per-sandbox allow rule for the brief's exact hosts (no wildcards, no IPs), or none. The rule goes with the sandbox | `host_problems`, `allow_problems`, `policy_argv` |
 | kit rules | sbx kits add per-sandbox rules on their own; any allow on the driller's sandbox that the brief did not name refuses the run before the driller types | `sandbox_problems` |
 | credentials | only the brief's; any `GENTAR_`, `BENCH_`, `TYPESAFE_` or `BOUNDARY_` name is refused, by class | `never_forward` |
 | hosted services | `BOUNDARY_API_KEY` present, with any value, refuses the run (exit 2) | `FORBIDDEN_ENV`, `extract` |
@@ -48,8 +48,22 @@ always beats an allow rule. A host whose global policy allows `**`, such as
 a shared bench host that others' suites rely on, can therefore not contain
 a driller. A driller refuses such a host (`start_refusals`), so it needs a
 bench host whose global network policy is deny-by-default: VM 151
-`gentar-driller-host` on arf, initialised with `sbx policy init deny-all`
-(its global rule denies `**` for TCP and UDP).
+`gentar-driller-host` on arf, initialised with `sbx policy init deny-all`.
+
+Proven on VM 151 (sbx 0.45.1, 2026-09-28) from a throwaway sandbox:
+
+- HTTP and HTTPS out get sbx's 403; raw TCP to arf, VM 142, VM 151
+  and tr0 is accepted by the transparent proxy and closed, with no banner
+  back; UDP and DNS are blocked by their proxies. Every attempt is in
+  `sbx policy log`, and nothing is in `allowed_hosts`.
+- A per-sandbox allow for one host opens exactly that host (200); every
+  other host stays blocked.
+- The host's own firewall (`gentar-egress.service`, nftables) also drops
+  new TCP/UDP flows from VM 151 to private, tailnet, link-local and ULA
+  ranges, under sbx. It survives a reboot.
+- `audit` on that sandbox's real log: with the host on the brief, no
+  breach; with an empty brief, the same connection is a breach and
+  verdict 1.
 
 ## Findings
 

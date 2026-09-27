@@ -31,6 +31,14 @@ DENY_ALL = {"rules": [{
     "resources": ["**"], "origin": "local", "layer": "local", "status": "active",
     "editable": False, "actions": ["net:connect:tcp", "net:connect:udp"]}]}
 DENY = d.policy_rules(json.dumps(DENY_ALL))
+# `sbx policy check network <canary> --json`, verbatim (VM 151, sbx 0.45.1,
+# with a per-sandbox rule present, i.e. default-deny-all no longer listed)
+DENIED = {"action": "net:connect:tcp", "allowed": False, "context": "global",
+          "deny_kind": "implicit", "governance": {"active": False},
+          "reason": "No matching allow rule (default deny)", "resource_type": "net:domain",
+          "resource_value": "gentar-canary.invalid:443", "target": "gentar-canary.invalid:443",
+          "type": "network"}
+CHECKS = [dict(DENIED, target=c, resource_value=c) for c in d.CANARIES]
 
 SB = "g1-driller-white-hat-0"
 ENV = {"GENTAR_DRILLER_MODEL_URL": "http://tr0:20128/v1", "GENTAR_DRILLER_MODEL": "m"}
@@ -54,25 +62,40 @@ class RefusalsTest(unittest.TestCase):
 
     def test_the_shared_allow_all_host_is_refused(self):
         # VM 142 today: a sandbox cannot be narrowed below a global `allow **`
-        why = d.start_refusals(ENV, d.policy_rules(json.dumps(ALLOW_ALL)), [], [])
-        self.assertTrue(any("does not deny '**'" in w for w in why), why)
+        why = d.start_refusals(ENV, d.policy_rules(json.dumps(ALLOW_ALL)), [], [],
+                             [dict(DENIED, allowed=True, reason="allow-all")])
+        self.assertTrue(any("global policy allows gentar-canary.invalid" in w for w in why), why)
         self.assertTrue(any("globally allows **" in w for w in why), why)
 
     def test_the_deny_all_host_with_a_clean_brief_goes(self):
-        self.assertEqual(d.start_refusals(ENV, DENY, ["registry.npmjs.org:443"], ["DEMO_TOKEN"]), [])
+        self.assertEqual(d.start_refusals(ENV, DENY, ["registry.npmjs.org:443"], ["DEMO_TOKEN"], CHECKS), [])
 
-    def test_no_rules_at_all_is_not_deny_by_default(self):
-        # an unreadable or empty policy must refuse, never pass by default
-        self.assertTrue(d.host_problems([]))
+    def test_deny_by_default_is_proven_by_checks_not_by_a_listed_rule(self):
+        # sbx 0.45.1 drops default-deny-all from `policy ls` once any
+        # per-sandbox rule exists; the default still denies
+        scoped_only = [dict(ALLOW_ALL["rules"][0], id="s1", applies_to=f"sandbox:{SB}",
+                            resources=["example.org:443"])]
+        self.assertEqual(d.host_problems(scoped_only, CHECKS), [])
+
+    def test_no_checks_is_unproven(self):
+        self.assertTrue(d.host_problems(DENY, []))
+
+    def test_one_allowed_canary_refuses(self):
+        checks = CHECKS[:-1] + [dict(DENIED, allowed=True, target="10.10.10.52:22")]
+        why = d.host_problems(DENY, checks)
+        self.assertEqual(len(why), 1)
+        self.assertIn("10.10.10.52:22", why[0])
+
+    def test_a_sandbox_context_answer_does_not_prove_the_global_default(self):
+        self.assertTrue(d.host_problems(DENY, [dict(DENIED, context="sandbox:x")]))
 
     def test_a_global_allow_next_to_the_deny_is_still_refused(self):
         rules = DENY + [dict(ALLOW_ALL["rules"][0], resources=["github.com"])]
-        self.assertEqual(len(d.host_problems(rules)), 1)
+        self.assertEqual(len(d.host_problems(rules, CHECKS)), 1)
 
-    def test_inactive_rules_do_not_count(self):
-        inactive = [dict(DENY[0], status="inactive")]
-        self.assertTrue(d.host_problems(inactive))
-        self.assertEqual(d.host_problems(DENY + [dict(ALLOW_ALL["rules"][0], status="inactive")]), [])
+    def test_inactive_global_allows_do_not_count(self):
+        self.assertEqual(d.host_problems(DENY + [dict(ALLOW_ALL["rules"][0], status="inactive")],
+                                         CHECKS), [])
 
     def test_a_kit_rule_on_the_driller_sandbox_is_named(self):
         kit = dict(ALLOW_ALL["rules"][0], id="k1", origin="kit", applies_to=f"sandbox:{SB}",
@@ -85,7 +108,7 @@ class RefusalsTest(unittest.TestCase):
 
     def test_boundary_api_key_refuses_whatever_its_value(self):
         for v in ("x", ""):
-            why = d.start_refusals(dict(ENV, BOUNDARY_API_KEY=v), DENY, [], [])
+            why = d.start_refusals(dict(ENV, BOUNDARY_API_KEY=v), DENY, [], [], CHECKS)
             self.assertTrue(any("BOUNDARY_API_KEY" in w for w in why))
         with self.assertRaises(d.DrillerRefusal):
             d.extract("hat", "notes", "t", env={"BOUNDARY_API_KEY": ""}, raw="[]")
@@ -95,12 +118,12 @@ class RefusalsTest(unittest.TestCase):
         for name in ("TYPESAFE_API_KEY", "BENCH_SSH_KEY", "GENTAR_DRILLER_MODEL_KEY",
                      "GENTAR_DAYTONA_API_KEY", "GENTAR_OSB_API_KEY", "GENTAR_OTLP_KEY",
                      "GENTAR_SOME_FUTURE_KEY", "gentar_bench_key", "BOUNDARY_API_KEY"):
-            why = d.start_refusals(ENV, DENY, [], [name])
+            why = d.start_refusals(ENV, DENY, [], [name], CHECKS)
             self.assertTrue(any(name in w for w in why), name)
-        self.assertEqual(d.start_refusals(ENV, DENY, [], ["DEMO_TOKEN", "MY_GENTAR_X"]), [])
+        self.assertEqual(d.start_refusals(ENV, DENY, [], ["DEMO_TOKEN", "MY_GENTAR_X"], CHECKS), [])
 
     def test_the_model_route_must_be_set(self):
-        why = d.start_refusals({}, DENY, [], [])
+        why = d.start_refusals({}, DENY, [], [], CHECKS)
         self.assertEqual(sum("GENTAR_DRILLER_MODEL" in w for w in why), 2)
 
     def test_allowlist_entries(self):
