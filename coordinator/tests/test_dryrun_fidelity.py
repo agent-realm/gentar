@@ -168,3 +168,92 @@ class TemplateStagingTest(_ScratchAdoption):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+GOAL_SUITE = """[scenario]
+name = "{name}"
+subject = "fid"
+data = "synthetic"
+[driver]
+command = "sh -c 'read x; read y'"
+goal = "Do the thing."
+[[driver.actions]]
+id = "go"
+key = "enter"
+when = "always"
+[[verify.commands]]
+command = "false"
+"""
+
+JUDGED_SUITE = """[scenario]
+name = "{name}"
+subject = "fid"
+data = "synthetic"
+[driver]
+command = "sh -c 'echo ready; sleep 1'"
+[[driver.turns]]
+type = "expect"
+[driver.turns.judge]
+question = "Does `screen` say ready?"
+"""
+
+
+@unittest.skipUnless(KIT.exists(), "the kit is not in the image build context")
+class SemanticSuitesInTheDryRunTest(_ScratchAdoption):
+    """claude-playbooks' first goal pilot hung run.sh --check: the dry run
+    started the driver of a suite with no turns and waited forever."""
+
+    def write(self, name, text):
+        (self.repo / "gentar" / "scenarios" / f"{name}.toml").write_text(text.format(name=name))
+
+    def test_a_goal_pilot_is_unverified_and_never_started(self):
+        self.write("goal", GOAL_SUITE)
+        try:
+            r = subprocess.run([sys.executable, "gentar/dryrun.py", "gentar/scenarios/goal.toml"],
+                               cwd=self.repo, capture_output=True, text=True, timeout=30,
+                               env=dict(os.environ, GENTAR_ENGINE=str(ENGINE),
+                                        GENTAR_DRYRUN_SYSTEM_DIRS=str(self.tmp / "none")))
+        except subprocess.TimeoutExpired:
+            self.fail("the dry run started the goal pilot's driver and hung")
+        self.assertIn("UNVERIFIED", r.stdout, r.stdout + r.stderr)
+        self.assertNotEqual(r.returncode, 0)          # not proven is not a pass
+        self.assertNotIn("verify 0 FAIL", r.stdout)   # nothing driven, nothing verified
+        ok = self.dryrun("gentar/scenarios/goal.toml", GENTAR_DRYRUN_UNVERIFIED="ok")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)   # run.sh --check
+
+    def run_bounded(self, name):
+        try:
+            return subprocess.run([sys.executable, "gentar/dryrun.py", f"gentar/scenarios/{name}.toml"],
+                                  cwd=self.repo, capture_output=True, text=True, timeout=40,
+                                  env=dict(os.environ, GENTAR_ENGINE=str(ENGINE),
+                                           GENTAR_DRYRUN_SYSTEM_DIRS=str(self.tmp / "none")))
+        except subprocess.TimeoutExpired:
+            self.fail(f"the dry run of {name} hung")
+
+    def test_a_judged_suite_with_an_interactive_driver_does_not_hang(self):
+        # Codex: the driver was started before the judged turn was seen,
+        # then waited on forever
+        self.write("judgedi", JUDGED_SUITE.replace("sh -c 'echo ready; sleep 1'", "sh -c 'read x'"))
+        r = self.run_bounded("judgedi")
+        self.assertIn("UNVERIFIED", r.stdout, r.stdout + r.stderr)
+
+    def test_an_unreplayed_turn_never_leaves_the_dry_run_waiting(self):
+        # a pick turn cannot be replayed; the interactive driver behind it
+        # is ended instead of waited on
+        self.write("pick", """[scenario]
+name = "{name}"
+subject = "fid"
+[driver]
+command = "sh -c 'read x'"
+[[driver.turns]]
+type = "pick"
+label = "One"
+""")
+        r = self.run_bounded("pick")
+        self.assertIn("UNVERIFIED", r.stdout, r.stdout + r.stderr)
+
+    def test_a_judged_expect_is_unverified_not_a_crash(self):
+        self.write("judged", JUDGED_SUITE)
+        r = self.dryrun("gentar/scenarios/judged.toml")
+        self.assertNotIn("Traceback", r.stderr, r.stderr)
+        self.assertIn("UNVERIFIED", r.stdout, r.stdout + r.stderr)

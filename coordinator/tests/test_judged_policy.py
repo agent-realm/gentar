@@ -88,12 +88,13 @@ class JudgedPolicyTest(unittest.TestCase):
             'key = "down"\nwhen = "w"\n')          # a QUOTED key (Codex)
         # No engine to stage: if the guard is ever missing, the run fails fast
         # at staging instead of building an arena on this machine.
-        env = dict(os.environ, GITHUB_EVENT_NAME="pull_request", GENTAR_DIR=str(self.tmp / "no-engine"),
-                   GENTAR_REPO_URL=str(self.tmp / "no-such-engine"))
-        r = subprocess.run(["/bin/bash", "gentar/run.sh", "semantic"], cwd=repo, env=env,
-                           capture_output=True, text=True, timeout=60)
-        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
-        self.assertIn("never run on a pull request", r.stderr)
+        for event in ("pull_request", "pull_request_target"):     # both carry PR code
+            env = dict(os.environ, GITHUB_EVENT_NAME=event, GENTAR_DIR=str(self.tmp / "no-engine"),
+                       GENTAR_REPO_URL=str(self.tmp / "no-such-engine"))
+            r = subprocess.run(["/bin/bash", "gentar/run.sh", "semantic"], cwd=repo, env=env,
+                               capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 2, (event, r.stdout + r.stderr))
+            self.assertIn("never run on a pull request", r.stderr)
 
     def test_a_main_push_floor_never_runs_a_judged_suite(self):
         env = {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main"}
