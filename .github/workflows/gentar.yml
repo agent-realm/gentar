@@ -5,7 +5,7 @@
 #   nightly   — subject + budget-guarded suites, post-merge.
 #   dispatch  — arbitrary scenario/ref, manual or from a subject repo.
 #
-# Everything runs on a self-hosted runner labelled `gentar-bench`: a machine
+# Every job runs on a self-hosted runner labelled `gentar-bench`: a machine
 # with Docker, sbx, and ssh reach to the bench-host named by the repository
 # variables GENTAR_BENCH_HOST / GENTAR_BENCH_USER (in the usual setup the
 # runner IS that bench-host, and the coordinator spawns benches by SSHing to
@@ -57,7 +57,13 @@ jobs:
   gate-setup:
     name: gate setup
     if: github.event_name == 'pull_request' || github.event_name == 'push'
-    runs-on: ubuntu-latest
+    # Self-hosted, like every other job here. It was ubuntu-latest, and when
+    # agent-realm's GitHub-hosted minutes ran out (September 2026) every PR
+    # gate failed here in 2 s, before a single suite (pilot, 2026-09-28).
+    # It only reads VERSION and computes the matrix: no bench, no secrets.
+    # The repository is private; the gate's bench jobs already run PR code
+    # on this runner.
+    runs-on: [self-hosted, gentar-bench]
     outputs:
       scenarios: ${{ steps.pick.outputs.scenarios }}
     steps:
