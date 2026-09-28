@@ -1,8 +1,73 @@
 # Reference: drillers
 
-**Status: the bench-free core only. No driller can run yet.** There is no
-scenario syntax, no CLI entry and no bench wiring. Those come after the
-pilot decides where drillers run (see [Where drillers run](#where-drillers-run)).
+**Status: wired, not yet run live.** A scenario with a `[driller]` table
+runs as N driller sessions (`bin/arena run <scenario>`), each on a fresh
+bench. The first live sessions wait for the model route's key and the
+pilot's choice of model provider (below).
+
+## A driller scenario
+
+```toml
+[scenario]
+name = "driller-white-hat-demo"
+data = "synthetic"          # required: the scrubbed screen goes to a model
+
+[oracle]
+steps = ["..."]             # install the subject, as in any suite
+
+[driller]
+hat = "white-hat"           # the persona (gentar/driller.py PERSONAS)
+runs = 5                    # sessions, each on a fresh bench (1..20)
+command = "bash -l"         # the terminal the driller gets
+readme = "README.md"        # in the workspace, absolute, or ~/...
+help = ["tool"]             # each one's --help goes into the brief
+allow = []                  # exact hosts the subject needs; none by default
+max_steps = 60              # budgets end a session, not the run
+seconds = 900
+max_calls = 80
+max_input_tokens = 400000
+every = 2
+```
+
+Refused at load: any other key, a missing `data = "synthetic"`, a
+`[driver]` in the same file, an unknown hat, a wildcard or IP in `allow`,
+and any arena-owned credential name. The engine's calibration target is
+[`driller-white-hat-demo`](../../coordinator/scenarios/driller-white-hat-demo.toml):
+a synthetic CLI with two planted flaws.
+
+## A session
+
+The model proposes; the coordinator decides (`gentar/drill.py`). Each turn
+it reads the bench's rendered screen, scrubs it, asks the model for one
+step (type text, press a key, wait, or done), checks it, and only then
+types it:
+
+- the danger gate on the screen before each step, after the model answers
+  and before a separate Enter, and on the text to be typed. A match ends
+  the session as a boundary finding and nothing is sent;
+- keys only from the engine's vocabulary; typed text printable and on one
+  line;
+- budgets (time, steps, model calls, input tokens) end the session, and
+  the model still writes its notes.
+
+Around it (`gentar/driller_run.py`): kit rules on the sandbox refuse the
+session before the first keystroke; the brief's hosts become one allow
+rule; the host is snapshotted before and after; the policy log is audited;
+the notes become typed findings with evidence on screen. After N sessions
+the findings are ranked (`coordinator._run_drill`) into
+`driller-<scenario>-<time>.md` next to the reports. A breach stops the
+sessions at once: exit 1. Findings never change the exit.
+
+## The model route and where screens go
+
+`GENTAR_DRILLER_MODEL_URL`, `GENTAR_DRILLER_MODEL` and
+`GENTAR_DRILLER_MODEL_KEY` reach the coordinator only (compose), never a
+bench, and the key and URL are scrubbed from everything exported. The
+route is 9router on tr0, which is **a proxy**: the model behind it is
+whichever provider the model id names (z.ai GLM, DeepSeek, Anthropic,
+EVREN). So a driller's scrubbed screen leaves our infrastructure to that
+provider, the same exposure as a judged turn's, which is why driller
+scenarios must be synthetic.
 
 ## What a driller is
 

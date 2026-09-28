@@ -278,6 +278,48 @@ class SbxBenchHost(BenchHost):
         sandboxes = data["sandboxes"] if isinstance(data, dict) else data
         return any(s.get("name") == name for s in sandboxes)
 
+    # -- drillers: the host's network policy, read from sbx itself --------
+
+    def _json(self, argv: list[str]) -> dict:
+        proc = self._run(argv, timeout=60, strict=False)
+        try:
+            return json.loads(proc.stdout or "{}")
+        except json.JSONDecodeError:
+            return {}
+
+    def policy_state(self, canaries) -> tuple[list[dict], list[dict]]:
+        """(rules, checks) for driller.host_problems: every network rule,
+        and the GLOBAL answer for each canary. An answer that is not JSON
+        comes back as {} and counts as not proven denied."""
+        from gentar.driller import policy_rules
+        rules = policy_rules(self._json([self.cfg.sbx_bin, "policy", "ls", "--json",
+                                         "--type", "network"]))
+        checks = [self._json([self.cfg.sbx_bin, "policy", "check", "network", c, "--json"])
+                  for c in canaries]
+        return rules, checks
+
+    def allow_for(self, sandbox: str, argv: list[str]) -> None:
+        """Apply driller.policy_argv's rule (the argv starts with `sbx`)."""
+        self._run([self.cfg.sbx_bin, *argv[1:]], timeout=60)
+
+    def policy_log(self, sandbox: str) -> str:
+        proc = self._run([self.cfg.sbx_bin, "policy", "log", sandbox, "--json"],
+                         timeout=60, strict=False)
+        return proc.stdout or "{}"
+
+    def snapshot(self) -> dict[str, set]:
+        """What exists on the host outside any one bench: sandbox names and
+        template names, for driller.outside_changes."""
+        data = self._json([self.cfg.sbx_bin, "ls", "--json"])
+        boxes = data["sandboxes"] if isinstance(data, dict) and "sandboxes" in data else data
+        names = {s.get("name", "") for s in boxes} if isinstance(boxes, list) else set()
+        proc = self._run([self.cfg.sbx_bin, "template", "ls"], timeout=60, strict=False)
+        # REPOSITORY TAG IMAGE-ID ...: a template is repo:tag, and a re-save
+        # under the same tag shows as a changed image id.
+        templates = {":".join(line.split()[:3]) for line in (proc.stdout or "").splitlines()[1:]
+                     if len(line.split()) >= 3}
+        return {"sandboxes": names - {""}, "templates": templates}
+
     def pty_spawn_args(self, sandbox: str, columns: int, lines: int,
                        env: dict[str, str], command: str) -> list[str]:
         ssh = self._ssh_base() + ["-tt", "--"]

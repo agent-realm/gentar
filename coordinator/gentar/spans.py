@@ -123,7 +123,10 @@ class Redactor:
             ("GENTAR_BENCH_HOST", cfg.bench_host), ("GENTAR_BENCH_USER", cfg.bench_user),
             ("GENTAR_BENCH_JUMP", cfg.bench_jump), ("GENTAR_TART_HOST", cfg.tart_host),
             ("GENTAR_TART_USER", cfg.tart_user),
-            ("TYPESAFE_API_KEY", os.environ.get("TYPESAFE_API_KEY", ""))) if v]
+            ("TYPESAFE_API_KEY", os.environ.get("TYPESAFE_API_KEY", "")),
+            # the driller model route: its key, and its URL (a locator)
+            ("GENTAR_DRILLER_MODEL_KEY", os.environ.get("GENTAR_DRILLER_MODEL_KEY", "")),
+            ("GENTAR_DRILLER_MODEL_URL", os.environ.get("GENTAR_DRILLER_MODEL_URL", ""))) if v]
         self._scrub = scrubber(self._base_secrets)
 
     def redact_values(self, named_values) -> None:

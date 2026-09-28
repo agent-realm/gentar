@@ -125,6 +125,12 @@ services:
       # COORDINATOR's only: scenario credentials are forwarded into the
       # bench, this never is. Empty = judged scenarios refuse (exit 2).
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      # The driller model route (docs/reference/drillers.md), used by the
+      # coordinator only: the model never reaches a bench. BOUNDARY_API_KEY
+      # is deliberately NOT forwarded; a driller run refuses if it is set.
+      GENTAR_DRILLER_MODEL_URL: ${GENTAR_DRILLER_MODEL_URL:-}
+      GENTAR_DRILLER_MODEL: ${GENTAR_DRILLER_MODEL:-}
+      GENTAR_DRILLER_MODEL_KEY: ${GENTAR_DRILLER_MODEL_KEY:-}
       # Where a run came from, for the exported trace; empty on a local run.
       GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-}
       GITHUB_RUN_ID: ${GITHUB_RUN_ID:-}

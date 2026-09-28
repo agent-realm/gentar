@@ -236,6 +236,65 @@ def _check_goal(path, sc) -> None:
             raise ScenarioError(f"{w}.on is only for approving actions (approve = true)")
 
 
+DRILLER_KEYS = {"hat", "runs", "command", "allow", "help", "readme", "max_steps",
+                "seconds", "max_calls", "max_input_tokens", "every"}
+
+
+def _check_driller(path, sc, dr) -> dict:
+    """The [driller] table: a persona session instead of scripted turns
+    (docs/reference/drillers.md). Every value checked here, before any
+    bench; the host and the model route are checked by the coordinator."""
+    from gentar.driller import PERSONAS, allow_problems, never_forward
+    if not isinstance(dr, dict):
+        raise ScenarioError(f"{path}: [driller] must be a table")
+    unknown = sorted(set(dr) - DRILLER_KEYS)
+    if unknown:
+        raise ScenarioError(f"{path}: [driller] unknown key(s) {', '.join(unknown)} "
+                            f"(known: {', '.join(sorted(DRILLER_KEYS))})")
+    if sc.data != "synthetic":
+        raise ScenarioError(f"{path}: a driller sends the scrubbed screen to its model: "
+                            f"declare [scenario] data = \"synthetic\" (no real accounts "
+                            f"or personal data on screen)")
+    if sc.driver_command or sc.turns or sc.goal:
+        raise ScenarioError(f"{path}: [driller] and [driver] exclude each other: a driller "
+                            f"has no script and no goal")
+    hat = dr.get("hat", "")
+    if hat not in PERSONAS:
+        raise ScenarioError(f"{path}: driller.hat must be one of {', '.join(sorted(PERSONAS))}")
+    out = {"hat": hat, "command": dr.get("command", "bash -l"), "readme": dr.get("readme", "README.md")}
+    for key, lo, hi, default in (("runs", 1, 20, 5), ("max_steps", 1, 500, 60),
+                                 ("seconds", 30, 7200, 900), ("max_calls", 1, 2000, 80),
+                                 ("max_input_tokens", 1000, 5_000_000, 400_000)):
+        v = dr.get(key, default)
+        if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
+            raise ScenarioError(f"{path}: driller.{key} must be an integer {lo}..{hi}")
+        out[key] = v
+    every = dr.get("every", 2)
+    if isinstance(every, bool) or not isinstance(every, (int, float)) or not 0 <= every <= 60:
+        raise ScenarioError(f"{path}: driller.every must be 0..60 seconds")
+    out["every"] = float(every)
+    for key in ("command", "readme"):
+        if not isinstance(out[key], str) or not out[key].strip():
+            raise ScenarioError(f"{path}: driller.{key} must be a non-empty string")
+    allow = dr.get("allow", [])
+    if not isinstance(allow, list) or not all(isinstance(a, str) for a in allow):
+        raise ScenarioError(f"{path}: driller.allow must be a list of host[:port] strings")
+    for a in allow:
+        why = allow_problems(a)
+        if why:
+            raise ScenarioError(f"{path}: driller.allow {why}")
+    out["allow"] = sorted(set(allow))
+    helps = dr.get("help", [])
+    if (not isinstance(helps, list)
+            or not all(isinstance(h, str) and h.strip() and "\n" not in h for h in helps)):
+        raise ScenarioError(f"{path}: driller.help must be a list of commands, one line each")
+    out["help"] = list(helps)
+    for name in sc.credential_names():
+        if never_forward(name):
+            raise ScenarioError(f"{path}: credential {name} can never reach a driller's bench")
+    return out
+
+
 class TomlScenario:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -333,8 +392,12 @@ class TomlScenario:
         # after a passing run this many units are recorded as burned.
         self.simulated_spend = int(budget.get("simulate_spend", 0) or 0)
 
-        if not self.steps and not self.driver_command:
-            raise ScenarioError(f"{path}: needs [oracle].steps or a [driver] command")
+        # A driller session instead of scripted turns (checked last: it
+        # needs data, credentials and the driver fields parsed above).
+        self.driller = (_check_driller(path, self, doc["driller"])
+                        if "driller" in doc else None)
+        if not self.steps and not self.driver_command and not self.driller:
+            raise ScenarioError(f"{path}: needs [oracle].steps, a [driver] command or a [driller]")
         for i, t in enumerate(self.turns):
             kind = t.get("type")
             if kind not in ("answer", "expect", "pick", "abort", "key"):

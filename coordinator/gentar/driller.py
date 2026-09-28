@@ -293,7 +293,11 @@ def extract(hat: str, feedback: str, transcript: str, env=None, raw: str | None 
     from gentar.baml_client import b
     if raw is not None:
         return list(b.parse.ExtractFindings(raw))
-    return list(b.ExtractFindings(hat, feedback, transcript))
+    # The model route only, passed explicitly: never the process
+    # environment, which holds the arena's own keys.
+    keys = ("GENTAR_DRILLER_MODEL_URL", "GENTAR_DRILLER_MODEL", "GENTAR_DRILLER_MODEL_KEY")
+    client = b.with_options(env={k: env.get(k, "") for k in keys})
+    return list(client.ExtractFindings(hat, feedback, transcript))
 
 
 def supported(findings, transcript: str):
