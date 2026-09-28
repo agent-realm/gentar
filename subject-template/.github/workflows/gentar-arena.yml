@@ -54,6 +54,20 @@ permissions:
   contents: read
 
 jobs:
+  # A GENTAR_CI_RUNNER that mentions `arena` is refused BEFORE any job is
+  # scheduled on it: `runs-on` would otherwise start plan on the bench runner
+  # and run the PR's own plan.py there before plan.py could refuse (Codex).
+  # contains() is case-insensitive, as runner labels are, and tests the raw
+  # text, so `Arena`, `ARENA` and a padded " arena" are all caught. This job
+  # fails the run loudly; plan and checks are skipped.
+  ci-runner-refused:
+    if: ${{ contains(vars.GENTAR_CI_RUNNER, 'arena') }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::GENTAR_CI_RUNNER names the arena label (or a label containing 'arena'): the plan and checks run pull request code and must never be scheduled on the bench runner"
+          exit 2
+
   plan:
     # GitHub-hosted by default. GENTAR_CI_RUNNER (a repository or
     # organisation variable, JSON: ["self-hosted", "linux-ci"]) moves plan
@@ -65,8 +79,9 @@ jobs:
     # GENTAR_CI_RUNNER set, plan (and so everything after it) is skipped for
     # it. Unset, forks keep the hosted checks as before.
     if: >-
-      ${{ !vars.GENTAR_CI_RUNNER || github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository }}
+      ${{ !contains(vars.GENTAR_CI_RUNNER, 'arena') &&
+      (!vars.GENTAR_CI_RUNNER || github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository) }}
     outputs:
       checks: ${{ steps.plan.outputs.checks }}
       bench: ${{ steps.plan.outputs.bench }}
@@ -92,7 +107,7 @@ jobs:
 
   checks:
     needs: plan
-    if: needs.plan.outputs.checks == 'true'
+    if: needs.plan.outputs.checks == 'true' && !contains(vars.GENTAR_CI_RUNNER, 'arena')
     # [phase1] os: GitHub-hosted runners only (plan.py refuses anything
     # else). On macOS this is the dry-run on macOS userland — bash 3.2, BSD
     # tools — not a macOS bench; that is gentar's tart tier. With

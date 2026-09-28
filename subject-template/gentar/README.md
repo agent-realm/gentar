@@ -362,8 +362,10 @@ and `bash`, plus `gh` for the release gate below. Three things change with it se
   code never reaches a self-hosted runner;
 - `[phase1] os` may only list `ubuntu-latest` (macOS checks need a hosted
   runner; `plan.py` refuses rather than quietly running Linux);
-- the value may not name the `arena` label, since the checks run pull
-  request code and the bench runner must never get it.
+- the value may not mention `arena` in any case, not even inside a longer
+  label: the checks run pull request code and the bench runner must never
+  get it. The workflow fails such a run before scheduling anything
+  (`ci-runner-refused`), because runner labels match regardless of case.
 
 The `bench` job is unaffected: it always runs on `arena`.
 GitHub-hosted runners cannot reach an internal bench-host. One-time

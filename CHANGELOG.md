@@ -31,9 +31,12 @@ Adopters pin a release tag, not a branch.
   organisation without hosted minutes (agent-realm, September 2026) or one
   that keeps CI in-house. Unset, nothing changes.
   - The resolved runner is in the plan output (`runner=`).
-  - `plan.py` refuses a malformed value, a value naming the `arena` label
-    (the checks run pull request code), and macOS in `[phase1] os` with the
-    variable set.
+  - `plan.py` refuses a malformed value, any value mentioning `arena` in
+    any case (the checks run pull request code, and runner labels match
+    case-insensitively), and macOS in `[phase1] os` with the variable set.
+  - The workflow refuses an `arena` value itself, before any job is
+    scheduled (`ci-runner-refused`); otherwise `plan` would already be
+    running the PR's `plan.py` on the bench runner.
   - With it set, a fork's pull request runs nothing, not even the plan: its
     code never reaches a self-hosted runner.
   - The `bench` job is unchanged, on `arena`. The release-gate snippet in

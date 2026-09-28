@@ -252,9 +252,14 @@ def ci_runner(env):
     if (not isinstance(labels, list) or not labels
             or not all(isinstance(x, str) and NAME.fullmatch(x) for x in labels)):
         raise Refuse(f"GENTAR_CI_RUNNER must be a runner label or a list of them: {raw!r}")
-    if "arena" in labels:
-        raise Refuse("GENTAR_CI_RUNNER names the `arena` label: the checks run pull "
-                     "request code and must never land on the bench runner")
+    # Case-insensitive and by substring, exactly as the workflow's own
+    # pre-scheduling guard (`contains(vars.GENTAR_CI_RUNNER, 'arena')`):
+    # runner labels match regardless of case, so `Arena` IS the bench
+    # runner (Codex).
+    if "arena" in raw.lower():
+        raise Refuse("GENTAR_CI_RUNNER names the `arena` label (or a label containing "
+                     "'arena', in any case): the checks run pull request code and must "
+                     "never land on the bench runner")
     return labels
 
 

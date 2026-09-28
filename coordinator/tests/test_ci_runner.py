@@ -73,7 +73,10 @@ class CiRunnerTest(unittest.TestCase):
                 self.plan(bad)
 
     def test_the_bench_runner_is_never_named(self):
-        for bad in ('["self-hosted", "arena"]', '"arena"'):
+        # any case, any label containing it: runner labels match case-
+        # insensitively, so `Arena` is the bench runner (Codex)
+        for bad in ('["self-hosted", "arena"]', '"arena"', '["self-hosted", "Arena"]',
+                    '"ARENA"', '["arena-ci"]'):
             with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse, "arena"):
                 self.plan(bad)
 
@@ -117,6 +120,17 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("runs-on: ${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER)"
                       " || matrix.os }}", self.job("checks"))
         self.assertIn("GENTAR_CI_RUNNER: ${{ vars.GENTAR_CI_RUNNER }}", self.job("plan"))
+
+    def test_an_arena_label_is_refused_before_any_job_is_scheduled(self):
+        # runs-on would start plan ON the bench runner, running the PR's
+        # plan.py there before plan.py could refuse (Codex)
+        guard = "contains(vars.GENTAR_CI_RUNNER, 'arena')"
+        refused = self.job("ci-runner-refused")
+        self.assertIn(f"if: ${{{{ {guard} }}}}", refused)
+        self.assertIn("exit 2", refused)
+        self.assertNotIn("GENTAR_CI_RUNNER)", refused.split("runs-on:")[1].split("\n")[0])
+        self.assertIn(f"!{guard}", self.job("plan"))
+        self.assertIn(f"!{guard}", self.job("checks"))
 
     def test_the_bench_stays_on_arena(self):
         bench = self.job("bench")
