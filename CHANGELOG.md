@@ -26,6 +26,12 @@ Adopters pin a release tag, not a branch.
   public repositories only; a private subject sets it as a repository
   variable, or plan and checks silently fall back to `ubuntu-latest`
   (cockpit's v0.9.0 re-pin, 2026-09-30). Check the plan's `runner=` line.
+- Kit README: with `GENTAR_CI_RUNNER` set, only same-repository PRs get
+  phase 1 checks; a fork's all-skipped run is not a pass. The "Secrets/vars
+  the workflow reads" list now holds every name the workflow reads,
+  including `TYPESAFE_API_KEY` (unset: `--sweep` skips judged suites by
+  name, so phase 2 can be green without them), the OTLP pair,
+  `GENTAR_CI_RUNNER` and `GENTAR_FLOOR`; a test keeps it complete.
 
 ## 0.9.0 — 2026-09-28
 ### Added
