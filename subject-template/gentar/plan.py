@@ -347,7 +347,11 @@ def plan(env, policy):
         names, note = _no_judged(list(p1["floor"]))
         return targeted(names, f"phase 1 on {default}: checks + floor" + note)
 
-    if tag is not None:
+    # Tag rules are for a tag PUSH. A dispatch run ON a tag ref (a drift
+    # run of a release, claude-playbooks' monitor) is a dispatch: it used to
+    # hit the release rule here and plan nothing, reading "success" with the
+    # arena skipped, and a dispatch naming suites was swallowed the same way.
+    if tag is not None and event == "push":
         if tag == "arena":
             if "arena" in p2["on"]:
                 return {**res, "bench": "phase2", "reason": "phase 2: the `arena` tag"}

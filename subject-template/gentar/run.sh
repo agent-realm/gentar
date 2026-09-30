@@ -371,6 +371,7 @@ judge_ready() {
 # the coordinator's forwarding warning then says the URL was dropped.
 if [ "$SWEEP" = 1 ]; then
   runnable=""
+  judged_skipped=""
   for f in "$HERE"/scenarios/*.toml; do
     [ -f "$f" ] || continue
     s=$(basename "$f" .toml)
@@ -380,10 +381,22 @@ if [ "$SWEEP" = 1 ]; then
       echo "skipping $s — judged suites never run on a pull request (phase 2 only)" >&2
     elif ! judge_ready "$f"; then
       echo "skipping $s — it has judged turns and TYPESAFE_API_KEY is not set" >&2
+      judged_skipped="$judged_skipped $s"
     else
       runnable="$runnable $s"
     fi
   done
+  # Said once more, loudly, at the end: a phase 2 that skipped its judged
+  # suites can finish green without having run them (claude-playbooks-ac,
+  # from Codex on cockpit's re-pin). In Actions it is a warning annotation.
+  if [ -n "$judged_skipped" ]; then
+    n=$(echo $judged_skipped | wc -w | tr -d ' ')
+    msg="$n judged suite(s) skipped, TYPESAFE_API_KEY is not set:$judged_skipped (a green sweep did not run them)"
+    echo "sweep summary: $msg" >&2
+    if [ "${GITHUB_ACTIONS:-}" = true ]; then
+      echo "::warning title=judged suites skipped::$msg"
+    fi
+  fi
   [ -n "$runnable" ] || { echo "no runnable suites in gentar/scenarios" >&2; exit 2; }
   echo "sweep:$runnable" >&2
   set -- $runnable

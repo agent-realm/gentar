@@ -38,6 +38,18 @@ Adopters pin a release tag, not a branch.
 
   Proven on VM 151: `smoke` and `scripted-onboarding` pass end to end,
   with no sandbox left.
+### Fixed
+- Kit `plan.py`: a `workflow_dispatch` run **on a tag ref** is a dispatch.
+  The release rule caught it first, so a drift run of a release planned
+  nothing and read "success" with the arena skipped, and a dispatch naming
+  suites on a tag was swallowed the same way (claude-playbooks' drift
+  monitor). Tag rules now apply to tag pushes only; a dispatch on a tag
+  runs phase 2 when `dispatch` is in `[phase2] on`, or the suites it names.
+### Changed
+- Kit `run.sh --sweep`: judged suites skipped for want of
+  `TYPESAFE_API_KEY` are summarised once more at the end of the selection
+  (`sweep summary: N judged suite(s) skipped …`), and as a warning
+  annotation in GitHub Actions, since a green phase 2 did not run them.
 ### Security
 - **No credential rides into a bench in a subject's git metadata.** gentar's
   own nightly and dispatch cloned private subjects with the token in the

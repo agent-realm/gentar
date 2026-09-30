@@ -206,9 +206,9 @@ workflow's first job asks it what this event should run.
 |---|---|
 | pull request | **phase 1**: bench-free checks on GitHub-hosted runners — `ubuntu-latest`, plus `macos-latest` if `[phase1] os` lists it — or on the self-hosted runner `GENTAR_CI_RUNNER` names (below) (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
 | push to the default branch | **phase 1**: the checks, plus `[phase1] floor` on the bench |
-| dispatch (no suites), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
+| dispatch (no suites; on any ref, a release tag included: a drift run), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
 | `arena-<suite>` tag, or a dispatch naming suites | exactly those suites (`arena / targeted`; never counts as phase 2) |
-| `v*` tag | nothing — a release is **gated** on a green phase 2 of its commit (below), not tested after it |
+| `v*` tag pushed | nothing — a release is **gated** on a green phase 2 of its commit (below), not tested after it |
 
 A fork's pull request never reaches the self-hosted runner, whatever the
 policy says: the bench job checks that from GitHub's own context. Try any
