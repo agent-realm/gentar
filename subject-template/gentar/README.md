@@ -356,7 +356,12 @@ runner labeled `arena` with Docker + reach to the bench-host.
 organisation variable `GENTAR_CI_RUNNER` to a JSON runs-on value, e.g.
 `["self-hosted", "linux-ci"]`, and `plan` and `checks` run there instead
 (the plan output's `runner=` line says where). It needs `git`, `python3`
-and `bash`, plus `gh` for the release gate below. Three things change with it set:
+and `bash`, plus `gh` for the release gate below. **On GitHub Free, an
+organisation variable reaches public repositories only:** a private
+repository needs it set as a repository variable, or the workflow never
+sees it and falls back to `ubuntu-latest` (found by cockpit, 2026-09-30).
+Check the plan output's `runner=` line after setting it. Three things
+change with it set:
 
 - a **fork's** pull request runs nothing at all, not even the checks: its
   code never reaches a self-hosted runner;

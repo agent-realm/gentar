@@ -21,6 +21,11 @@ read this file before moving an adopter's `GENTAR_REF` across one.
 Adopters pin a release tag, not a branch.
 
 ## Unreleased
+### Docs
+- `GENTAR_CI_RUNNER`: on GitHub Free, an organisation variable reaches
+  public repositories only; a private subject sets it as a repository
+  variable, or plan and checks silently fall back to `ubuntu-latest`
+  (cockpit's v0.9.0 re-pin, 2026-09-30). Check the plan's `runner=` line.
 
 ## 0.9.0 — 2026-09-28
 ### Added
