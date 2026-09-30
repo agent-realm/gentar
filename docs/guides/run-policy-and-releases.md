@@ -56,7 +56,8 @@ publishing job depend on it (`needs: arena-gate`):
 
 ```yaml
   arena-gate:
-    runs-on: ubuntu-latest
+    # the same runner as the arena's plan/checks (GENTAR_CI_RUNNER, if set)
+    runs-on: ${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER) || 'ubuntu-latest' }}
     permissions: { actions: read, contents: read }
     steps:
       - uses: actions/checkout@v4

@@ -10,7 +10,8 @@ prints; it holds no tag-parsing or PR-narrowing logic of its own, because
 logic in YAML cannot be tested and this can.
 
 `plan` needs no engine, no Docker, no bench and no secrets, so the kit runs
-it on a GitHub-hosted runner BEFORE any job may touch the self-hosted one:
+it on a GitHub-hosted runner (or the one GENTAR_CI_RUNNER names, never the
+bench's) BEFORE any job may touch the self-hosted bench runner:
 a pull request's code never reaches the bench-host unless this says so.
 
 Phases (the pilot's words: phase 1 for every PR, phase 2 only when asked):
@@ -64,6 +65,10 @@ SETUP_TOOLS = ("go", "node", "python")
 # checks job runs a pull request's code, which must never reach a
 # self-hosted runner by way of this list.
 CHECK_OS = ("ubuntu-latest", "macos-latest")
+# The self-hosted route is the repository/organisation variable
+# GENTAR_CI_RUNNER instead (a JSON runs-on value): an organisation without
+# GitHub-hosted minutes, or one that keeps CI on its own runners, sets it
+# and the plan and checks jobs run there (see ci_runner).
 
 # Every key the policy may hold, with its default. An unknown key is a
 # refusal: a typo like `benh = "declared"` must not silently mean "off".
@@ -227,6 +232,37 @@ def _no_judged(names):
     return kept, (f"; judged suite(s) {', '.join(dropped)} left for phase 2" if dropped else "")
 
 
+def ci_runner(env):
+    """GENTAR_CI_RUNNER, validated: None (GitHub-hosted, the default) or the
+    runs-on labels of the runner the plan and checks jobs use instead.
+
+    The workflow reads the variable itself (`fromJSON(vars.GENTAR_CI_RUNNER)`
+    in runs-on); this is the same value, checked where it can be tested.
+    Never the bench runner: the checks run pull request code, and the
+    `arena` label is where benches are driven from."""
+    raw = (env.get("GENTAR_CI_RUNNER") or "").strip()
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        raise Refuse(f"GENTAR_CI_RUNNER is not JSON: {raw!r} (write it as "
+                     f"[\"self-hosted\", \"linux-ci\"] or \"linux-ci\")") from None
+    labels = [value] if isinstance(value, str) else value
+    if (not isinstance(labels, list) or not labels
+            or not all(isinstance(x, str) and NAME.fullmatch(x) for x in labels)):
+        raise Refuse(f"GENTAR_CI_RUNNER must be a runner label or a list of them: {raw!r}")
+    # Case-insensitive and by substring, exactly as the workflow's own
+    # pre-scheduling guard (`contains(vars.GENTAR_CI_RUNNER, 'arena')`):
+    # runner labels match regardless of case, so `Arena` IS the bench
+    # runner (Codex).
+    if "arena" in raw.lower():
+        raise Refuse("GENTAR_CI_RUNNER names the `arena` label (or a label containing "
+                     "'arena', in any case): the checks run pull request code and must "
+                     "never land on the bench runner")
+    return labels
+
+
 def plan(env, policy):
     """What this event runs. Pure: env in, plan out."""
     event = env.get("GITHUB_EVENT_NAME", "")
@@ -240,6 +276,19 @@ def plan(env, policy):
 
     res = {"checks": False, "bench": "none", "suites": [], "reason": "",
            "setup": {}, "os": ["ubuntu-latest"]}
+    runner = ci_runner(env)
+    # Where plan and checks ran, in the plan output (claude-playbooks-dc):
+    # a subject can see it without reading repository settings.
+    res["runner"] = json.dumps(runner) if runner else "github-hosted"
+    if runner is not None:
+        # One entry, named after the runner; the workflow's runs-on reads
+        # the variable, so this only names the matrix job.
+        res["os"] = ["+".join(runner)]
+        if fork:
+            # The workflow already skips plan for this case (it would run
+            # the fork's plan.py on a self-hosted runner); said here too.
+            return {**res, "reason": "fork PR: never on a self-hosted runner "
+                                     "(GENTAR_CI_RUNNER is set), not even the checks"}
 
     def targeted(names, why):
         names = _dedup(names)
@@ -274,7 +323,13 @@ def plan(env, policy):
 
     p1, p2 = policy["phase1"], policy["phase2"]
     res["setup"] = dict(p1["setup"])
-    res["os"] = list(dict.fromkeys(p1["os"]))
+    if runner is None:
+        res["os"] = list(dict.fromkeys(p1["os"]))
+    elif any(o != "ubuntu-latest" for o in p1["os"]):
+        raise Refuse(f"[phase1] os lists {', '.join(o for o in p1['os'] if o != 'ubuntu-latest')} "
+                     f"but GENTAR_CI_RUNNER sends the checks to one self-hosted runner: "
+                     f"macOS checks need a GitHub-hosted runner. Drop it from [phase1] os, "
+                     f"or unset GENTAR_CI_RUNNER")
 
     if event == "pull_request":
         res["checks"] = p1["checks"]
@@ -326,6 +381,7 @@ def emit(res):
         f"suites={' '.join(res['suites'])}",
         f"reason={res['reason']}",
         f"os={json.dumps(res['os'])}",
+        f"runner={res.get('runner', 'github-hosted')}",
     ] + [f"setup_{t}={res['setup'].get(t, '')}" for t in SETUP_TOOLS]
     out = "\n".join(lines) + "\n"
     sys.stdout.write(out)

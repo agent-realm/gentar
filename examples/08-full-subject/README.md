@@ -42,3 +42,18 @@ gentar/run.sh --sweep          # every suite this environment can run
 bench-side on the PR, the floor (`example-full-install`) on the main push,
 and a release tag gated by `release-gate.sh` rather than run; the sweep
 exits `0`.
+
+## CI on your own runners
+
+With no GitHub-hosted minutes, the bench-free jobs go to a self-hosted
+runner through one repository or organisation variable. No file changes:
+
+```bash
+gh variable set GENTAR_CI_RUNNER -R owner/repo --body '["self-hosted", "linux-ci"]'
+GENTAR_CI_RUNNER='["self-hosted", "linux-ci"]' \
+  GITHUB_EVENT_NAME=push GITHUB_REF=refs/heads/main gentar/run.sh --plan
+```
+
+**Pass:** the plan prints `runner=["self-hosted", "linux-ci"]`. The same
+plan with `'["self-hosted", "arena"]'` exits `2`: the checks never run on
+the bench runner.

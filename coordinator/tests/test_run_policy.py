@@ -15,6 +15,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -296,22 +297,30 @@ class WorkflowInvariantTest(unittest.TestCase):
                 out[name] += line + "\n"
         return out
 
-    def test_only_the_bench_job_is_self_hosted_and_it_is_gated(self):
+    def test_only_the_bench_job_names_a_self_hosted_runner_and_it_is_gated(self):
+        # Literally: plan and checks reach a self-hosted runner only through
+        # GENTAR_CI_RUNNER (plan.py refuses the `arena` label in it), and a
+        # fork's PR skips plan when that is set (test_ci_runner).
         jobs = self.jobs()
-        self_hosted = [j for j, t in jobs.items() if "self-hosted" in t]
-        self.assertEqual(self_hosted, ["bench"])
+        literal = [j for j, t in jobs.items() if re.search(r"runs-on: \[self-hosted", t)]
+        self.assertEqual(literal, ["bench"])
+        self.assertEqual([j for j, t in jobs.items() if "arena]" in t and "runs-on" in t], ["bench"])
         bench = jobs["bench"]
         self.assertIn("needs: plan", bench)
         self.assertIn("needs.plan.outputs.bench != 'none'", bench)
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", bench)
 
-    def test_plan_and_checks_are_github_hosted(self):
-        # plan is fixed; checks runs on the policy's [phase1] os, which
-        # plan.py restricts to GitHub-hosted labels (PlanTest covers it)
+    def test_plan_and_checks_are_github_hosted_unless_the_variable_says(self):
+        # unset: plan on ubuntu-latest, checks on the policy's [phase1] os,
+        # which plan.py restricts to GitHub-hosted labels (PlanTest covers it)
         jobs = self.jobs()
-        self.assertIn("runs-on: ubuntu-latest", jobs["plan"])
-        self.assertIn("runs-on: ${{ matrix.os }}", jobs["checks"])
+        self.assertIn("|| 'ubuntu-latest' }}", jobs["plan"])
+        self.assertIn("|| matrix.os }}", jobs["checks"])
         self.assertIn("os: ${{ fromJSON(needs.plan.outputs.os) }}", jobs["checks"])
+        for j in ("plan", "checks"):
+            runs_on = re.search(r"runs-on: (.*)", jobs[j]).group(1)
+            self.assertEqual(re.sub(r"\|\| .*", "", runs_on).strip(),
+                             "${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER)")
 
     def test_pushes_to_any_branch_reach_the_planner(self):
         # the default branch is the repo's (main, master, trunk); only the

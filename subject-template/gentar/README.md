@@ -14,7 +14,7 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.8.1` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.9.0` |
 
 ## Quickstart (local)
 
@@ -204,7 +204,7 @@ workflow's first job asks it what this event should run.
 
 | Event | Runs |
 |---|---|
-| pull request | **phase 1**: bench-free checks on GitHub-hosted runners — `ubuntu-latest`, plus `macos-latest` if `[phase1] os` lists it (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
+| pull request | **phase 1**: bench-free checks on GitHub-hosted runners — `ubuntu-latest`, plus `macos-latest` if `[phase1] os` lists it — or on the self-hosted runner `GENTAR_CI_RUNNER` names (below) (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
 | push to the default branch | **phase 1**: the checks, plus `[phase1] floor` on the bench |
 | dispatch (no suites), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
 | `arena-<suite>` tag, or a dispatch naming suites | exactly those suites (`arena / targeted`; never counts as phase 2) |
@@ -244,7 +244,8 @@ failure. Undeclared templates run as before.
 
 ```yaml
   arena-gate:
-    runs-on: ubuntu-latest
+    # the same runner as the arena's plan/checks (GENTAR_CI_RUNNER, if set)
+    runs-on: ${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER) || 'ubuntu-latest' }}
     permissions: { actions: read, contents: read }
     steps:
       - uses: actions/checkout@v4
@@ -350,6 +351,23 @@ The arena workflow is the kit's, byte for byte — `--check` compares it —
 and does what the run policy says (above). Its `plan` and `checks` jobs
 run on GitHub-hosted runners; only the `bench` job needs a self-hosted
 runner labeled `arena` with Docker + reach to the bench-host.
+
+**No GitHub-hosted minutes, or CI kept in-house?** Set the repository or
+organisation variable `GENTAR_CI_RUNNER` to a JSON runs-on value, e.g.
+`["self-hosted", "linux-ci"]`, and `plan` and `checks` run there instead
+(the plan output's `runner=` line says where). It needs `git`, `python3`
+and `bash`, plus `gh` for the release gate below. Three things change with it set:
+
+- a **fork's** pull request runs nothing at all, not even the checks: its
+  code never reaches a self-hosted runner;
+- `[phase1] os` may only list `ubuntu-latest` (macOS checks need a hosted
+  runner; `plan.py` refuses rather than quietly running Linux);
+- the value may not mention `arena` in any case, not even inside a longer
+  label: the checks run pull request code and the bench runner must never
+  get it. The workflow fails such a run before scheduling anything
+  (`ci-runner-refused`), because runner labels match regardless of case.
+
+The `bench` job is unaffected: it always runs on `arena`.
 GitHub-hosted runners cannot reach an internal bench-host. One-time
 setup, ~5 min on any always-on machine with Docker:
 
