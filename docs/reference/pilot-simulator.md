@@ -14,7 +14,7 @@ A scenario's `[driver]` block names the command and a list of **turns**
 |---|---|
 | `answer` | wait for a prompt pattern, then type text |
 | `expect` | wait for a pattern to appear on screen |
-| `pick` | walk a `❯`-cursor picker to a labeled option and select it |
+| `pick` | walk a `❯`-cursor picker to a labeled option and select it. Numbered (`❯ 1. Dark`) or not (`❯ No, exit`); an unnumbered one counts once the label is in the option block, so the input prompt never does. A label not in the list fails as soon as the cursor wraps. An `optional` pick that never sees its picker is skipped and named in the report's warnings |
 | `key` | send raw key events (`enter`, `escape`, `ctrl-c`), optionally anchored to a screen and paced |
 | `abort` | prove the danger gate fires |
 

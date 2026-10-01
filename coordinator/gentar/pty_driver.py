@@ -20,7 +20,24 @@ from gentar.benchhost import BenchHost
 
 from gentar.gates import APPROVAL_RE, DANGER_RE  # noqa: E402,F401  (re-exported)
 PICKER_CURSOR_RE = re.compile(r"^\s*❯\s*[0-9]+\.", re.MULTILINE)
+# An UNNUMBERED picker's cursor line: `❯ <text>`. Claude Code 2.1.283's
+# API-key and trust dialogs ("❯ No, exit" / "Yes, I trust this folder") have
+# no numbers (cockpit). Text after the glyph is required: an empty `❯` is the
+# input prompt, not a picker.
+CURSOR_TEXT_RE = re.compile(r"^\s*❯\s*\S.*$", re.MULTILINE)
 SPINNER_RE = re.compile(r"^[✻✽✢·✳✶]", re.MULTILINE)
+
+
+def picker_visible(screen: str, label: "re.Pattern") -> bool:
+    """A picker is on screen: a numbered `❯ N.` cursor line, or an
+    unnumbered `❯ <text>` cursor line with the wanted label somewhere in
+    the option block around it (the last 20 rows). The label condition keeps
+    the input prompt (`❯ ` plus typed text) from passing as a picker."""
+    if PICKER_CURSOR_RE.search(screen):
+        return True
+    rows = screen.splitlines()[-20:]
+    return (any(CURSOR_TEXT_RE.match(r) for r in rows)
+            and any(label.search(r) for r in rows))
 
 
 class DriverAbort(RuntimeError):
@@ -177,12 +194,13 @@ class PtyDriver:
         label = re.compile(label_pattern, re.IGNORECASE)
         waited = 0.0
         while waited < settle:
-            if PICKER_CURSOR_RE.search(self.screen()):
+            if picker_visible(self.screen(), label):
                 break
             time.sleep(0.5)
             waited += 0.5
         else:
             return False
+        seen = []
         for _ in range(max_tries):
             # The transcript is a raw stream, not a rendered pane (gauntlet
             # had tmux capture-pane); in-place redraws stack blocks, so the
@@ -192,6 +210,12 @@ class PtyDriver:
             if label.search(cursor):
                 self.send_key("enter")
                 return True
+            # Back at an option already passed: the list wrapped (or the
+            # cursor does not move), and the label is not in it.
+            text = cursor.strip()
+            if text in seen:
+                return False
+            seen.append(text)
             self.send_key("down")
             time.sleep(1)
         return False
