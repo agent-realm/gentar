@@ -236,6 +236,49 @@ def _check_goal(path, sc) -> None:
             raise ScenarioError(f"{w}.on is only for approving actions (approve = true)")
 
 
+_SEPARATORS = {";", "&&", "||", "|", "&", "(", ")", "{", "}", "!"}
+_PREFIXES = {"exec", "nohup", "env", "sudo", "command", "time"}
+
+
+def plain_timeout(command: str, depth: int = 0) -> bool:
+    """True when `command` starts something under GNU `timeout` without
+    `--foreground`. timeout puts its child in a NEW background process group,
+    so an interactive program under it is stopped by SIGTTIN (state T) the
+    moment it reads the tty, before it draws anything; headless `-p` runs
+    never notice (cockpit's first-run scenario, 2026-10-01).
+
+    Only `timeout` in command position counts (`echo timeout` does not), and
+    a quoted script (`bash -lc "timeout 60 claude"`) is looked into."""
+    import re
+    import shlex
+    try:
+        lex = shlex.shlex(command, posix=True, punctuation_chars=";&|(){}!")
+        lex.whitespace_split = True
+        words = list(lex)
+    except ValueError:
+        return False
+    prev = None
+    for i, w in enumerate(words):
+        command_pos = (prev is None or prev in _SEPARATORS or prev in _PREFIXES
+                       or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", prev or "") is not None)
+        if command_pos and w.rsplit("/", 1)[-1] == "timeout" and i + 1 < len(words):
+            # options before the duration; -k/-s (and the long forms without
+            # `=`) take the next word as their argument
+            opts, rest = [], iter(words[i + 1:])
+            for o in rest:
+                if not o.startswith("-"):
+                    break
+                opts.append(o)
+                if o in ("-k", "-s", "--kill-after", "--signal"):
+                    next(rest, None)
+            if "--foreground" not in opts:
+                return True
+        if depth < 3 and any(c.isspace() for c in w) and plain_timeout(w, depth + 1):
+            return True
+        prev = w
+    return False
+
+
 class TomlScenario:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -338,6 +381,15 @@ class TomlScenario:
         self.goal_timeout = driver.get("timeout", 300)
         if self.goal or self.actions:
             _check_goal(path, self)
+        # Not refusals: things that load fine and are probably wrong. The
+        # coordinator prints them and puts them in the report.
+        self.warnings: list[str] = []
+        if self.driver_command and (self.turns or self.goal) and plain_timeout(self.driver_command):
+            self.warnings.append(
+                "driver.command runs under plain `timeout`: GNU timeout puts its child "
+                "in a background process group, so an interactive program is stopped "
+                "by SIGTTIN (state T) on its first tty read and never draws. Use "
+                "`timeout --foreground`")
         # Rates over N runs — for judged suites only: a deterministic suite
         # must pass every time, so a rate would only hide its flakes.
         semantic = doc.get("semantic") or {}

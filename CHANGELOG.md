@@ -29,6 +29,11 @@ Adopters pin a release tag, not a branch.
   optional `[on_failure] commands` table, captured before the session is
   closed. A stuck TUI used to leave only the transcript (cockpit's
   first-run scenario, parked after three rounds).
+- A warning (printed, and in the report) when a scenario with driver turns
+  starts its command under plain `timeout`: GNU timeout's child runs in a
+  background process group, so a TUI is stopped by SIGTTIN on its first tty
+  read (found by cockpit). Use `timeout --foreground`. The engine's own
+  `agent-pty-smoke` now does; unverified live until its next dispatch.
 
 ## 0.9.0 — 2026-09-28
 ### Added

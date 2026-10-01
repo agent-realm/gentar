@@ -74,6 +74,16 @@ declares and passes them through with `-e NAME`, so exporting them is
 enough. Bare `docker compose run` does not — add the same `-e` flags, as
 the [CI contract](ci-and-releases.md) does.
 
+## Bounding an interactive command: `timeout --foreground`
+
+Wrap a TUI in `timeout --foreground N <cmd>`, never plain `timeout`. GNU
+`timeout` runs its child in a new **background** process group, so an
+interactive program under it is stopped by SIGTTIN (state `T`) on its first
+tty read and never draws; a headless `-p` run never notices. The engine
+warns when a scenario with driver turns starts its command under plain
+`timeout` (the warning is printed and lands in the report), and the failure
+snapshot's process tree shows the `T` state when it happens.
+
 ## When a turn fails — the failure snapshot
 
 A failed turn, the final wait for EOF timing out, the danger gate or a

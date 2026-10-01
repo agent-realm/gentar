@@ -137,5 +137,37 @@ class SnapshotTest(unittest.TestCase):
         self.assertNotIn("Failure snapshot", report.markdown())
 
 
+class PlainTimeoutTest(unittest.TestCase):
+    """GNU timeout's child is a background process group: a TUI under it is
+    stopped by SIGTTIN before it draws (cockpit, 2026-10-01)."""
+
+    def test_detection(self):
+        from gentar.toml_scenario import plain_timeout as p
+        flagged = ["timeout 300 claude", "/usr/bin/timeout 9 x", "cd x && timeout 5 y",
+                   "FOO=1 timeout 5 y", "exec timeout 5 y", 'bash -lc "timeout 60 claude"',
+                   "timeout -k 5 60 x", "timeout --kill-after 5 60 x",
+                   'timeout -s INT 60 bash -lc "cockpit run"']
+        clean = ["timeout --foreground 300 claude", "timeout -k 5 --foreground 60 x",
+                 "timeout --signal=INT --foreground 5 x", "claude --timeout 5", "echo timeout",
+                 "echo timeout 5", 'sh -c "cd x && timeout --foreground 5 y"', "cockpit run"]
+        for c in flagged:
+            self.assertTrue(p(c), c)
+        for c in clean:
+            self.assertFalse(p(c), c)
+
+    def test_warned_only_with_interactive_turns(self):
+        self.assertTrue(load(BASE.replace("cockpit run", "timeout 60 cockpit run") + TURN).warnings)
+        self.assertFalse(load(BASE.replace("cockpit run", "timeout 60 cockpit run")).warnings)
+        self.assertFalse(load(BASE.replace("cockpit run", "timeout --foreground 60 cockpit run")
+                              + TURN).warnings)
+
+    def test_the_engines_own_scenarios_are_clean(self):
+        scen = Path(__file__).resolve().parents[1] / "scenarios"
+        if not scen.exists():
+            self.skipTest("scenarios/ is not in this build context")
+        for f in sorted(scen.glob("*.toml")):
+            self.assertEqual(TomlScenario(f).warnings, [], f.name)
+
+
 if __name__ == "__main__":
     unittest.main()
