@@ -301,6 +301,24 @@ class TomlScenario:
                     f"([A-Za-z_][A-Za-z0-9_]*), got {c!r}")
 
         self.steps = list((doc.get("oracle") or {}).get("steps", []))
+        # Diagnostics run on the bench when a driver turn fails, before the
+        # session is closed: their output lands in the report's failure
+        # snapshot (cockpit). Never a verdict; same timeout rule as verify.
+        on_failure = doc.get("on_failure") or {}
+        if not isinstance(on_failure, dict) or set(on_failure) - {"commands"}:
+            raise ScenarioError(f"{path}: [on_failure] takes only `commands`")
+        self.on_failure = []
+        for i, c in enumerate(on_failure.get("commands", [])):
+            c = {"command": c} if isinstance(c, str) else c
+            if (not isinstance(c, dict) or not isinstance(c.get("command"), str)
+                    or not c["command"].strip() or set(c) - {"command", "timeout"}
+                    or isinstance(c.get("timeout", 60), bool)
+                    or not isinstance(c.get("timeout", 60), int)
+                    or not 1 <= c.get("timeout", 60) <= 600):
+                raise ScenarioError(
+                    f"{path}: on_failure.commands[{i}] must be a command string or "
+                    f"{{ command = \"...\", timeout = 1..600 }}")
+            self.on_failure.append(c)
         verify = doc.get("verify") or {}
         self.files = list(verify.get("files", []))
         self.commands = list(verify.get("commands", []))
@@ -333,6 +351,8 @@ class TomlScenario:
         # after a passing run this many units are recorded as burned.
         self.simulated_spend = int(budget.get("simulate_spend", 0) or 0)
 
+        if self.on_failure and not self.driver_command:
+            raise ScenarioError(f"{path}: [on_failure] needs a [driver]: it runs when a turn fails")
         if not self.steps and not self.driver_command:
             raise ScenarioError(f"{path}: needs [oracle].steps or a [driver] command")
         for i, t in enumerate(self.turns):

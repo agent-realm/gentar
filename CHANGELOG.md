@@ -21,6 +21,14 @@ read this file before moving an adopter's `GENTAR_REF` across one.
 Adopters pin a release tag, not a branch.
 
 ## Unreleased
+### Added
+- **Failure snapshot** (engine): when a driver turn fails (or the final
+  wait times out, or the danger gate or a goal pilot ends the run), the
+  report gets the rendered last screen, the raw tail of the pty stream
+  with escapes visible, the bench's process tree, and the output of a new
+  optional `[on_failure] commands` table, captured before the session is
+  closed. A stuck TUI used to leave only the transcript (cockpit's
+  first-run scenario, parked after three rounds).
 
 ## 0.9.0 — 2026-09-28
 ### Added

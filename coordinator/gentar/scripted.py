@@ -18,6 +18,36 @@ class TurnFailure(AssertionError):
     pass
 
 
+PS_FOREST = ("ps -eo pid,ppid,stat,tty,etime,args --forest 2>/dev/null "
+             "|| ps -ef 2>/dev/null || echo 'no ps on this bench'")
+_CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def failure_snapshot(driver, bench, run_id: str, scenario, scrub) -> dict:
+    """What the pilot's session looked like when a turn failed: the rendered
+    last screen, the raw tail of the byte stream (escapes visible, so a
+    TUI waiting on a terminal query shows its ESC[6n), the bench's process
+    tree, and the scenario's own [on_failure] commands. Every part is
+    scrubbed and best-effort: a part that cannot be read says why."""
+    def part(fn):
+        try:
+            return scrub(fn())
+        except Exception as exc:                        # noqa: BLE001
+            return f"(could not read: {type(exc).__name__}: {exc})"[:300]
+
+    snap = {"screen": part(driver.screen),
+            "raw_tail": part(lambda: _CTRL.sub(lambda m: f"\\x{ord(m.group()):02x}",
+                                               driver.transcript[-3000:])),
+            "processes": part(lambda: bench.exec(run_id, PS_FOREST, timeout=30)[1][-8000:]),
+            "on_failure": []}
+    for c in getattr(scenario, "on_failure", []) or []:
+        def run(c=c):
+            rc, out = bench.exec(run_id, c["command"], timeout=int(c.get("timeout", 60)))
+            return f"exit {rc}\n{out[-4000:]}"
+        snap["on_failure"].append({"command": scrub(c["command"]), "output": part(run)})
+    return snap
+
+
 def make_judge(scenario, spans: Spans, subject: str, run_id: str):
     """The run's one judge (judged turns, a goal pilot, soft verify)."""
     # The coordinator already refused a non-synthetic scenario or a missing
@@ -42,6 +72,7 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
     driver.start(scenario.driver_command, env=env)
     spans.emit(subject, run_id, name, "driver.start",
                attrs={"command": scenario.driver_command[:120]})
+    failed = False
     try:
         if getattr(scenario, "goal", ""):
             return _goal_pilot(driver, judge, scenario, spans, subject, run_id)
@@ -128,7 +159,17 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                 "(wait_done 300s) — the scripted exit keys did not "
                 "produce EOF")
         return f"driver ok: {len(scenario.turns)} turns"
+    except BaseException:
+        failed = True
+        raise
     finally:
+        if failed and report is not None:
+            # A stuck TUI used to leave only the transcript: no screen, no
+            # process list, and verify never ran (cockpit's first-run
+            # scenario, parked after 3 rounds). Captured BEFORE close()
+            # kills the session; never raises over the real failure.
+            report.failure = failure_snapshot(driver, bench, run_id, scenario,
+                                              spans.redactor.scrub)
         if state is not None:
             # The final screen, for soft [[verify.judge]] checks. Never
             # stored: it lives only in this run's memory.
