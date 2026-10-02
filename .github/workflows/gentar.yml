@@ -251,6 +251,7 @@ jobs:
               # skipped permissions (found 2026-10-02). Env config is not
               # persisted into the clone.
               auth=$(printf 'x-access-token:%s' "$SUBJECT_TOKEN" | base64 | tr -d '\n')
+              echo "::add-mask::$auth"   # derived, so Actions does not mask it on its own
               GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
                 GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
                 git clone $depth $branch "https://github.com/$repo" \
@@ -400,6 +401,7 @@ jobs:
               # skipped permissions (found 2026-10-02). Env config is not
               # persisted into the clone.
               auth=$(printf 'x-access-token:%s' "$SUBJECT_TOKEN" | base64 | tr -d '\n')
+              echo "::add-mask::$auth"   # derived, so Actions does not mask it on its own
               GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
                 GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
                 git clone $depth $branch "https://github.com/$repo" \

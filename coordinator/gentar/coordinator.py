@@ -35,8 +35,14 @@ class RunError(RuntimeError):
 # remote URL, an http.extraheader (actions/checkout's auth header), or a
 # credential store file. The engine copies the subject, `.git` included,
 # into the bench, where agents may run with skipped permissions.
-_CRED_IN_URL = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s@:]+:[^/\s@]+@", re.IGNORECASE)
-_CRED_KEYS = re.compile(r"^\s*extraheader\s*=|x-access-token|authorization:", re.IGNORECASE | re.MULTILINE)
+# Any user info in an http(s) URL: `user:pass@`, `token@` (GitHub accepts a
+# bare token as the user), `:token@`, `token:@`, in a remote or in a
+# `[url "..."]` insteadOf header. For other schemes only a password counts:
+# `ssh://git@host` is a user name, not a secret.
+_CRED_IN_URL = re.compile(r"https?://[^/\s\"']*@|[a-z][a-z0-9+.-]*://[^/\s@:\"']*:[^/\s@\"']+@",
+                          re.IGNORECASE)
+_CRED_KEYS = re.compile(r"^\s*(extraheader|cookiefile)\s*=|x-access-token|authorization:",
+                        re.IGNORECASE | re.MULTILINE)
 
 
 def subject_credential_problems(subject_dir: str) -> list[str]:
@@ -45,17 +51,26 @@ def subject_credential_problems(subject_dir: str) -> list[str]:
     never the value. A worktree's `.git` pointer file is not a directory
     and holds no config."""
     out = []
-    config = os.path.join(subject_dir, ".git", "config")
-    if os.path.isfile(config):
+    gitdir = os.path.join(subject_dir, ".git")
+    configs = []
+    if os.path.isdir(gitdir):
+        # Every git config the copy carries: the repo's, each submodule's
+        # (.git/modules/**/config) and each worktree's config.worktree.
+        for root, dirs, files in os.walk(gitdir):
+            dirs[:] = [d for d in dirs if d not in ("objects", "lfs", "logs")]
+            configs += [os.path.join(root, f) for f in files if f in ("config", "config.worktree")]
+    for config in sorted(configs):
         try:
             with open(config, encoding="utf-8", errors="replace") as fh:
                 text = fh.read()
         except OSError as exc:
-            return [f"cannot read {config} to check it for credentials: {exc.strerror}"]
+            out.append(f"cannot read {config} to check it for credentials: {exc.strerror}")
+            continue
         if _CRED_IN_URL.search(text):
-            out.append(f"{config} has a credential in a remote URL")
+            out.append(f"{config} has a credential in a URL (a remote or an insteadOf)")
         if _CRED_KEYS.search(text):
-            out.append(f"{config} has an auth header or token (http.extraheader)")
+            out.append(f"{config} has an auth header, token or cookie file "
+                       f"(http.extraheader / http.cookieFile)")
     for name in (".git-credentials", os.path.join(".git", "credentials")):
         if os.path.exists(os.path.join(subject_dir, name)):
             out.append(f"{os.path.join(subject_dir, name)} exists (a git credential store)")

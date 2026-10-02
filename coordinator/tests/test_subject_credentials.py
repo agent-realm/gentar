@@ -41,8 +41,32 @@ class ProblemsTest(unittest.TestCase):
     def test_a_token_in_the_remote_url_is_refused(self):
         bad = CLEAN.replace("https://github.com", f"https://x-access-token:{SECRET}@github.com")
         why = coord.subject_credential_problems(str(subject(bad)))
-        self.assertTrue(any("remote URL" in w for w in why))
+        self.assertTrue(any("in a URL" in w for w in why))
         self.assertNotIn(SECRET, " ".join(why))
+
+    def test_every_user_info_shape_in_an_http_url_is_refused(self):
+        # fallback review (Gemini): token-only, empty user, empty password
+        for url in (f"https://{SECRET}@github.com", f"https://:{SECRET}@github.com",
+                    f"https://{SECRET}:@github.com", f"http://{SECRET}@git.example.org"):
+            bad = CLEAN.replace("https://github.com", url)
+            with self.subTest(url=url):
+                why = coord.subject_credential_problems(str(subject(bad)))
+                self.assertTrue(why)
+                self.assertNotIn(SECRET, " ".join(why))
+
+    def test_an_insteadof_rewrite_with_a_token_is_refused(self):
+        bad = CLEAN + f'[url "https://{SECRET}@github.com/"]\n\tinsteadOf = https://github.com/\n'
+        self.assertTrue(coord.subject_credential_problems(str(subject(bad))))
+
+    def test_a_submodule_config_is_checked(self):
+        d = subject(CLEAN, {".git/modules/lib/config":
+                            CLEAN.replace("https://github.com", f"https://x-access-token:{SECRET}@github.com")})
+        why = coord.subject_credential_problems(str(d))
+        self.assertTrue(any("modules" in w for w in why))
+
+    def test_a_cookie_file_is_refused(self):
+        bad = CLEAN + "[http]\n\tcookieFile = /home/u/.gitcookies\n"
+        self.assertTrue(coord.subject_credential_problems(str(subject(bad))))
 
     def test_a_user_password_url_is_refused(self):
         bad = CLEAN.replace("https://github.com", "https://bob:hunter2@git.example.org")
@@ -106,6 +130,7 @@ class WorkflowTest(unittest.TestCase):
         self.assertNotIn('"${{ secrets.GENTAR_SUBJECT_TOKEN }}"', text)
         self.assertEqual(text.count("SUBJECT_TOKEN: ${{ secrets.GENTAR_SUBJECT_TOKEN }}"), 2)
         self.assertEqual(text.count('GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"'), 2)
+        self.assertEqual(text.count('echo "::add-mask::$auth"'), 2)
 
 
 if __name__ == "__main__":
