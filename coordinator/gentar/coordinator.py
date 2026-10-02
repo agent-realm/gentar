@@ -484,7 +484,8 @@ def _run(name: str, cfg: Config | None = None) -> int:
         else:
             rules, checks = bench.policy_state(d.CANARIES)
             why = d.start_refusals(os.environ, rules, scenario.driller["allow"],
-                                   scenario.credential_names(), checks)
+                                   scenario.credential_names(), checks,
+                                   model=scenario.driller["model"])
         if why:
             msg = "driller guard: " + "; ".join(why) + " — refusing before any bench exists."
             print(f"Error: {msg}")

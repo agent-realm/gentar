@@ -183,8 +183,39 @@ def sandbox_problems(rules: list[dict], sandbox: str, allow: list[str]) -> list[
     return out
 
 
+# A model id as 9router names it: `cc/claude-sonnet-5`, `glm/glm-5.3`, …
+MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}")
+
+
+def model_problems(env: dict, model: str) -> list[str]:
+    """The model a driller uses: its scenario's `model`, else the arena's
+    GENTAR_DRILLER_MODEL. Each repo, each driller, picks its own; the arena
+    keeps the route (URL, key) and may restrict the choice with
+    GENTAR_DRILLER_MODELS, a comma-separated list. The chosen model's
+    provider receives the scrubbed screens, so that list is the operator's
+    say over where they go."""
+    if not model:
+        return ["no driller model: set [driller] model, or GENTAR_DRILLER_MODEL for the arena"]
+    if not MODEL_ID.fullmatch(model):
+        return [f"driller model {model!r} is not a model id"]
+    allowed = [m.strip() for m in (env.get("GENTAR_DRILLER_MODELS") or "").split(",") if m.strip()]
+    if allowed and model not in allowed:
+        return [f"driller model {model!r} is not one this arena allows "
+                f"(GENTAR_DRILLER_MODELS: {', '.join(allowed)})"]
+    return []
+
+
+def model_env(env: dict, model: str) -> dict:
+    """The model call's whole environment: the arena's route and key, and
+    the driller's model. Nothing else from the process environment."""
+    return {"GENTAR_DRILLER_MODEL_URL": env.get("GENTAR_DRILLER_MODEL_URL", ""),
+            "GENTAR_DRILLER_MODEL_KEY": env.get("GENTAR_DRILLER_MODEL_KEY", ""),
+            "GENTAR_DRILLER_MODEL": model or env.get("GENTAR_DRILLER_MODEL", "")}
+
+
 def start_refusals(env: dict, host_rules: list[dict], allow: list[str],
-                   credentials: list[str], host_checks: list[dict]) -> list[str]:
+                   credentials: list[str], host_checks: list[dict],
+                   model: str = "") -> list[str]:
     """Every reason this driller run must not start. Empty means go."""
     out = []
     for name in FORBIDDEN_ENV:
@@ -198,9 +229,9 @@ def start_refusals(env: dict, host_rules: list[dict], allow: list[str],
             out.append(f"allowlist {why}")
     for name in sorted(n for n in set(credentials) if never_forward(n)):
         out.append(f"credential {name} can never reach a driller's bench")
-    for key in ("GENTAR_DRILLER_MODEL_URL", "GENTAR_DRILLER_MODEL"):
-        if not env.get(key):
-            out.append(f"{key} is not set (the driller model route: 9router on tr0)")
+    if not env.get("GENTAR_DRILLER_MODEL_URL"):
+        out.append("GENTAR_DRILLER_MODEL_URL is not set (the driller model route: 9router on tr0)")
+    out += model_problems(env, model or env.get("GENTAR_DRILLER_MODEL", ""))
     return out
 
 

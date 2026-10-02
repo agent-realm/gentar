@@ -236,7 +236,7 @@ def _check_goal(path, sc) -> None:
             raise ScenarioError(f"{w}.on is only for approving actions (approve = true)")
 
 
-DRILLER_KEYS = {"hat", "runs", "command", "allow", "help", "readme", "max_steps",
+DRILLER_KEYS = {"hat", "runs", "command", "allow", "help", "readme", "model", "max_steps",
                 "seconds", "max_calls", "max_input_tokens", "every"}
 
 
@@ -289,6 +289,11 @@ def _check_driller(path, sc, dr) -> dict:
             or not all(isinstance(h, str) and h.strip() and "\n" not in h for h in helps)):
         raise ScenarioError(f"{path}: driller.help must be a list of commands, one line each")
     out["help"] = list(helps)
+    from gentar.driller import MODEL_ID
+    model = dr.get("model", "")
+    if not isinstance(model, str) or (model and not MODEL_ID.fullmatch(model)):
+        raise ScenarioError(f"{path}: driller.model must be a model id, e.g. \"cc/claude-sonnet-5\"")
+    out["model"] = model
     for name in sc.credential_names():
         if never_forward(name):
             raise ScenarioError(f"{path}: credential {name} can never reach a driller's bench")

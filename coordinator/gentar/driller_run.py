@@ -28,8 +28,6 @@ from gentar.drill import DrillBudget, drill
 # (scenario name, session record) for every session this process ran.
 SINK: list[tuple[str, dict]] = []
 
-MODEL_ENV = ("GENTAR_DRILLER_MODEL_URL", "GENTAR_DRILLER_MODEL", "GENTAR_DRILLER_MODEL_KEY")
-
 
 class BoundaryBreach(AssertionError):
     """The containment did not hold: the session fails, and it is a bug in
@@ -79,13 +77,15 @@ def session(scenario, bench, run_id: str, spans, subject: str, report=None,
         driver_factory = lambda: PtyDriver(bench, run_id)          # noqa: E731
     if model_factory is None:
         from gentar.drill import BamlModel
-        model_factory = lambda: BamlModel({k: env.get(k, "") for k in MODEL_ENV})  # noqa: E731
+        model_factory = lambda: BamlModel(d.model_env(env, dr["model"]))  # noqa: E731
     driver = driver_factory()
     # The brief's credentials only: the scenario's own, as for any suite
     # (the parser already refused every arena-owned name).
     from gentar.oracle import run_env
     driver.start(dr["command"], env=run_env(scenario))
-    spans.emit(subject, run_id, name, "driller.start", attrs={"hat": dr["hat"]})
+    spans.emit(subject, run_id, name, "driller.start",
+               attrs={"hat": dr["hat"],
+                      "model": d.model_env(env, dr["model"])["GENTAR_DRILLER_MODEL"]})
     model = model_factory()
     try:
         result = drill(driver, model, persona.charter, brief, scrub,
@@ -107,8 +107,8 @@ def session(scenario, bench, run_id: str, spans, subject: str, report=None,
     if result.notes:
         try:
             raw = d.extract(persona.hat, result.notes, scrub(transcript[-60000:]),
-                            env={k: env.get(k, "") for k in (*MODEL_ENV, *d.FORBIDDEN_ENV)
-                                 if k in env})
+                            env={**d.model_env(env, dr["model"]),
+                                 **{k: env[k] for k in d.FORBIDDEN_ENV if k in env}})
             findings, dropped = d.supported(raw, scrub(transcript))
         except Exception as exc:                        # noqa: BLE001 — reported, not fatal
             reasons_note = f"findings extraction failed: {type(exc).__name__}"

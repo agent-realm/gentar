@@ -131,6 +131,8 @@ services:
       GENTAR_DRILLER_MODEL_URL: ${GENTAR_DRILLER_MODEL_URL:-}
       GENTAR_DRILLER_MODEL: ${GENTAR_DRILLER_MODEL:-}
       GENTAR_DRILLER_MODEL_KEY: ${GENTAR_DRILLER_MODEL_KEY:-}
+      # Optional: the models a driller scenario may choose (comma-separated).
+      GENTAR_DRILLER_MODELS: ${GENTAR_DRILLER_MODELS:-}
       # Where a run came from, for the exported trace; empty on a local run.
       GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-}
       GITHUB_RUN_ID: ${GITHUB_RUN_ID:-}

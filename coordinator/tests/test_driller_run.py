@@ -60,6 +60,43 @@ class TableTest(unittest.TestCase):
                 load(text)
 
 
+class ModelChoiceTest(unittest.TestCase):
+    """Each repo, each driller, picks its own model; the arena keeps the
+    route and may restrict the choice (pilot, 2026-10-02)."""
+
+    ARENA = {"GENTAR_DRILLER_MODEL_URL": "http://tr0:20128/v1", "GENTAR_DRILLER_MODEL": "glm/glm-5.3",
+             "GENTAR_DRILLER_MODEL_KEY": "k", "TYPESAFE_API_KEY": "judge", "BENCH_SSH_KEY": "b"}
+
+    def test_the_scenario_picks_the_model(self):
+        sc = load(HEAD + DRILLER + 'model = "cc/claude-sonnet-5"\n')
+        self.assertEqual(sc.driller["model"], "cc/claude-sonnet-5")
+        env = d.model_env(self.ARENA, sc.driller["model"])
+        self.assertEqual(env["GENTAR_DRILLER_MODEL"], "cc/claude-sonnet-5")
+        self.assertEqual(set(env), {"GENTAR_DRILLER_MODEL_URL", "GENTAR_DRILLER_MODEL",
+                                    "GENTAR_DRILLER_MODEL_KEY"})      # nothing else leaks in
+
+    def test_without_one_the_arena_default_is_used(self):
+        sc = load(HEAD + DRILLER)
+        self.assertEqual(sc.driller["model"], "")
+        self.assertEqual(d.model_env(self.ARENA, "")["GENTAR_DRILLER_MODEL"], "glm/glm-5.3")
+        self.assertEqual(d.model_problems(self.ARENA, "glm/glm-5.3"), [])
+
+    def test_no_model_anywhere_refuses(self):
+        env = dict(self.ARENA, GENTAR_DRILLER_MODEL="")
+        why = d.start_refusals(env, DENY, [], [], CHECKS, model="")
+        self.assertTrue(any("no driller model" in w for w in why))
+
+    def test_the_arena_allowlist_is_the_operators_say(self):
+        env = dict(self.ARENA, GENTAR_DRILLER_MODELS="cc/claude-sonnet-5, glm/glm-5.3")
+        self.assertEqual(d.model_problems(env, "cc/claude-sonnet-5"), [])
+        self.assertIn("not one this arena allows", d.model_problems(env, "deepseek/deepseek-v4-pro")[0])
+
+    def test_a_malformed_model_is_refused_at_load(self):
+        for bad in ('model = "a b"', 'model = 3', 'model = "$(id)"', 'model = "/x"'):
+            with self.subTest(bad=bad), self.assertRaises(ScenarioError):
+                load(HEAD + DRILLER + bad + "\n")
+
+
 class FakeBench:
     def __init__(self, rules=None, log=None, after=None):
         self.rules = DENY if rules is None else rules

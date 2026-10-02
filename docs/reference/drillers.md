@@ -22,6 +22,7 @@ command = "bash -l"         # the terminal the driller gets
 readme = "README.md"        # in the workspace, absolute, or ~/...
 help = ["tool"]             # each one's --help goes into the brief
 allow = []                  # exact hosts the subject needs; none by default
+model = "cc/claude-sonnet-5" # this driller's model; unset = the arena's default
 max_steps = 60              # budgets end a session, not the run
 seconds = 900
 max_calls = 80
@@ -60,9 +61,22 @@ sessions at once: exit 1. Findings never change the exit.
 
 ## The model route and where screens go
 
-`GENTAR_DRILLER_MODEL_URL`, `GENTAR_DRILLER_MODEL` and
+**Each repo, and each driller in it, picks its model** with `model` in the
+`[driller]` table; without one, the arena's `GENTAR_DRILLER_MODEL` is used.
+The arena owns the route: `GENTAR_DRILLER_MODEL_URL` and
 `GENTAR_DRILLER_MODEL_KEY` reach the coordinator only (compose), never a
-bench, and the key and URL are scrubbed from everything exported. The
+bench, and both are scrubbed from everything exported. An arena may limit
+the choice with `GENTAR_DRILLER_MODELS` (comma-separated model ids): a
+driller asking for any other is refused before a bench exists. The model
+call gets exactly those three values and nothing else from the
+coordinator's environment.
+
+Run the arena with the key lent by reference, never pasted:
+
+```bash
+with-secret GENTAR_DRILLER_MODEL_KEY=keychain:pilot/gentar-driller-model-key -- \
+  bin/arena run driller-white-hat-demo
+``` The
 route is 9router on tr0, which is **a proxy**: the model behind it is
 whichever provider the model id names (z.ai GLM, DeepSeek, Anthropic,
 EVREN). So a driller's scrubbed screen leaves our infrastructure to that
