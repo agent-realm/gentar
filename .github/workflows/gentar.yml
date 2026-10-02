@@ -215,6 +215,9 @@ jobs:
         # injection, but a repo variable should not get that far).
         env:
           GENTAR_NIGHTLY_SUBJECTS: ${{ vars.GENTAR_NIGHTLY_SUBJECTS }}
+          # The subject read token, through env only: never pasted into this
+          # script, never in a clone URL, never written to a .git/config.
+          SUBJECT_TOKEN: ${{ secrets.GENTAR_SUBJECT_TOKEN }}
         run: |
           umask 077
           echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
@@ -222,7 +225,7 @@ jobs:
           # subjects/. GENTAR_SUBJECT_TOKEN (PAT with read access) is
           # opt-in; without it the nightly run covers subjectless suites
           # only and says so. subject_ref pins what gets tested.
-          if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
+          if [ -n "$SUBJECT_TOKEN" ]; then
             REF="${{ github.event.inputs.subject_ref }}"
             REF="${REF:-main}"
             # WHICH subjects this arena tests is an install's choice, not
@@ -242,8 +245,15 @@ jobs:
                 *:full) depth=""; branch="-b $REF" ;;
               esac
               name="${repo##*/}"
-              git clone $depth $branch \
-                "https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/$repo" \
+              # The token travels as an HTTP header set through git's env
+              # config: a token in the URL is saved in .git/config, which
+              # the engine then copied into benches where agents run with
+              # skipped permissions (found 2026-10-02). Env config is not
+              # persisted into the clone.
+              auth=$(printf 'x-access-token:%s' "$SUBJECT_TOKEN" | base64 | tr -d '\n')
+              GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+                GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+                git clone $depth $branch "https://github.com/$repo" \
                 "subjects/$name" 2>/dev/null || \
                 echo "$repo clone failed — its suites will fail honestly"
             done
@@ -356,12 +366,15 @@ jobs:
         # injection, but a repo variable should not get that far).
         env:
           GENTAR_NIGHTLY_SUBJECTS: ${{ vars.GENTAR_NIGHTLY_SUBJECTS }}
+          # The subject read token, through env only: never pasted into this
+          # script, never in a clone URL, never written to a .git/config.
+          SUBJECT_TOKEN: ${{ secrets.GENTAR_SUBJECT_TOKEN }}
         run: |
           umask 077
           echo "${{ secrets.GENTAR_BENCH_KEY }}" > /tmp/gentar_ci_bench_key
           # Subject scenarios need the subject mounted; clone only when
           # the read token exists (otherwise such scenarios fail honestly).
-          if [ -n "${{ secrets.GENTAR_SUBJECT_TOKEN }}" ]; then
+          if [ -n "$SUBJECT_TOKEN" ]; then
             REF="${{ github.event.inputs.subject_ref }}"
             REF="${REF:-main}"
             # WHICH subjects this arena tests is an install's choice, not
@@ -381,8 +394,15 @@ jobs:
                 *:full) depth=""; branch="-b $REF" ;;
               esac
               name="${repo##*/}"
-              git clone $depth $branch \
-                "https://x-access-token:${{ secrets.GENTAR_SUBJECT_TOKEN }}@github.com/$repo" \
+              # The token travels as an HTTP header set through git's env
+              # config: a token in the URL is saved in .git/config, which
+              # the engine then copied into benches where agents run with
+              # skipped permissions (found 2026-10-02). Env config is not
+              # persisted into the clone.
+              auth=$(printf 'x-access-token:%s' "$SUBJECT_TOKEN" | base64 | tr -d '\n')
+              GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+                GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+                git clone $depth $branch "https://github.com/$repo" \
                 "subjects/$name" 2>/dev/null || \
                 echo "$repo clone failed — its suites will fail honestly"
             done
