@@ -115,6 +115,8 @@ def allow_problems(entry: str) -> str | None:
     either: an address is how a driller would reach arf's internal range."""
     if "*" in entry:
         return f"{entry!r}: a wildcard; name each host the subject needs"
+    if entry.split(":", 1)[0].lower() == CONTROL_HOST:
+        return f"{entry!r}: the audit's positive control host; it must stay blocked"
     if not _HOST.match(entry):
         return f"{entry!r}: not a host[:port]"
     try:
@@ -282,6 +284,27 @@ def audit(log, sandbox: str, allow: list[str]) -> Audit:
             continue
         (out.allowed if host_allowed(str(e.get("host", "")), allow) else out.breaches).append(e)
     return out
+
+
+# A host the bench tries to reach before every session. It must show up in
+# the policy log as blocked, or the log cannot be trusted to show anything
+# (Sonnet 5.5's review: an audit that reads nothing passes everything).
+CONTROL_HOST = "gentar-control.example.org"
+CONTROL_ARGV = ("curl -s -m 5 -o /dev/null https://gentar-control.example.org/ 2>/dev/null "
+                "|| getent hosts gentar-control.example.org >/dev/null 2>&1 || true")
+
+
+def control_seen(result: "Audit") -> bool:
+    """The positive control is in the log as a blocked attempt."""
+    return any(str(e.get("host", "")).startswith(CONTROL_HOST) for e in result.denied)
+
+
+def without_control(result: "Audit") -> "Audit":
+    """The audit as the report shows it: the control is the harness, not
+    the driller, so it is no finding."""
+    return Audit(denied=[e for e in result.denied
+                         if not str(e.get("host", "")).startswith(CONTROL_HOST)],
+                 breaches=result.breaches, allowed=result.allowed)
 
 
 def outside_changes(before: dict[str, set], after: dict[str, set], own: set) -> list[str]:

@@ -98,12 +98,14 @@ class ModelChoiceTest(unittest.TestCase):
 
 
 class FakeBench:
-    def __init__(self, rules=None, log=None, after=None):
+    def __init__(self, rules=None, log=None, after=None, control=True):
         self.rules = DENY if rules is None else rules
         self.log = log or {"blocked_hosts": [], "allowed_hosts": []}
         self.after = after
+        self.control = control           # sbx logs the positive control
         self.allowed = []
         self.snaps = 0
+        self.execs = []
 
     def policy_state(self, canaries):
         return self.rules, [c for c in CHECKS if c["target"] in canaries]
@@ -112,7 +114,11 @@ class FakeBench:
         self.allowed.append(argv)
 
     def policy_log(self, sandbox):
-        return json.dumps(self.log)
+        log = json.loads(json.dumps(self.log))
+        if self.control and any(c == d.CONTROL_ARGV for c in self.execs):
+            log["blocked_hosts"].append({"host": d.CONTROL_HOST + ":443", "vm_name": sandbox,
+                                         "proxy_type": "forward"})
+        return json.dumps(log)
 
     def snapshot(self):
         self.snaps += 1
@@ -124,6 +130,7 @@ class FakeBench:
         return f"/w/{run_id}"
 
     def exec(self, run_id, cmd, timeout=300, env=None):
+        self.execs.append(cmd)
         return 0, "Tool README\n" if cmd.startswith("cat ") else "usage: tool\n"
 
 
@@ -233,6 +240,62 @@ class SessionTest(unittest.TestCase):
         out, report, drv, err = self.run_session(FakeBench(log=log))
         self.assertIsNone(err)
         self.assertIn("1 blocked attempt(s)", out)
+
+
+class FailClosedTest(unittest.TestCase):
+    """The audit must fail closed (Sonnet 5.5's review): an sbx error or a
+    log that never saw the positive control is not "nothing happened"."""
+
+    run_session = SessionTest.run_session
+
+    def test_the_control_runs_before_the_driller_and_is_no_finding(self):
+        bench = FakeBench()
+        out, report, drv, err = self.run_session(bench)
+        self.assertIsNone(err)
+        self.assertIn(d.CONTROL_ARGV, bench.execs)
+        self.assertIn("0 blocked attempt(s)", out)            # the control is not counted
+        self.assertFalse(any(d.CONTROL_HOST in e.get("host", "") for e in report.driller["audit"].denied))
+
+    def test_a_log_without_the_control_fails_the_session(self):
+        out, report, drv, err = self.run_session(FakeBench(control=False))
+        self.assertIsInstance(err, driller_run.BoundaryBreach)
+        self.assertIn("positive control", str(err))
+
+    def test_an_unreadable_log_or_snapshot_is_an_error_not_a_pass(self):
+        from gentar.benchhost import BenchHostError
+
+        class Broken(FakeBench):
+            def policy_log(self, sandbox):
+                raise BenchHostError("sbx policy log unreadable")
+        with self.assertRaises(BenchHostError):
+            self.run_session(Broken())
+
+    def test_the_control_host_can_never_be_allowed(self):
+        self.assertIsNotNone(d.allow_problems(d.CONTROL_HOST))
+        self.assertIsNotNone(d.allow_problems(d.CONTROL_HOST + ":443"))
+
+
+class SbxFailClosedTest(unittest.TestCase):
+
+    def host(self, rc, stdout):
+        h = SbxBenchHost(Config())
+        h._run = lambda cmd, timeout=300, strict=True: subprocess.CompletedProcess(cmd, rc, stdout=stdout, stderr="")
+        return h
+
+    def test_policy_log_refuses_errors_and_garbage(self):
+        from gentar.benchhost import BenchHostError
+        for rc, out in ((1, ""), (0, ""), (0, "not json"), (0, "[]"), (0, '{"other": 1}'),
+                        (0, '{"blocked_hosts": "x"}')):
+            with self.subTest(rc=rc, out=out), self.assertRaises(BenchHostError):
+                self.host(rc, out).policy_log("box1")
+        self.assertIn("allowed_hosts", self.host(0, '{"blocked_hosts": [], "allowed_hosts": []}')
+                      .policy_log("box1"))
+
+    def test_snapshot_refuses_errors(self):
+        from gentar.benchhost import BenchHostError
+        for rc, out in ((1, ""), (0, "nope"), (0, '{"x": 1}')):
+            with self.subTest(rc=rc, out=out), self.assertRaises(BenchHostError):
+                self.host(rc, out).snapshot()
 
 
 class RunDrillTest(unittest.TestCase):

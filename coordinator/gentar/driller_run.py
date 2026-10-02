@@ -69,6 +69,9 @@ def session(scenario, bench, run_id: str, spans, subject: str, report=None,
         bench.allow_for(run_id, argv)
     # 3. before: the host, the brief
     before = bench.snapshot()
+    # The positive control: a blocked attempt the harness makes itself, so
+    # an audit that sees nothing can be told from one that saw nothing.
+    bench.exec(run_id, d.CONTROL_ARGV, timeout=30)
     brief = _brief(bench, run_id, dr, bench.workspace(run_id), scrub)
 
     # 4. the session
@@ -98,9 +101,14 @@ def session(scenario, bench, run_id: str, spans, subject: str, report=None,
         driver.close()
 
     # 5. after: what got through, what changed
-    audit = d.audit(bench.policy_log(run_id), run_id, dr["allow"])
+    raw_audit = d.audit(bench.policy_log(run_id), run_id, dr["allow"])
     outside = d.outside_changes(before, bench.snapshot(), {run_id})
-    code, reasons = d.verdict(audit, outside, scrub=scrub)
+    code, reasons = d.verdict(raw_audit, outside, scrub=scrub)
+    if not d.control_seen(raw_audit):
+        code = 1
+        reasons.append(f"the policy log did not record the positive control "
+                       f"({d.CONTROL_HOST} blocked): the boundary audit cannot be trusted")
+    audit = d.without_control(raw_audit)
 
     # 6. notes -> findings, evidence or nothing
     findings, dropped = [], []
