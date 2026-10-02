@@ -37,7 +37,7 @@ def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
 def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
 # #########################################################################
-# Generated enums (2)
+# Generated enums (3)
 # #########################################################################
 
 class Category(str, Enum):
@@ -56,9 +56,22 @@ class Severity(str, Enum):
     HIGH = "HIGH"
     CRITICAL = "CRITICAL"
 
+class StepKind(str, Enum):
+    TYPE = "TYPE"
+    KEY = "KEY"
+    WAIT = "WAIT"
+    DONE = "DONE"
+
 # #########################################################################
-# Generated classes (1)
+# Generated classes (2)
 # #########################################################################
+
+class DrillStep(BaseModel):
+    kind: StepKind
+    text: typing.Optional[str] = Field(default=None, description='for TYPE: the exact characters to type')
+    enter: typing.Optional[bool] = Field(default=None, description='for TYPE: press Enter after the text')
+    key: typing.Optional[str] = Field(default=None, description='for KEY: one of enter, escape, up, down, ctrl-c')
+    why: str = Field(description='one line: what you are trying and why')
 
 class Finding(BaseModel):
     category: Category
@@ -74,10 +87,11 @@ class Finding(BaseModel):
 
 
 # #########################################################################
-# Model rebuilds (1)
+# Model rebuilds (2)
 # #########################################################################
 # Resolve string forward references now that every model above is defined so
 # class declaration order never breaks Pydantic construction (issue #793).
 # Recursive models are intentionally omitted (Pydantic resolves those lazily;
 # eagerly rebuilding them can recurse).
+DrillStep.model_rebuild()
 Finding.model_rebuild()

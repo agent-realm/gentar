@@ -34,6 +34,7 @@ memory service, **claude-playbooks** is the CLI that installs playbooks.
 | `memhouse-house` | sbx | a real service deployed inside the bench's own Docker daemon; verdicts are SQL counts against it |
 | `docs-honesty-kommander` | sbx | a README's install *and* uninstall paths run verbatim, drift-guarded |
 | `docs-honesty-gentar` | sbx | the repository README's own claims, checked against this repo |
+| `driller-white-hat-demo` | sbx (deny-by-default host only) | a white hat driller session against a synthetic CLI with two planted flaws (a world-readable token, a token printed on screen); the verdict is the boundary audit, the findings are reported and ranked over 5 sessions |
 
 The last one is worth a sentence. `docs-honesty-gentar` greps the
 [README](../../README.md) for the commands it tells you to run, then proves their targets exist:

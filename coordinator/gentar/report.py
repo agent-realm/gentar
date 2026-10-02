@@ -66,6 +66,9 @@ class RunReport:
     agent_stats: dict = field(default_factory=dict)
     # Soft [[verify.judge]] results — reported, never the verdict.
     soft: list = field(default_factory=list)
+    # One driller session (gentar/driller_run.py): how it ended, the
+    # boundary's findings and audit, the typed findings. Scrubbed upstream.
+    driller: dict = field(default_factory=dict)
 
     def mark(self, verdict: str, exit_code: int) -> None:
         self.verdict = verdict
@@ -139,6 +142,31 @@ class RunReport:
                     lines.append("```")
                     lines.append(_tail(s.output, _STEP_TAIL))
                     lines.append("```")
+                lines.append("")
+
+        if self.driller:
+            dr = self.driller
+            audit = dr.get("audit")
+            lines.append("## Driller session (findings are reported, never the verdict)")
+            lines.append("")
+            lines.append(f"- ended: {dr.get('ended', '?')} after {dr.get('steps', 0)} step(s)")
+            for b in dr.get("breaches") or []:
+                lines.append(f"- **{b}**")
+            for b in dr.get("boundary") or []:
+                lines.append(f"- boundary: {b}")
+            if audit is not None:
+                blocked = sorted({e.get("host", "?") for e in audit.denied})
+                lines.append(f"- blocked attempts (the wall held): {', '.join(blocked) or 'none'}")
+            lines.append(f"- supported findings: {len(dr.get('findings') or [])}; dropped for "
+                         f"no evidence on screen: {dr.get('dropped', 0)}")
+            lines.append("")
+            for f in dr.get("findings") or []:
+                sev = getattr(f.severity, "value", f.severity)
+                cat = getattr(f.category, "value", f.category)
+                lines.append(f"- {sev} {cat}: {_tail(f.title, 160)}")
+                lines.append(f"  - evidence: `{_tail(f.evidence, 300)}`")
+                lines.append(f"  - reproduce: `{_tail(f.reproduce, 300)}`")
+            if dr.get("findings"):
                 lines.append("")
 
         if self.soft:

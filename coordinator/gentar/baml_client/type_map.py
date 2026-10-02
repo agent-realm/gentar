@@ -16,6 +16,9 @@ from . import stream_types
 
 type_map = {
 
+    "types.DrillStep": types.DrillStep,
+    "stream_types.DrillStep": stream_types.DrillStep,
+
     "types.Finding": types.Finding,
     "stream_types.Finding": stream_types.Finding,
 
@@ -23,5 +26,7 @@ type_map = {
     "types.Category": types.Category,
 
     "types.Severity": types.Severity,
+
+    "types.StepKind": types.StepKind,
 
 }

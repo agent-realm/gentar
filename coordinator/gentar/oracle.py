@@ -122,6 +122,11 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
         _step(bench, subject, run_id, name, spans, i, step_text, env=step_env,
               report=report)
 
+    # 3a. A driller session instead of turns: its exit is the boundary's.
+    if getattr(scenario, "driller", None):
+        from gentar.driller_run import session
+        return session(scenario, bench, run_id, spans, subject, report=report)
+
     # 3b. Interactive driver turns (scripted today; agents phase 6).
     judge, final = None, {}
     if scenario.driver_command:

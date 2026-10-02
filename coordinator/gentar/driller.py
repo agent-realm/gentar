@@ -115,6 +115,8 @@ def allow_problems(entry: str) -> str | None:
     either: an address is how a driller would reach arf's internal range."""
     if "*" in entry:
         return f"{entry!r}: a wildcard; name each host the subject needs"
+    if entry.split(":", 1)[0].lower() == CONTROL_HOST:
+        return f"{entry!r}: the audit's positive control host; it must stay blocked"
     if not _HOST.match(entry):
         return f"{entry!r}: not a host[:port]"
     try:
@@ -183,8 +185,39 @@ def sandbox_problems(rules: list[dict], sandbox: str, allow: list[str]) -> list[
     return out
 
 
+# A model id as 9router names it: `cc/claude-sonnet-5`, `glm/glm-5.3`, …
+MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}")
+
+
+def model_problems(env: dict, model: str) -> list[str]:
+    """The model a driller uses: its scenario's `model`, else the arena's
+    GENTAR_DRILLER_MODEL. Each repo, each driller, picks its own; the arena
+    keeps the route (URL, key) and may restrict the choice with
+    GENTAR_DRILLER_MODELS, a comma-separated list. The chosen model's
+    provider receives the scrubbed screens, so that list is the operator's
+    say over where they go."""
+    if not model:
+        return ["no driller model: set [driller] model, or GENTAR_DRILLER_MODEL for the arena"]
+    if not MODEL_ID.fullmatch(model):
+        return [f"driller model {model!r} is not a model id"]
+    allowed = [m.strip() for m in (env.get("GENTAR_DRILLER_MODELS") or "").split(",") if m.strip()]
+    if allowed and model not in allowed:
+        return [f"driller model {model!r} is not one this arena allows "
+                f"(GENTAR_DRILLER_MODELS: {', '.join(allowed)})"]
+    return []
+
+
+def model_env(env: dict, model: str) -> dict:
+    """The model call's whole environment: the arena's route and key, and
+    the driller's model. Nothing else from the process environment."""
+    return {"GENTAR_DRILLER_MODEL_URL": env.get("GENTAR_DRILLER_MODEL_URL", ""),
+            "GENTAR_DRILLER_MODEL_KEY": env.get("GENTAR_DRILLER_MODEL_KEY", ""),
+            "GENTAR_DRILLER_MODEL": model or env.get("GENTAR_DRILLER_MODEL", "")}
+
+
 def start_refusals(env: dict, host_rules: list[dict], allow: list[str],
-                   credentials: list[str], host_checks: list[dict]) -> list[str]:
+                   credentials: list[str], host_checks: list[dict],
+                   model: str = "") -> list[str]:
     """Every reason this driller run must not start. Empty means go."""
     out = []
     for name in FORBIDDEN_ENV:
@@ -198,9 +231,9 @@ def start_refusals(env: dict, host_rules: list[dict], allow: list[str],
             out.append(f"allowlist {why}")
     for name in sorted(n for n in set(credentials) if never_forward(n)):
         out.append(f"credential {name} can never reach a driller's bench")
-    for key in ("GENTAR_DRILLER_MODEL_URL", "GENTAR_DRILLER_MODEL"):
-        if not env.get(key):
-            out.append(f"{key} is not set (the driller model route: 9router on tr0)")
+    if not env.get("GENTAR_DRILLER_MODEL_URL"):
+        out.append("GENTAR_DRILLER_MODEL_URL is not set (the driller model route: 9router on tr0)")
+    out += model_problems(env, model or env.get("GENTAR_DRILLER_MODEL", ""))
     return out
 
 
@@ -253,6 +286,27 @@ def audit(log, sandbox: str, allow: list[str]) -> Audit:
     return out
 
 
+# A host the bench tries to reach before every session. It must show up in
+# the policy log as blocked, or the log cannot be trusted to show anything
+# (Sonnet 5.5's review: an audit that reads nothing passes everything).
+CONTROL_HOST = "gentar-control.example.org"
+CONTROL_ARGV = ("curl -s -m 5 -o /dev/null https://gentar-control.example.org/ 2>/dev/null "
+                "|| getent hosts gentar-control.example.org >/dev/null 2>&1 || true")
+
+
+def control_seen(result: "Audit") -> bool:
+    """The positive control is in the log as a blocked attempt."""
+    return any(str(e.get("host", "")).startswith(CONTROL_HOST) for e in result.denied)
+
+
+def without_control(result: "Audit") -> "Audit":
+    """The audit as the report shows it: the control is the harness, not
+    the driller, so it is no finding."""
+    return Audit(denied=[e for e in result.denied
+                         if not str(e.get("host", "")).startswith(CONTROL_HOST)],
+                 breaches=result.breaches, allowed=result.allowed)
+
+
 def outside_changes(before: dict[str, set], after: dict[str, set], own: set) -> list[str]:
     """What changed on the bench host outside the driller's own sandbox:
     `before`/`after` map a kind ("sandboxes", "templates") to the names seen.
@@ -293,7 +347,11 @@ def extract(hat: str, feedback: str, transcript: str, env=None, raw: str | None 
     from gentar.baml_client import b
     if raw is not None:
         return list(b.parse.ExtractFindings(raw))
-    return list(b.ExtractFindings(hat, feedback, transcript))
+    # The model route only, passed explicitly: never the process
+    # environment, which holds the arena's own keys.
+    keys = ("GENTAR_DRILLER_MODEL_URL", "GENTAR_DRILLER_MODEL", "GENTAR_DRILLER_MODEL_KEY")
+    client = b.with_options(env={k: env.get(k, "") for k in keys})
+    return list(client.ExtractFindings(hat, feedback, transcript))
 
 
 def supported(findings, transcript: str):

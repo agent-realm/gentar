@@ -82,6 +82,36 @@ class BamlAsyncClient:
     def parse_stream(self):
       return self.__llm_stream_parser
 
+    async def DrillerNotes(self, charter: str,brief: str,history: typing.List[str],screen: str,
+        baml_options: BamlCallOptions = {},
+    ) -> str:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            # Use streaming internally when on_tick is provided
+            __stream__ = self.stream.DrillerNotes(charter=charter,brief=brief,history=history,screen=screen,
+                baml_options=baml_options)
+            return await __stream__.get_final_response()
+        else:
+            # Original non-streaming code
+            __result__ = await self.__options.merge_options(baml_options).call_function_async(function_name="DrillerNotes", args={
+                "charter": charter,"brief": brief,"history": history,"screen": screen,
+            })
+            return typing.cast(str, __result__.cast_to(types, types, stream_types, False, __runtime__))
+    async def DrillerStep(self, charter: str,brief: str,screen: str,history: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> types.DrillStep:
+        # Check if on_tick is provided
+        if 'on_tick' in baml_options:
+            # Use streaming internally when on_tick is provided
+            __stream__ = self.stream.DrillerStep(charter=charter,brief=brief,screen=screen,history=history,
+                baml_options=baml_options)
+            return await __stream__.get_final_response()
+        else:
+            # Original non-streaming code
+            __result__ = await self.__options.merge_options(baml_options).call_function_async(function_name="DrillerStep", args={
+                "charter": charter,"brief": brief,"screen": screen,"history": history,
+            })
+            return typing.cast(types.DrillStep, __result__.cast_to(types, types, stream_types, False, __runtime__))
     async def ExtractFindings(self, hat: str,feedback: str,transcript: str,
         baml_options: BamlCallOptions = {},
     ) -> typing.List["types.Finding"]:
@@ -106,6 +136,30 @@ class BamlStreamClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    def DrillerNotes(self, charter: str,brief: str,history: typing.List[str],screen: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlStream[str, str]:
+        __ctx__, __result__ = self.__options.merge_options(baml_options).create_async_stream(function_name="DrillerNotes", args={
+            "charter": charter,"brief": brief,"history": history,"screen": screen,
+        })
+        return baml_py.BamlStream[str, str](
+          __result__,
+          lambda x: typing.cast(str, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(str, x.cast_to(types, types, stream_types, False, __runtime__)),
+          __ctx__,
+        )
+    def DrillerStep(self, charter: str,brief: str,screen: str,history: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlStream[stream_types.DrillStep, types.DrillStep]:
+        __ctx__, __result__ = self.__options.merge_options(baml_options).create_async_stream(function_name="DrillerStep", args={
+            "charter": charter,"brief": brief,"screen": screen,"history": history,
+        })
+        return baml_py.BamlStream[stream_types.DrillStep, types.DrillStep](
+          __result__,
+          lambda x: typing.cast(stream_types.DrillStep, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.DrillStep, x.cast_to(types, types, stream_types, False, __runtime__)),
+          __ctx__,
+        )
     def ExtractFindings(self, hat: str,feedback: str,transcript: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlStream[typing.List["stream_types.Finding"], typing.List["types.Finding"]]:
@@ -126,6 +180,20 @@ class BamlHttpRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    async def DrillerNotes(self, charter: str,brief: str,history: typing.List[str],screen: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = await self.__options.merge_options(baml_options).create_http_request_async(function_name="DrillerNotes", args={
+            "charter": charter,"brief": brief,"history": history,"screen": screen,
+        }, mode="request")
+        return __result__
+    async def DrillerStep(self, charter: str,brief: str,screen: str,history: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = await self.__options.merge_options(baml_options).create_http_request_async(function_name="DrillerStep", args={
+            "charter": charter,"brief": brief,"screen": screen,"history": history,
+        }, mode="request")
+        return __result__
     async def ExtractFindings(self, hat: str,feedback: str,transcript: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -141,6 +209,20 @@ class BamlHttpStreamRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    async def DrillerNotes(self, charter: str,brief: str,history: typing.List[str],screen: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = await self.__options.merge_options(baml_options).create_http_request_async(function_name="DrillerNotes", args={
+            "charter": charter,"brief": brief,"history": history,"screen": screen,
+        }, mode="stream")
+        return __result__
+    async def DrillerStep(self, charter: str,brief: str,screen: str,history: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        __result__ = await self.__options.merge_options(baml_options).create_http_request_async(function_name="DrillerStep", args={
+            "charter": charter,"brief": brief,"screen": screen,"history": history,
+        }, mode="stream")
+        return __result__
     async def ExtractFindings(self, hat: str,feedback: str,transcript: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:

@@ -278,6 +278,72 @@ class SbxBenchHost(BenchHost):
         sandboxes = data["sandboxes"] if isinstance(data, dict) else data
         return any(s.get("name") == name for s in sandboxes)
 
+    # -- drillers: the host's network policy, read from sbx itself --------
+
+    def _json(self, argv: list[str]) -> dict:
+        proc = self._run(argv, timeout=60, strict=False)
+        try:
+            return json.loads(proc.stdout or "{}")
+        except json.JSONDecodeError:
+            return {}
+
+    def policy_state(self, canaries) -> tuple[list[dict], list[dict]]:
+        """(rules, checks) for driller.host_problems: every network rule,
+        and the GLOBAL answer for each canary. An answer that is not JSON
+        comes back as {} and counts as not proven denied."""
+        from gentar.driller import policy_rules
+        rules = policy_rules(self._json([self.cfg.sbx_bin, "policy", "ls", "--json",
+                                         "--type", "network"]))
+        checks = [self._json([self.cfg.sbx_bin, "policy", "check", "network", c, "--json"])
+                  for c in canaries]
+        return rules, checks
+
+    def allow_for(self, sandbox: str, argv: list[str]) -> None:
+        """Apply driller.policy_argv's rule (the argv starts with `sbx`)."""
+        self._run([self.cfg.sbx_bin, *argv[1:]], timeout=60)
+
+    def policy_log(self, sandbox: str) -> str:
+        """The sandbox's policy log, or BenchHostError. Never an empty
+        stand-in: an audit that reads "{}" after an sbx error sees no
+        breach, and the session would pass unaudited (fail open)."""
+        proc = self._run([self.cfg.sbx_bin, "policy", "log", sandbox, "--json"],
+                         timeout=60, strict=False)
+        try:
+            data = json.loads(proc.stdout or "")
+        except json.JSONDecodeError:
+            data = None
+        if (proc.returncode != 0 or not isinstance(data, dict)
+                or not isinstance(data.get("blocked_hosts", []), list)
+                or not isinstance(data.get("allowed_hosts", []), list)
+                or not ({"blocked_hosts", "allowed_hosts"} & set(data))):
+            raise BenchHostError(f"sbx policy log for {sandbox} unreadable "
+                                 f"(exit {proc.returncode}): the boundary cannot be audited")
+        return proc.stdout
+
+    def snapshot(self) -> dict[str, set]:
+        """What exists on the host outside any one bench: sandbox names and
+        template names, for driller.outside_changes. BenchHostError when sbx
+        cannot answer: an empty snapshot would hide every change (fail open)."""
+        proc = self._run([self.cfg.sbx_bin, "ls", "--json"], timeout=60, strict=False)
+        try:
+            data = json.loads(proc.stdout or "")
+        except json.JSONDecodeError:
+            data = None
+        boxes = data.get("sandboxes") if isinstance(data, dict) else data
+        if proc.returncode != 0 or not isinstance(boxes, list):
+            raise BenchHostError(f"sbx ls unreadable (exit {proc.returncode}): "
+                                 f"host changes cannot be audited")
+        names = {s.get("name", "") for s in boxes}
+        proc = self._run([self.cfg.sbx_bin, "template", "ls"], timeout=60, strict=False)
+        if proc.returncode != 0:
+            raise BenchHostError(f"sbx template ls failed (exit {proc.returncode}): "
+                                 f"host changes cannot be audited")
+        # REPOSITORY TAG IMAGE-ID ...: a template is repo:tag, and a re-save
+        # under the same tag shows as a changed image id.
+        templates = {":".join(line.split()[:3]) for line in (proc.stdout or "").splitlines()[1:]
+                     if len(line.split()) >= 3}
+        return {"sandboxes": names - {""}, "templates": templates}
+
     def pty_spawn_args(self, sandbox: str, columns: int, lines: int,
                        env: dict[str, str], command: str) -> list[str]:
         ssh = self._ssh_base() + ["-tt", "--"]

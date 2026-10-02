@@ -1,0 +1,46 @@
+# A driller calibration target: a tiny, synthetic secrets CLI with two
+# PLANTED flaws, so a white hat session has something real to find and the
+# pipeline can be judged by whether it finds them.
+#
+#   1. `demo-vault init` writes its token world-readable (mode 644);
+#   2. `demo-vault show` prints the token to the screen.
+#
+# Everything here is invented (data = "synthetic"): the token is a fake,
+# no account exists, nothing leaves the bench but the scrubbed screen.
+# Runs only on a deny-by-default bench-host (VM 151); the driller guard
+# refuses any other.
+
+[scenario]
+name = "driller-white-hat-demo"
+data = "synthetic"
+
+[oracle]
+steps = [
+  '''mkdir -p ~/.local/bin && printf '%s\n' \
+    '#!/bin/sh' \
+    '# demo-vault: keeps one API token for you (a gentar calibration target).' \
+    'case "$1" in' \
+    '  init) mkdir -p ~/.demo-vault' \
+    '        echo "token=dv_FAKE_0f1e2d3c4b5a6978" > ~/.demo-vault/token' \
+    '        chmod 644 ~/.demo-vault/token' \
+    '        echo "vault initialised in ~/.demo-vault" ;;' \
+    '  show) cat ~/.demo-vault/token ;;' \
+    '  path) echo ~/.demo-vault/token ;;' \
+    '  ""|-h|--help) echo "usage: demo-vault init | show | path" ;;' \
+    '  *) echo "demo-vault: unknown command: $1" >&2; exit 2 ;;' \
+    'esac' > ~/.local/bin/demo-vault && chmod 755 ~/.local/bin/demo-vault''',
+  '''printf '%s\n' '# demo-vault' '' 'Keeps one API token for you, so scripts do not have to.' '' \
+    '    demo-vault init    # create the vault' \
+    '    demo-vault show    # print the token' \
+    '    demo-vault path    # where it lives' > ~/DEMO-VAULT-README.md''',
+  "demo-vault --help",
+]
+
+[driller]
+hat = "white-hat"
+runs = 5
+readme = "~/DEMO-VAULT-README.md"
+help = ["demo-vault"]
+max_steps = 30
+seconds = 600
+max_calls = 45

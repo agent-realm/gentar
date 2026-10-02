@@ -23,8 +23,15 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (1)
+# Generated classes (2)
 # #########################################################################
+
+class DrillStep(BaseModel):
+    kind: typing.Optional[types.StepKind] = None
+    text: typing.Optional[str] = Field(default=None, description='for TYPE: the exact characters to type')
+    enter: typing.Optional[bool] = Field(default=None, description='for TYPE: press Enter after the text')
+    key: typing.Optional[str] = Field(default=None, description='for KEY: one of enter, escape, up, down, ctrl-c')
+    why: typing.Optional[str] = Field(default=None, description='one line: what you are trying and why')
 
 class Finding(BaseModel):
     category: typing.Optional[types.Category] = None
@@ -40,10 +47,11 @@ class Finding(BaseModel):
 
 
 # #########################################################################
-# Model rebuilds (1)
+# Model rebuilds (2)
 # #########################################################################
 # Resolve string forward references now that every model above is defined so
 # class declaration order never breaks Pydantic construction (issue #793).
 # Recursive models are intentionally omitted (Pydantic resolves those lazily;
 # eagerly rebuilding them can recurse).
+DrillStep.model_rebuild()
 Finding.model_rebuild()

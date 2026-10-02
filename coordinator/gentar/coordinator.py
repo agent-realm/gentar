@@ -147,11 +147,71 @@ def run(name: str, cfg: Config | None = None) -> int:
     """Run one scenario; every terminal path — pass, fail, refusal,
     quarantine — then flushes its trace (best-effort, never the verdict)."""
     cfg = cfg or Config()
+    drill_runs = _drill_plan(name, cfg)
+    if drill_runs:
+        return _run_drill(name, cfg, drill_runs)
     runs, rate_min = _rate_plan(name, cfg)
     if runs <= 1:
         with exporting():
             return _run(name, cfg)
     return _run_rate(name, cfg, runs, rate_min)
+
+
+def _drill_plan(name: str, cfg: Config) -> int:
+    """How many driller sessions: [driller] runs, or 0 for anything else."""
+    try:
+        _, scenario = _resolve(name, cfg)
+    except RunError:
+        return 0
+    if scenario is None or name in cfg.quarantine or not getattr(scenario, "driller", None):
+        return 0
+    return int(scenario.driller["runs"])
+
+
+def _run_drill(name: str, cfg: Config, runs: int) -> int:
+    """N driller sessions, each on a fresh bench, then their findings
+    ranked by how many sessions found the same thing. Exit 0 unless the
+    boundary failed: a breach stops at once (1); a refusal is 2. Findings
+    never change the exit."""
+    from gentar import driller as d
+    from gentar import driller_run
+    per_run, audits, done = [], [], 0
+    for i in range(runs):
+        print(f"driller session {i + 1}/{runs} of {name}")
+        start = len(driller_run.SINK)
+        with exporting():
+            rc = _run(name, cfg)
+        mine = [r for n, r in driller_run.SINK[start:] if n == name]
+        if rc == 2:
+            return 2
+        done += 1
+        for r in mine:
+            per_run.append(r["findings"])
+            audits.append(r["audit"])
+        if rc != 0:
+            print(f"driller: session {i + 1} failed the boundary audit; stopping (no more sessions)")
+            break
+    clusters = d.cluster(per_run)
+    spans = Spans(cfg)
+    text = d.render(clusters, len(per_run), audits, scrub=spans.redactor.scrub)
+    print(text)
+    if cfg.report_dir:
+        try:
+            os.makedirs(cfg.report_dir, exist_ok=True)
+            path = os.path.join(cfg.report_dir,
+                                f"driller-{name}-{time.strftime('%Y%m%d-%H%M%S')}.md")
+            with open(path, "w") as fh:
+                fh.write(f"# Driller: {name}\n\n{done}/{runs} session(s) ran; "
+                         f"exit {0 if rc == 0 else rc}.\n\n{text}\n")
+            print(f"driller summary: {path}")
+        except OSError as exc:
+            print(f"warn: driller summary write failed (non-fatal): {exc}")
+    with exporting():
+        spans.emit(ARENA_SUBJECT, new_run_id(cfg.name_prefix), name, "driller.summary",
+                   "pass" if rc == 0 else "fail",
+                   attrs={"sessions": str(done), "findings": str(len(clusters))},
+                   detail=f"{done}/{runs} sessions, {len(clusters)} distinct finding(s)")
+    return 0 if rc == 0 else rc
 
 
 def _rate_plan(name: str, cfg: Config) -> tuple:
@@ -416,6 +476,29 @@ def _run(name: str, cfg: Config | None = None) -> int:
         report.mark("refuse", 2)
         _write_report(report, cfg)
         return 2
+    # -- driller guard: the host must be deny-by-default, proven by sbx ------
+    if scenario and getattr(scenario, "driller", None):
+        from gentar import driller as d
+        if not hasattr(bench, "policy_state"):
+            why = [f"drillers run on sbx benches only (this scenario's tier: {bench_kind})"]
+        else:
+            rules, checks = bench.policy_state(d.CANARIES)
+            why = d.start_refusals(os.environ, rules, scenario.driller["allow"],
+                                   scenario.credential_names(), checks,
+                                   model=scenario.driller["model"])
+        if why:
+            msg = "driller guard: " + "; ".join(why) + " — refusing before any bench exists."
+            print(f"Error: {msg}")
+            Spans(cfg).emit(ARENA_SUBJECT, "", name, "driller.refuse", "error",
+                            attrs={"bench_kind": bench_kind}, detail="run refused: driller guard")
+            report = RunReport(
+                scenario=name,
+                run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+                subject=subject, reproduce=f"docker compose run --rm coordinator run {name}",
+                error=msg)
+            report.mark("refuse", 2)
+            _write_report(report, cfg)
+            return 2
     spans = Spans(cfg)
     # Scrub the values of what this run declared from everything it exports.
     if scenario:
