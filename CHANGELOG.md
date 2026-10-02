@@ -38,6 +38,12 @@ Adopters pin a release tag, not a branch.
 
   Proven on VM 151: `smoke` and `scripted-onboarding` pass end to end,
   with no sandbox left.
+- Kit `[stage] git = true` (`gentar/policy.toml`): ship git history into the
+  bench for suites that clone their own release tags. `plan.py stage-git`
+  gives the staged copy a fresh `.git` from a local clone (history and tags,
+  a new config, no remote), so CI's auth header is never copied. A shallow
+  checkout is refused. Needed by the own-repo move: kommander-update and
+  agent-profile-smoke clone from `$WORKSPACE_DIR/.git`.
 ### Fixed
 - Kit `plan.py`: a `workflow_dispatch` run **on a tag ref** is a dispatch.
   The release rule caught it first, so a drift run of a release planned

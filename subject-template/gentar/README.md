@@ -396,6 +396,15 @@ are absent are skipped and named, not run into a red refusal. It tears down
 with `gentar/run.sh --down`, which also removes the bench sandboxes a cancelled
 job left behind — and never touches an arena another live run holds.
 
+**Git history in the bench.** The subject is staged without `.git`: on
+CI it holds the job's auth header. A suite that needs history (one that
+clones an older release tag to test an update) sets `[stage] git = true`
+in `gentar/policy.toml`. The kit then gives the staged copy a fresh `.git`
+from a local clone: every commit and tag, a new config, no remote. The
+engine refuses a subject whose git config still holds a credential. The
+checkout must be full (the kit workflow's bench job uses `fetch-depth: 0`);
+a shallow one is refused.
+
 **Credential grouping.** `credentials` lists *alternatives*. A provider that is
 a pair must be a nested list — `[["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]`.
 Written flat, the two are either-or: the token wins alone and the URL is

@@ -602,6 +602,9 @@ mkdir "subjects/$SUBJECT"
 (cd "$REPO" && tar \
   --exclude=./.git --exclude=./gentar/.arena --exclude=./gentar/reports \
   -cf - .) | tar -xf - -C "subjects/$SUBJECT"
+# History, when the policy asks for it ([stage] git = true): a fresh .git
+# built by a local clone, so no credential and no remote path come along.
+python3 "$HERE/plan.py" stage-git "$REPO" "subjects/$SUBJECT"
 # A worktree's .git is a pointer file with a host-absolute path — dead
 # on the bench — so `git describe` there finds nothing. Freeze the
 # version HERE, where git works; scenarios read it instead of trusting

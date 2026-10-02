@@ -40,3 +40,9 @@ docs = true            # the docs standard, checked by --check (missing, not
                        # "Before any release". Set false to opt out.
 # allow_drift = []     # kit files you have deliberately changed; --check
                        # then notes the difference instead of failing
+
+# [stage]
+# git = true           # ship git history (commits, tags) into the bench, for
+#                      # suites that clone their own release tags. A fresh .git
+#                      # from a local clone: no remote, no config carried over,
+#                      # so CI's auth header never comes along. Off by default.
