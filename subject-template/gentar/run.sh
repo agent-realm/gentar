@@ -685,6 +685,14 @@ if [ "$LOCAL_BENCH" = 1 ]; then
       exit 2
     fi
   done
+  # sbx in the coordinator has no session bus: it reads the Docker login
+  # from files only. A login held in a desktop keyring (gnome-keyring) is
+  # invisible there, and every bench would fail at PREPARE IMAGE.
+  SBX_AUTH="$HOME/.config/com.docker.sandboxes/com.docker.sandboxes-auth/sandboxes-auth"
+  if ! ls "$SBX_AUTH" 2>/dev/null | grep -q .; then
+    echo "GENTAR_BENCH_HOST=local: sbx has no login in files ($SBX_AUTH is empty); a keyring login is invisible to the coordinator. Sign in once as $(id -un) with $ARENA/bin/sbx-file-login" >&2
+    exit 2
+  fi
   export GENTAR_LOCAL_SBX_BIN
   GENTAR_LOCAL_SBX_BIN=$(readlink -f "$SBX_PATH" 2>/dev/null || echo "$SBX_PATH")
   if [ ! -f "$ARENA/compose.local-bench.yml" ]; then

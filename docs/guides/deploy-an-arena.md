@@ -36,6 +36,20 @@ paths. The runner's user must be the one that ran `sbx login`. Benches see
 none of it; each gets only its own workspace directory. Proven on an arf VM
 (sbx 0.45.1) with the `smoke` and `scripted-onboarding` suites.
 
+The login must be in **files**. sbx in the coordinator has no session bus,
+so it reads the Docker login only from
+`~/.config/com.docker.sandboxes/com.docker.sandboxes-auth/`. On a host with
+a session bus and a keyring (gnome-keyring), `sbx login` puts the login in
+the keyring instead, and the coordinator cannot see it: every bench then
+fails at `PREPARE IMAGE` with "no default account profile set". Sign in once
+more, from a container, so the login is also written as files:
+
+    bin/sbx-file-login                 # device flow, as the runner's user
+    printf %s "$PAT" | bin/sbx-file-login --username <user> --password-stdin
+
+The host's keyring login stays as it is. The arena refuses with exit 2
+while that folder is empty.
+
 ## 2. A self-hosted runner
 
 The kit's workflow runs the arena on a runner labelled **`arena`**. A

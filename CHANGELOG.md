@@ -22,6 +22,19 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Fixed
+- **Local bench mode on a host whose sbx login is in a keyring.** sbx in
+  the coordinator has no session bus and reads the Docker login only from
+  files, so on a host with gnome-keyring (arf VM 142, sbx 0.39) every bench
+  failed at `PREPARE IMAGE`: "no default account profile set: secret not
+  found". New `bin/sbx-file-login` signs sbx in from a container, so the
+  login is also written as files; the host's keyring login stays. The kit's
+  `run.sh` and `bin/arena` now refuse with exit 2 while the file login is
+  missing, instead of failing every suite.
+- **Bench errors keep the reason.** A failing bench command's output was cut
+  to its first 400 characters, and sbx prints the reason last; errors now
+  keep the start and the last 400 characters.
+
 ## 0.9.1 — 2026-10-03
 ### Added
 - **Local bench mode** (engine and kit): `GENTAR_BENCH_HOST=local` when the

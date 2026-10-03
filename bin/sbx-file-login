@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Sign this host's sbx in to Docker so that local bench mode can read the
+# login (GENTAR_BENCH_HOST=local).
+#
+# In local bench mode, sbx runs inside the coordinator container. There is no
+# session bus in that container, so sbx reads its Docker login from files
+# only (~/.config/com.docker.sandboxes/com.docker.sandboxes-auth/). A login
+# that `sbx login` put in a desktop keyring (gnome-keyring, on a host with a
+# session bus) is invisible there, and every bench fails at PREPARE IMAGE:
+# "no default account profile set: secret not found".
+#
+# This script runs `sbx login` in a container with the same mounts as the
+# coordinator and no session bus, so the login is written where the
+# coordinator reads it. A keyring login the host already has stays as it is.
+#
+# Run it once, as the runner's user, on the bench host:
+#   bin/sbx-file-login                                    # device flow
+#   printf %s "$PAT" | bin/sbx-file-login --username <user> --password-stdin
+#
+# Arguments are passed to `sbx login`.
+set -euo pipefail
+
+SBX=$(command -v sbx 2>/dev/null || true)
+[ -n "$SBX" ] || { echo "sbx-file-login: no sbx on PATH" >&2; exit 2; }
+SBX=$(readlink -f "$SBX" 2>/dev/null || echo "$SBX")
+for d in "$HOME/.local/state/sandboxes" "$HOME/.config/sandboxes" "$HOME/.config/com.docker.sandboxes"; do
+  if [ ! -d "$d" ] || [ ! -O "$d" ]; then
+    echo "sbx-file-login: $d is missing or not owned by $(id -un) — run sbx once as this user first" >&2
+    exit 2
+  fi
+done
+
+tty=()
+[ -t 0 ] && tty=(-t)
+exec docker run --rm -i ${tty[@]+"${tty[@]}"} \
+  --user "$(id -u):$(id -g)" -e HOME="$HOME" \
+  -v "$SBX:/usr/bin/sbx:ro" \
+  -v "$HOME/.local/state/sandboxes:$HOME/.local/state/sandboxes" \
+  -v "$HOME/.config/sandboxes:$HOME/.config/sandboxes" \
+  -v "$HOME/.config/com.docker.sandboxes:$HOME/.config/com.docker.sandboxes" \
+  "${GENTAR_SBX_LOGIN_IMAGE:-alpine:3}" sbx login "$@"

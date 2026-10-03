@@ -60,6 +60,13 @@ if local_bench; then
       exit 2
     fi
   done
+  # sbx in the coordinator has no session bus: it reads the Docker login
+  # from files only (a keyring login is invisible there).
+  SBX_AUTH="$HOME/.config/com.docker.sandboxes/com.docker.sandboxes-auth/sandboxes-auth"
+  if ! ls "$SBX_AUTH" 2>/dev/null | grep -q .; then
+    echo "arena: sbx has no login in files ($SBX_AUTH is empty); run bin/sbx-file-login once as $(id -un)" >&2
+    exit 2
+  fi
   export GENTAR_LOCAL_SBX_BIN
   GENTAR_LOCAL_SBX_BIN=$(readlink -f "$SBX_PATH" 2>/dev/null || echo "$SBX_PATH")
   export GENTAR_LOCAL_UID GENTAR_LOCAL_GID GENTAR_LOCAL_HOME

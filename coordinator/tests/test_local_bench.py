@@ -117,6 +117,75 @@ class ReviewFixesTest(unittest.TestCase):
         self.assertLess(step.index("          fi\n          if [ -n \"$CLONE_KEY\" ]"), len(step))
 
 
+class KeyringLoginTest(unittest.TestCase):
+    """VM 142, 2026-10-03: sbx 0.39 kept its Docker login in gnome-keyring.
+    sbx in the coordinator (no session bus) read files only, so every bench
+    failed at PREPARE IMAGE, and the 400-character head cut hid the reason."""
+
+    def test_an_error_keeps_the_reason_at_the_end(self):
+        from gentar.benchhost import clip
+        out = ("── RESOLVE SETUP\n" + "   resolving configuration…\n" * 30 +
+               "── PREPARE IMAGE\n   → pull docker/sandbox-templates:shell-docker\n"
+               "ERROR: encode registry auth: no default account profile set: secret not found")
+        c = clip(out)
+        self.assertIn("RESOLVE SETUP", c)
+        self.assertIn("no default account profile set: secret not found", c)
+        self.assertLess(len(c), 530)
+        self.assertEqual(clip("short"), "short")
+
+    @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
+    def test_the_kit_and_bin_arena_refuse_a_keyring_only_login(self):
+        auth = "/.config/com.docker.sandboxes/com.docker.sandboxes-auth/sandboxes-auth"
+        for f in (ROOT / "subject-template" / "gentar" / "run.sh", ROOT / "bin" / "arena"):
+            t = f.read_text()
+            self.assertIn(auth, t, f)
+            self.assertIn('ls "$SBX_AUTH" 2>/dev/null | grep -q .', t, f)
+            self.assertIn("sbx-file-login", t, f)
+
+    @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
+    def test_sbx_file_login_runs_login_without_a_session_bus(self):
+        import subprocess
+        tmp = Path(tempfile.mkdtemp())
+        home = tmp / "home"
+        for d in (".local/state/sandboxes", ".config/sandboxes", ".config/com.docker.sandboxes"):
+            (home / d).mkdir(parents=True)
+        bindir = tmp / "bin"
+        bindir.mkdir()
+        log = tmp / "docker.args"
+        (bindir / "sbx").write_text("#!/bin/sh\nexit 0\n")
+        (bindir / "docker").write_text(f'#!/bin/sh\nfor a in "$@"; do echo "$a"; done > {log}\n')
+        for f in ("sbx", "docker"):
+            (bindir / f).chmod(0o755)
+        env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home),
+               "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus"}
+        r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "sbx-file-login"),
+                            "--username", "u", "--password-stdin"],
+                           env=env, input="", capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        args = log.read_text().splitlines()
+        self.assertEqual(args[-6:-4], ["alpine:3", "sbx"])
+        self.assertEqual(args[-4:], ["login", "--username", "u", "--password-stdin"])
+        self.assertIn(f"{home}/.config/com.docker.sandboxes:{home}/.config/com.docker.sandboxes", args)
+        joined = " ".join(args)
+        self.assertNotIn("DBUS", joined)
+        self.assertNotIn("/run/user", joined)
+        self.assertNotIn("-t", args)                      # stdin is not a terminal here
+
+    @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
+    def test_sbx_file_login_refuses_missing_state(self):
+        import subprocess
+        tmp = Path(tempfile.mkdtemp())
+        bindir = tmp / "bin"
+        bindir.mkdir()
+        (bindir / "sbx").write_text("#!/bin/sh\nexit 0\n")
+        (bindir / "sbx").chmod(0o755)
+        r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "sbx-file-login")],
+                           env={"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp)},
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("missing or not owned", r.stderr)
+
+
 class RedactionTest(unittest.TestCase):
 
     def test_the_mode_word_is_not_scrubbed(self):

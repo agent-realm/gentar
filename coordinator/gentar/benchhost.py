@@ -46,6 +46,16 @@ class BenchHostError(RuntimeError):
     pass
 
 
+def clip(text: str, head: int = 120, tail: int = 400) -> str:
+    """Shorten command output for an error message, keeping both ends.
+    sbx prints its progress first and the reason last ("ERROR: ..."), so
+    a head-only cut hid every create failure behind "PREPARE IMAGE"."""
+    text = text.strip()
+    if len(text) <= head + tail + 5:
+        return text
+    return f"{text[:head]} … {text[-tail:]}"
+
+
 class BenchHost:
     """Base: the interface, plus shared ssh-argv policy. Subclasses decide
     what "a bench" is and how commands reach it."""
@@ -86,11 +96,11 @@ class BenchHost:
                            and "ssh" in proc.stderr.lower())
         if transport_error:
             raise BenchHostError(
-                f"ssh transport error: {proc.stderr.strip()[:400]}")
+                f"ssh transport error: {clip(proc.stderr)}")
         if strict and proc.returncode != 0:
             raise BenchHostError(
                 f"remote failed rc={proc.returncode}: "
-                f"{(proc.stdout + proc.stderr).strip()[:400]}")
+                f"{clip(proc.stdout + proc.stderr)}")
         return proc
 
     # -- interface (subclass responsibility) -------------------------------
@@ -272,7 +282,7 @@ class SbxBenchHost(BenchHost):
         )
         if ssh.returncode != 0:
             raise BenchHostError(
-                f"push to {remote_dir} failed: {ssh.stderr.decode()[:400]}")
+                f"push to {remote_dir} failed: {clip(ssh.stderr.decode())}")
 
     def rm(self, name: str) -> None:
         # Never raises: teardown must not mask the real verdict.
@@ -416,7 +426,7 @@ class TartBenchHost(BenchHost):
         )
         if ssh.returncode != 0:
             raise BenchHostError(
-                f"push to {remote_dir} failed: {ssh.stderr.decode()[:400]}")
+                f"push to {remote_dir} failed: {clip(ssh.stderr.decode())}")
 
     def rm(self, name: str) -> None:
         # Never raises: teardown must not mask the real verdict.
@@ -673,7 +683,7 @@ class DaytonaBenchHost(BenchHost):
         )
         if ssh.returncode != 0:
             raise BenchHostError(
-                f"push to {remote_dir} failed: {ssh.stderr.decode()[:400]}")
+                f"push to {remote_dir} failed: {clip(ssh.stderr.decode())}")
 
     def rm(self, name: str) -> None:
         # Never raises: teardown must not mask the real verdict.
