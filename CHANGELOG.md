@@ -21,6 +21,8 @@ read this file before moving an adopter's `GENTAR_REF` across one.
 Adopters pin a release tag, not a branch.
 
 ## Unreleased
+
+## 0.9.1 — 2026-10-03
 ### Added
 - **Local bench mode** (engine and kit): `GENTAR_BENCH_HOST=local` when the
   arena runs on the bench host itself (a runner on that VM). sbx is called
