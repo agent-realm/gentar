@@ -93,14 +93,16 @@ def _resolve(name: str, cfg: Config) -> tuple:
     """-> (callable(bench, run_id, spans) -> summary, TomlScenario | None)"""
     if name in REGISTRY:
         return REGISTRY[name], None
-    for d in cfg.scenarios_dirs:
-        tomls = load_dir(d)
-        if name in tomls:
-            scenario = tomls[name]
-            return (lambda bench, run_id, spans, subject="arena",
-                    report=None: run_oracle(
-                scenario, bench, run_id, spans, cfg, subject=subject,
-                report=report)), scenario
+    found = [(d, load_dir(d)) for d in cfg.scenarios_dirs]
+    hits = [d for d, tomls in found if name in tomls]
+    if hits:
+        scenario = dict(found)[hits[0]][name]
+        for other in hits[1:]:
+            print(f"note: scenario {name!r} from {hits[0]} hides the one in {other}")
+        return (lambda bench, run_id, spans, subject="arena",
+                report=None: run_oracle(
+            scenario, bench, run_id, spans, cfg, subject=subject,
+            report=report)), scenario
     raise RunError(f"unknown scenario {name!r}; known: {', '.join(known_names(cfg))}")
 
 
