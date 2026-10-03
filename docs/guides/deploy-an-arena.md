@@ -48,7 +48,9 @@ more, from a container, so the login is also written as files:
     printf %s "$PAT" | bin/sbx-file-login --username <user> --password-stdin
 
 The host's keyring login stays as it is. The arena refuses with exit 2
-while that folder is empty.
+while that folder has no default account profile
+(`GENTAR_SBX_AUTH_CHECK=off` skips the check, for an sbx that keeps it
+elsewhere).
 
 ## 2. A self-hosted runner
 
