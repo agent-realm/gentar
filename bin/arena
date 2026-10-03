@@ -61,10 +61,12 @@ if local_bench; then
     fi
   done
   # sbx in the coordinator has no session bus: it reads the Docker login
-  # from files only (a keyring login is invisible there).
+  # from files only (a keyring login is invisible there). The folder is the
+  # default account profile, docker/auth/metadata/hub/default in base64.
   SBX_AUTH="$HOME/.config/com.docker.sandboxes/com.docker.sandboxes-auth/sandboxes-auth"
-  if ! ls "$SBX_AUTH" 2>/dev/null | grep -q .; then
-    echo "arena: sbx has no login in files ($SBX_AUTH is empty); run bin/sbx-file-login once as $(id -un)" >&2
+  SBX_PROFILE="$SBX_AUTH/ZG9ja2VyL2F1dGgvbWV0YWRhdGEvaHViL2RlZmF1bHQ="
+  if [ "${GENTAR_SBX_AUTH_CHECK:-on}" != off ] && ! ls "$SBX_PROFILE" 2>/dev/null | grep -q .; then
+    echo "arena: sbx has no login in files (no default account profile in $SBX_AUTH); run bin/sbx-file-login once as $(id -un) (GENTAR_SBX_AUTH_CHECK=off skips this check)" >&2
     exit 2
   fi
   export GENTAR_LOCAL_SBX_BIN

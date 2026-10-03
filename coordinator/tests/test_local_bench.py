@@ -133,14 +133,49 @@ class KeyringLoginTest(unittest.TestCase):
         self.assertLess(len(c), 530)
         self.assertEqual(clip("short"), "short")
 
+    PROFILE = "ZG9ja2VyL2F1dGgvbWV0YWRhdGEvaHViL2RlZmF1bHQ="   # docker/auth/metadata/hub/default
+
+    @staticmethod
+    def _check_block(script: Path) -> str:
+        """The script's own refusal lines, from SBX_AUTH= to its closing fi."""
+        lines = script.read_text().splitlines()
+        start = next(i for i, l in enumerate(lines) if l.strip().startswith("SBX_AUTH="))
+        end = next(i for i in range(start, len(lines)) if lines[i].strip() == "fi")
+        return "\n".join(lines[start:end + 1])
+
+    def _run_check(self, script: Path, home: Path, **env) -> "subprocess.CompletedProcess":
+        import subprocess
+        body = "set -u\nARENA=/engine\n" + self._check_block(script) + "\necho passed\n"
+        return subprocess.run(["/bin/bash", "-c", body], capture_output=True, text=True,
+                              env={"PATH": "/usr/bin:/bin", "HOME": str(home), **env})
+
     @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
     def test_the_kit_and_bin_arena_refuse_a_keyring_only_login(self):
-        auth = "/.config/com.docker.sandboxes/com.docker.sandboxes-auth/sandboxes-auth"
-        for f in (ROOT / "subject-template" / "gentar" / "run.sh", ROOT / "bin" / "arena"):
-            t = f.read_text()
-            self.assertIn(auth, t, f)
-            self.assertIn('ls "$SBX_AUTH" 2>/dev/null | grep -q .', t, f)
-            self.assertIn("sbx-file-login", t, f)
+        auth = ".config/com.docker.sandboxes/com.docker.sandboxes-auth/sandboxes-auth"
+        for script in (ROOT / "subject-template" / "gentar" / "run.sh", ROOT / "bin" / "arena"):
+            with self.subTest(script=script.name):
+                home = Path(tempfile.mkdtemp())
+                # no store at all
+                r = self._run_check(script, home)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertIn("sbx-file-login", r.stderr)
+                # what VM 142 had: the store folder with only its lock
+                (home / auth).mkdir(parents=True)
+                (home / auth / ".posixage.lock").write_text("")
+                self.assertEqual(self._run_check(script, home).returncode, 2)
+                # another secret, or an empty profile folder, is not a login
+                (home / auth / "ZG9ja2VyL290aGVy").mkdir()
+                (home / auth / "ZG9ja2VyL290aGVy" / "secretpass").write_text("x")
+                (home / auth / self.PROFILE).mkdir()
+                self.assertEqual(self._run_check(script, home).returncode, 2)
+                # what VM 151 has: the default account profile, with content
+                (home / auth / self.PROFILE / "secretpass").write_text("x")
+                r = self._run_check(script, home)
+                self.assertEqual((r.returncode, r.stdout.strip()), (0, "passed"), r.stderr)
+                # the escape hatch for a future sbx with another layout
+                empty = Path(tempfile.mkdtemp())
+                r = self._run_check(script, empty, GENTAR_SBX_AUTH_CHECK="off")
+                self.assertEqual((r.returncode, r.stdout.strip()), (0, "passed"), r.stderr)
 
     @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
     def test_sbx_file_login_runs_login_without_a_session_bus(self):
@@ -172,19 +207,30 @@ class KeyringLoginTest(unittest.TestCase):
         self.assertNotIn("-t", args)                      # stdin is not a terminal here
 
     @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
-    def test_sbx_file_login_refuses_missing_state(self):
+    def test_sbx_file_login_makes_missing_dirs_and_refuses_a_non_directory(self):
         import subprocess
         tmp = Path(tempfile.mkdtemp())
+        home = tmp / "home"
+        home.mkdir()
         bindir = tmp / "bin"
         bindir.mkdir()
-        (bindir / "sbx").write_text("#!/bin/sh\nexit 0\n")
-        (bindir / "sbx").chmod(0o755)
+        for f in ("sbx", "docker"):
+            (bindir / f).write_text("#!/bin/sh\nexit 0\n")
+            (bindir / f).chmod(0o755)
+        env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home)}
         r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "sbx-file-login")],
-                           env={"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp)},
-                           capture_output=True, text=True)
+                           env=env, input="", capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)        # a fresh host: the dirs are made
+        for d in (".local/state/sandboxes", ".config/sandboxes", ".config/com.docker.sandboxes"):
+            self.assertTrue((home / d).is_dir(), d)
+            self.assertEqual((home / d).stat().st_mode & 0o777, 0o700, d)
+        home2 = tmp / "home2"
+        (home2 / ".config").mkdir(parents=True)
+        (home2 / ".config" / "sandboxes").write_text("not a dir")
+        r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "sbx-file-login")],
+                           env={**env, "HOME": str(home2)}, input="", capture_output=True, text=True)
         self.assertEqual(r.returncode, 2)
-        self.assertIn("missing or not owned", r.stderr)
-
+        self.assertIn("not a directory owned by", r.stderr)
 
 class RedactionTest(unittest.TestCase):
 

@@ -23,9 +23,12 @@ set -euo pipefail
 SBX=$(command -v sbx 2>/dev/null || true)
 [ -n "$SBX" ] || { echo "sbx-file-login: no sbx on PATH" >&2; exit 2; }
 SBX=$(readlink -f "$SBX" 2>/dev/null || echo "$SBX")
+# A missing bind source would be created by Docker as root; create it here,
+# as this user, and refuse one that belongs to someone else.
 for d in "$HOME/.local/state/sandboxes" "$HOME/.config/sandboxes" "$HOME/.config/com.docker.sandboxes"; do
+  [ -e "$d" ] || mkdir -p -m 700 "$d" 2>/dev/null || true
   if [ ! -d "$d" ] || [ ! -O "$d" ]; then
-    echo "sbx-file-login: $d is missing or not owned by $(id -un) — run sbx once as this user first" >&2
+    echo "sbx-file-login: $d is not a directory owned by $(id -un)" >&2
     exit 2
   fi
 done
