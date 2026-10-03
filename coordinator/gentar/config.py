@@ -51,6 +51,10 @@ class Config:
         # in once. NO default — gentar ships no bench-host of its own,
         # and a plausible-but-wrong address is worse than a refusal.
         self.bench_host = _opt("GENTAR_BENCH_HOST")
+        # "local" (local bench mode) is a mode word: tolerate stray spaces,
+        # so "local " can never fall back to ssh as a host named "local ".
+        if self.bench_host.strip() == "local":
+            self.bench_host = "local"
         self.bench_user = _opt("GENTAR_BENCH_USER")
         # Optional SSH jump host, e.g. "user@gateway". Empty = direct.
         self.bench_jump = _opt("GENTAR_BENCH_JUMP")
@@ -214,7 +218,7 @@ class Config:
                     f"CI it embeds the job id — shorten it)"]
         # GENTAR_BENCH_HOST=local (sbx): the arena runs on the bench host
         # itself, so there is no account to ssh in as.
-        if kind == "sbx" and self.bench_host.strip() == "local":
+        if kind == "sbx" and self.bench_host == "local":
             return []
         return [var for var, attr in BENCH_REQUIREMENTS[kind]
                 if not getattr(self, attr, "").strip()]

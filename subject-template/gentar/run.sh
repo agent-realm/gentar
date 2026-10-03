@@ -642,7 +642,35 @@ ARENA_FILES=(-f docker-compose.yml)
 # host itself (a runner on that VM) and calls sbx directly, so there is no
 # ssh and no bench key. The engine's overlay mounts the host's sbx into the
 # coordinator and runs it as this user; an engine without it refuses.
-if [ "${GENTAR_BENCH_HOST:-}" = local ]; then
+# The setting: the environment first (CI), else the arena's .env (a local
+# run edits gentar/.arena/.env), the way compose resolves it. Spaces and
+# quotes are tolerated; anything else is a host name.
+bench_host_setting() {
+  if [ -n "${GENTAR_BENCH_HOST:-}" ]; then printf '%s' "$GENTAR_BENCH_HOST"
+  elif [ -f "$ARENA/.env" ]; then sed -n 's/^GENTAR_BENCH_HOST=//p' "$ARENA/.env" | tail -1
+  fi | tr -d "\"' [:space:]"
+}
+LOCAL_BENCH=0
+[ "$(bench_host_setting)" = local ] && LOCAL_BENCH=1
+if [ "$LOCAL_BENCH" = 1 ]; then
+  export GENTAR_BENCH_HOST=local
+  # What compose mounts must exist and belong to this user already: a
+  # missing bind source is created by Docker as root, and sbx inside the
+  # coordinator could then not write its state. They exist once this user
+  # has run `sbx login`; refuse rather than create them.
+  SBX_PATH=$(command -v sbx 2>/dev/null || true)
+  if [ -z "$SBX_PATH" ]; then
+    echo "GENTAR_BENCH_HOST=local: no sbx on this host's PATH (install it and run sbx login as $(id -un))" >&2
+    exit 2
+  fi
+  for d in "$HOME/.local/state/sandboxes" "$HOME/.config/sandboxes" "$HOME/.config/com.docker.sandboxes"; do
+    if [ ! -d "$d" ] || [ ! -O "$d" ]; then
+      echo "GENTAR_BENCH_HOST=local: $d is missing or not owned by $(id -un) — run sbx login as this user first" >&2
+      exit 2
+    fi
+  done
+  export GENTAR_LOCAL_SBX_BIN
+  GENTAR_LOCAL_SBX_BIN=$(readlink -f "$SBX_PATH" 2>/dev/null || echo "$SBX_PATH")
   if [ ! -f "$ARENA/compose.local-bench.yml" ]; then
     echo "GENTAR_BENCH_HOST=local needs an engine with compose.local-bench.yml (GENTAR_REF $REF has none)" >&2
     exit 2
@@ -686,7 +714,7 @@ arena() { docker compose "${ARENA_FILES[@]}" -p "arena-$SUBJECT" "$@"; }
 # different, missing file. Same shape as the engine's own bin/arena, so
 # the two say the same thing. The path is printed, never the contents.
 require_bench_key() {
-  [ "${GENTAR_BENCH_HOST:-}" = local ] && return 0    # local bench mode: no key
+  [ "${LOCAL_BENCH:-0}" = 1 ] && return 0    # local bench mode: no key
   local key
   # `compose config --format json` PRETTY-PRINTS, so "bench_ssh_key" and
   # its "file" land on different lines and a single-line sed match finds

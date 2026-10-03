@@ -63,6 +63,60 @@ class LocalHostTest(unittest.TestCase):
                          ["GENTAR_BENCH_USER"])
 
 
+HAVE_CHECKOUT = (ROOT / "bin" / "bench-reap").exists() and (ROOT / "subject-template").exists()
+
+
+class ReviewFixesTest(unittest.TestCase):
+    """The fallback review of #64 (Antigravity, gemini-3.8-flash-high)."""
+
+    def test_stray_spaces_never_fall_back_to_ssh(self):
+        for v in ("local ", " local", "local\n"):
+            c = cfg(GENTAR_BENCH_HOST=v)
+            self.assertEqual(c.bench_host, "local", repr(v))
+            self.assertTrue(SbxBenchHost(c).local)
+            self.assertEqual(c.missing_bench_env("sbx"), [])
+
+    @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
+    def test_bench_reap_works_in_local_mode(self):
+        import subprocess
+        tmp = Path(tempfile.mkdtemp())
+        ws = tmp / "ws"
+        (ws / "g1-20261003-065126-6868cf").mkdir(parents=True)      # a stranded workspace
+        log = tmp / "sbx.log"
+        fake = tmp / "sbx"
+        fake.write_text("#!/bin/sh\n"
+                        f"echo \"$*\" >> {log}\n"
+                        'case "$1" in ls) echo \'{"sandboxes":[{"name":"g1-20261003-065041-19538d"},'
+                        '{"name":"someone-else"}]}\' ;; esac\n')
+        fake.chmod(0o755)
+        env = {"PATH": os.environ["PATH"], "HOME": str(tmp), "GENTAR_BENCH_HOST": "local",
+               "GENTAR_NAME_PREFIX": "g1", "GENTAR_SBX_BIN": str(fake),
+               "GENTAR_BENCH_WORKSPACE_ROOT": str(ws), "GENTAR_ENGINE_DIR": str(tmp)}
+        r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "bench-reap")], env=env,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("reaped sandbox: g1-20261003-065041-19538d", r.stdout)
+        self.assertIn("reaped workspace: g1-20261003-065126-6868cf", r.stdout)
+        self.assertIn("rm g1-20261003-065041-19538d --force", log.read_text())
+        self.assertNotIn("someone-else", log.read_text().replace("ls --json", ""))
+        self.assertFalse((ws / "g1-20261003-065126-6868cf").exists())
+
+    @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
+    def test_the_kit_reads_the_arena_env_and_refuses_missing_sbx_state(self):
+        r = (ROOT / "subject-template" / "gentar" / "run.sh").read_text()
+        self.assertIn('elif [ -f "$ARENA/.env" ]; then sed -n \'s/^GENTAR_BENCH_HOST=//p\' "$ARENA/.env"', r)
+        self.assertIn("run sbx login as this user first", r)
+        self.assertIn('GENTAR_LOCAL_SBX_BIN=$(readlink -f "$SBX_PATH"', r)
+
+    @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
+    def test_the_workflow_still_stages_the_clone_key_in_local_mode(self):
+        w = (ROOT / "subject-template" / ".github" / "workflows" / "gentar-arena.yml").read_text()
+        step = w[w.index("- name: stage bench access"):w.index("- name: run suites")]
+        self.assertNotIn("exit 0", step)
+        self.assertLess(step.index('printf \'%s\\n\' "$BENCH_KEY"'), step.index('if [ -n "$CLONE_KEY" ]'))
+        self.assertLess(step.index("          fi\n          if [ -n \"$CLONE_KEY\" ]"), len(step))
+
+
 class RedactionTest(unittest.TestCase):
 
     def test_the_mode_word_is_not_scrubbed(self):
@@ -94,10 +148,10 @@ class WiringTest(unittest.TestCase):
         r = run.read_text()
         self.assertIn("ARENA_FILES+=(-f compose.local-bench.yml)", r)
         self.assertIn('GENTAR_BENCH_KEY_FILE=/dev/null', r)
-        self.assertIn('[ "${GENTAR_BENCH_HOST:-}" = local ] && return 0', r)
+        self.assertIn('[ "${LOCAL_BENCH:-0}" = 1 ] && return 0', r)
         w = wf.read_text()
         self.assertEqual(w.count("secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST"), 3)
-        self.assertIn('if [ "$GENTAR_BENCH_HOST" = local ]; then', w)
+        self.assertIn('''if [ "$(printf '%s' "$GENTAR_BENCH_HOST" | tr -d '[:space:]')" = local ]; then''', w)
 
     def test_bin_arena_layers_it(self):
         a = (ROOT / "bin" / "arena")

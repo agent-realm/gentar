@@ -216,10 +216,9 @@ jobs:
           # readability check here, and only be refused later by run.sh.
           # Local bench mode: this runner IS the bench host, sbx is called
           # directly, and there is no key, user or ssh at all.
-          if [ "$GENTAR_BENCH_HOST" = local ]; then
+          if [ "$(printf '%s' "$GENTAR_BENCH_HOST" | tr -d '[:space:]')" = local ]; then
             echo "bench: local (this runner's host; no ssh, no bench key)"
-            exit 0
-          fi
+          else
           if [ -z "$(printf '%s' "$BENCH_KEY" | tr -d '[:space:]')" ]; then
             echo "::error::repo secret BENCH_SSH_KEY is not set (or is blank)" >&2
             exit 2
@@ -236,6 +235,7 @@ jobs:
           done
           printf '%s\n' "$BENCH_KEY" > "$RUNNER_TEMP/bench_key"
           chmod 600 "$RUNNER_TEMP/bench_key"
+          fi
           if [ -n "$CLONE_KEY" ]; then
             printf '%s\n' "$CLONE_KEY" > "$RUNNER_TEMP/gentar_clone_key"
             chmod 600 "$RUNNER_TEMP/gentar_clone_key"
