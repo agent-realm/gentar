@@ -47,14 +47,17 @@ class PrecedenceTest(unittest.TestCase):
     def test_the_subject_dir_comes_first(self):
         self.assertEqual(self.cfg.scenarios_dirs, [str(self.subject), str(self.baked)])
 
-    def test_a_shared_name_runs_the_subjects_copy_and_says_so(self):
+    def test_a_shared_name_runs_the_subjects_copy_and_says_so_once(self):
+        coord._SHADOW_NOTED.clear()
         printed = []
         with mock.patch("builtins.print", side_effect=printed.append):
             _, sc = coord._resolve("shared", self.cfg)
+            _, again = coord._resolve("shared", self.cfg)   # the run resolves twice
         self.assertEqual(sc.steps, ["echo subject-copy"])
-        out = "\n".join(map(str, printed))
-        self.assertIn("'shared'", out)
-        self.assertIn(f"hides the one in {self.baked}", out)
+        self.assertEqual(again.steps, ["echo subject-copy"])
+        self.assertEqual(len(printed), 1, printed)
+        self.assertIn("'shared'", printed[0])
+        self.assertIn(f"hides the one in {self.baked}", printed[0])
 
     def test_unshared_names_resolve_silently_from_either_dir(self):
         for name, step in (("engine-only", "echo engine-only"), ("subject-only", "echo subject-only")):

@@ -89,6 +89,11 @@ def _write_report(report: RunReport, cfg: Config) -> None:
         print(f"warn: report write failed (non-fatal): {exc}")
 
 
+# (name, winning dir, hidden dir) notes already printed: _resolve runs more
+# than once per suite, and one note per pair is enough.
+_SHADOW_NOTED: set[tuple[str, str, str]] = set()
+
+
 def _resolve(name: str, cfg: Config) -> tuple:
     """-> (callable(bench, run_id, spans) -> summary, TomlScenario | None)"""
     if name in REGISTRY:
@@ -98,7 +103,9 @@ def _resolve(name: str, cfg: Config) -> tuple:
     if hits:
         scenario = dict(found)[hits[0]][name]
         for other in hits[1:]:
-            print(f"note: scenario {name!r} from {hits[0]} hides the one in {other}")
+            if (name, hits[0], other) not in _SHADOW_NOTED:
+                _SHADOW_NOTED.add((name, hits[0], other))
+                print(f"note: scenario {name!r} from {hits[0]} hides the one in {other}")
         return (lambda bench, run_id, spans, subject="arena",
                 report=None: run_oracle(
             scenario, bench, run_id, spans, cfg, subject=subject,
