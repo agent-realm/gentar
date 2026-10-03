@@ -24,6 +24,18 @@ Any Linux machine reachable over SSH.
 
 Check: `ssh <user>@<host> sbx ls` works with that key.
 
+**When the runner IS the bench host (local bench mode).** Put the runner
+(section 2) on the bench host itself and set `GENTAR_BENCH_HOST=local`, a
+plain repository variable: no SSH account, no key, no `BENCH_SSH_KEY`,
+`GENTAR_BENCH_USER` or bench secret at all. The arena then calls the host's
+`sbx` directly: the engine's `compose.local-bench.yml` runs the coordinator
+as the runner's user, with the host's `sbx` binary, its state and config
+(`~/.local/state/sandboxes`, `~/.config/sandboxes`,
+`~/.config/com.docker.sandboxes`) and the workspace root mounted at the same
+paths. The runner's user must be the one that ran `sbx login`. Benches see
+none of it; each gets only its own workspace directory. Proven on an arf VM
+(sbx 0.45.1) with the `smoke` and `scripted-onboarding` suites.
+
 ## 2. A self-hosted runner
 
 The kit's workflow runs the arena on a runner labelled **`arena`**. A

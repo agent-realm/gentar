@@ -212,5 +212,9 @@ class Config:
             return [f"a GENTAR_NAME_PREFIX of at most {PREFIX_MAX} characters "
                     f"(got {len(self.name_prefix)}: {self.name_prefix!r}; in "
                     f"CI it embeds the job id — shorten it)"]
+        # GENTAR_BENCH_HOST=local (sbx): the arena runs on the bench host
+        # itself, so there is no account to ssh in as.
+        if kind == "sbx" and self.bench_host.strip() == "local":
+            return []
         return [var for var, attr in BENCH_REQUIREMENTS[kind]
                 if not getattr(self, attr, "").strip()]

@@ -220,11 +220,19 @@ class _Pieces:
         return "".join(out)
 
 
+# Settings whose value is a MODE, not a locator or a secret: scrubbing them
+# would blank an ordinary word everywhere (GENTAR_BENCH_HOST=local is local
+# bench mode, and "local" would vanish from every report and span).
+MODE_VALUES = {("GENTAR_BENCH_HOST", "local")}
+
+
 def scrubber(named_values):
     """named_values: iterable of (name, value). Returns scrub(text) -> text."""
     full, pieces = [], []            # (length, str | locator token, mark); piece finders
     for name, value in named_values:
         if not isinstance(value, str) or len(value) < MIN_VALUE:
+            continue
+        if (name, value) in MODE_VALUES:
             continue
         mark = f"«redacted:{name}»"
         parts = _locator_parts(name, value)

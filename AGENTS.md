@@ -237,7 +237,11 @@ agent:
 
 1. **Bench host:** any Linux box with `sbx` installed and logged in once.
    Check its sandbox network policy and its stored secrets before the first
-   run: the engine refuses an sbx host with stored secrets (exit 2).
+   run: the engine refuses an sbx host with stored secrets (exit 2). When the
+   runner runs ON the bench host, prefer local bench mode
+   (`GENTAR_BENCH_HOST=local`, a repository variable): no SSH account, no
+   bench key and no bench secrets to create, so nothing to ask the pilot to
+   grant beyond the runner itself.
 2. **Runner (own-arena CI):** a self-hosted runner labelled `arena` on a
    host with Docker and reach to the bench host. If the organisation has no
    GitHub-hosted minutes or keeps CI in-house, ask which runner the

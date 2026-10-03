@@ -214,6 +214,12 @@ jobs:
           # Refuse BEFORE staging. A blank or whitespace-only secret would
           # still be written as a file of a byte or two, pass every
           # readability check here, and only be refused later by run.sh.
+          # Local bench mode: this runner IS the bench host, sbx is called
+          # directly, and there is no key, user or ssh at all.
+          if [ "$GENTAR_BENCH_HOST" = local ]; then
+            echo "bench: local (this runner's host; no ssh, no bench key)"
+            exit 0
+          fi
           if [ -z "$(printf '%s' "$BENCH_KEY" | tr -d '[:space:]')" ]; then
             echo "::error::repo secret BENCH_SSH_KEY is not set (or is blank)" >&2
             exit 2
@@ -236,7 +242,7 @@ jobs:
           fi
         env:
           BENCH_KEY: ${{ secrets.BENCH_SSH_KEY }}
-          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
           GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
           CLONE_KEY: ${{ secrets.GENTAR_CLONE_KEY }}
 
@@ -258,7 +264,7 @@ jobs:
           GENTAR_REF: ${{ github.event.inputs.gentar_ref || vars.GENTAR_REF }}
           GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
           # SECRETS rather than variables: a public repo's logs are public.
-          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
           GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
           GENTAR_CLONE_SSH_KEY: ${{ secrets.GENTAR_CLONE_KEY && format('{0}/gentar_clone_key', runner.temp) || '' }}
           GENTAR_REPO_URL: ${{ vars.GENTAR_REPO_URL }}
@@ -296,5 +302,5 @@ jobs:
         run: gentar/run.sh --down || true
         env:
           GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
-          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
           GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}

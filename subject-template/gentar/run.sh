@@ -638,6 +638,25 @@ mkdir "subjects/$SUBJECT"
 # until the trap's `down -v`.
 ARENA_FILES=(-f docker-compose.yml)
 [ -f "$ARENA/compose.rm.yml" ] && ARENA_FILES+=(-f compose.rm.yml)
+# Local bench mode (GENTAR_BENCH_HOST=local): the arena runs on the bench
+# host itself (a runner on that VM) and calls sbx directly, so there is no
+# ssh and no bench key. The engine's overlay mounts the host's sbx into the
+# coordinator and runs it as this user; an engine without it refuses.
+if [ "${GENTAR_BENCH_HOST:-}" = local ]; then
+  if [ ! -f "$ARENA/compose.local-bench.yml" ]; then
+    echo "GENTAR_BENCH_HOST=local needs an engine with compose.local-bench.yml (GENTAR_REF $REF has none)" >&2
+    exit 2
+  fi
+  ARENA_FILES+=(-f compose.local-bench.yml)
+  export GENTAR_LOCAL_UID GENTAR_LOCAL_GID GENTAR_LOCAL_HOME GENTAR_BENCH_KEY_FILE
+  GENTAR_LOCAL_UID=$(id -u); GENTAR_LOCAL_GID=$(id -g); GENTAR_LOCAL_HOME=$HOME
+  GENTAR_BENCH_KEY_FILE=/dev/null     # the compose secret needs a file; there is no key
+  # Create the workspace root as this user before compose binds it: a
+  # missing bind source is created by Docker as root, and the coordinator
+  # (this user) could then not make a bench's workspace in it.
+  export GENTAR_BENCH_WORKSPACE_ROOT="${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}"
+  mkdir -p "$GENTAR_BENCH_WORKSPACE_ROOT"
+fi
 # Telemetry destination (optional; AGENTS.md decision 6): the arena's
 # collector forwards what the coordinator scrubbed to GENTAR_OTLP_EXPORT
 # with GENTAR_OTLP_KEY. Both or neither — half a destination is a refusal, not a
@@ -667,6 +686,7 @@ arena() { docker compose "${ARENA_FILES[@]}" -p "arena-$SUBJECT" "$@"; }
 # different, missing file. Same shape as the engine's own bin/arena, so
 # the two say the same thing. The path is printed, never the contents.
 require_bench_key() {
+  [ "${GENTAR_BENCH_HOST:-}" = local ] && return 0    # local bench mode: no key
   local key
   # `compose config --format json` PRETTY-PRINTS, so "bench_ssh_key" and
   # its "file" land on different lines and a single-line sed match finds
