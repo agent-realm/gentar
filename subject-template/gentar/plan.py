@@ -78,6 +78,10 @@ SCHEMA = {
     "phase2": {"on": list(PHASE2_TRIGGERS), "release_gate": True,
                "max_age_days": 0},
     "check": {"allow_drift": [], "docs": False},
+    # Ship git history into the bench (scenarios that clone their own
+    # tags, an update path). Off by default: .git on CI holds the job's
+    # auth header, so it is never copied; stage-git builds a fresh one.
+    "stage": {"git": False},
 }
 
 README_MAX_LINES = 150
@@ -126,6 +130,8 @@ def load_policy(path=POLICY):
                      f"(known: {', '.join(SCHEMA)})")
     if not isinstance(out["check"]["docs"], bool):
         raise Refuse("[check] docs must be true or false")
+    if not isinstance(out["stage"]["git"], bool):
+        raise Refuse("[stage] git must be true or false")
     p1, p2 = out["phase1"], out["phase2"]
     if not isinstance(p1["checks"], bool):
         raise Refuse("[phase1] checks must be true or false")
@@ -347,7 +353,11 @@ def plan(env, policy):
         names, note = _no_judged(list(p1["floor"]))
         return targeted(names, f"phase 1 on {default}: checks + floor" + note)
 
-    if tag is not None:
+    # Tag rules are for a tag PUSH. A dispatch run ON a tag ref (a drift
+    # run of a release, claude-playbooks' monitor) is a dispatch: it used to
+    # hit the release rule here and plan nothing, reading "success" with the
+    # arena skipped, and a dispatch naming suites was swallowed the same way.
+    if tag is not None and event == "push":
         if tag == "arena":
             if "arena" in p2["on"]:
                 return {**res, "bench": "phase2", "reason": "phase 2: the `arena` tag"}
@@ -515,12 +525,48 @@ def lint(policy, engine_root):
     return problems
 
 
+def stage_git(repo: str, dest: str) -> None:
+    """Give the staged subject (`dest`, the working-tree copy) a .git with
+    the repository's history and tags, and nothing else of its .git: a
+    local `git clone` writes a NEW config, so an auth header that
+    actions/checkout left in the source config is not copied, and the
+    origin (a host path) is removed. Refuses (exit 2) on a shallow
+    source, which has no tags to ship."""
+    import subprocess
+    import tempfile
+
+    def git(*args, cwd=None):
+        r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise Refuse(f"stage-git: git {args[0]} failed: {r.stderr.strip()[:300]}")
+        return r.stdout.strip()
+
+    if git("-C", repo, "rev-parse", "--is-shallow-repository") == "true":
+        raise Refuse("[stage] git = true needs full history, and this checkout is shallow "
+                     "(the kit workflow's bench job checks out with fetch-depth: 0; a local "
+                     "shallow clone needs `git fetch --unshallow`)")
+    if os.path.exists(os.path.join(dest, ".git")):
+        raise Refuse(f"stage-git: {dest}/.git already exists")
+    with tempfile.TemporaryDirectory() as tmp:
+        clone = os.path.join(tmp, "c")
+        git("clone", "-q", "--no-checkout", "--no-hardlinks", repo, clone)
+        git("-C", clone, "remote", "remove", "origin")
+        os.rename(os.path.join(clone, ".git"), os.path.join(dest, ".git"))
+    git("-C", dest, "reset", "-q")                 # the index matches HEAD; files are the copy's
+
+
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else ""
     try:
         policy = load_policy()
         if cmd == "plan":
             emit(plan(os.environ, policy))
+            return 0
+        if cmd == "stage-git" and len(argv) == 4:
+            if (policy or {}).get("stage", {}).get("git"):
+                stage_git(argv[2], argv[3])
+                print("staged: git history (fresh local clone, no remote, no config "
+                      "carried over)", file=sys.stderr)
             return 0
         if cmd == "gate-config":           # release-gate.sh's view of [phase2]
             p2 = (policy or {}).get("phase2") or SCHEMA["phase2"]
@@ -538,7 +584,8 @@ def main(argv):
     except Refuse as exc:
         print(f"plan: {exc}", file=sys.stderr)
         return 2
-    print("usage: gentar/plan.py plan | lint [engine-root] | gate-config", file=sys.stderr)
+    print("usage: gentar/plan.py plan | lint [engine-root] | gate-config | stage-git <repo> <dest>",
+          file=sys.stderr)
     return 2
 
 

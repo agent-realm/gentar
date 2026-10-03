@@ -21,6 +21,8 @@ read this file before moving an adopter's `GENTAR_REF` across one.
 Adopters pin a release tag, not a branch.
 
 ## Unreleased
+
+## 0.9.1 — 2026-10-03
 ### Added
 - **Local bench mode** (engine and kit): `GENTAR_BENCH_HOST=local` when the
   arena runs on the bench host itself (a runner on that VM). sbx is called
@@ -38,6 +40,24 @@ Adopters pin a release tag, not a branch.
 
   Proven on VM 151: `smoke` and `scripted-onboarding` pass end to end,
   with no sandbox left.
+- Kit `[stage] git = true` (`gentar/policy.toml`): ship git history into the
+  bench for suites that clone their own release tags. `plan.py stage-git`
+  gives the staged copy a fresh `.git` from a local clone (history and tags,
+  a new config, no remote), so CI's auth header is never copied. A shallow
+  checkout is refused. Needed by the own-repo move: kommander-update and
+  agent-profile-smoke clone from `$WORKSPACE_DIR/.git`.
+### Fixed
+- Kit `plan.py`: a `workflow_dispatch` run **on a tag ref** is a dispatch.
+  The release rule caught it first, so a drift run of a release planned
+  nothing and read "success" with the arena skipped, and a dispatch naming
+  suites on a tag was swallowed the same way (claude-playbooks' drift
+  monitor). Tag rules now apply to tag pushes only; a dispatch on a tag
+  runs phase 2 when `dispatch` is in `[phase2] on`, or the suites it names.
+### Changed
+- Kit `run.sh --sweep`: judged suites skipped for want of
+  `TYPESAFE_API_KEY` are summarised once more at the end of the selection
+  (`sweep summary: N judged suite(s) skipped …`), and as a warning
+  annotation in GitHub Actions, since a green phase 2 did not run them.
 ### Security
 - **No credential rides into a bench in a subject's git metadata.** gentar's
   own nightly and dispatch cloned private subjects with the token in the

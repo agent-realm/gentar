@@ -371,6 +371,7 @@ judge_ready() {
 # the coordinator's forwarding warning then says the URL was dropped.
 if [ "$SWEEP" = 1 ]; then
   runnable=""
+  judged_skipped=""
   for f in "$HERE"/scenarios/*.toml; do
     [ -f "$f" ] || continue
     s=$(basename "$f" .toml)
@@ -380,10 +381,22 @@ if [ "$SWEEP" = 1 ]; then
       echo "skipping $s — judged suites never run on a pull request (phase 2 only)" >&2
     elif ! judge_ready "$f"; then
       echo "skipping $s — it has judged turns and TYPESAFE_API_KEY is not set" >&2
+      judged_skipped="$judged_skipped $s"
     else
       runnable="$runnable $s"
     fi
   done
+  # Said once more, loudly, at the end: a phase 2 that skipped its judged
+  # suites can finish green without having run them (claude-playbooks-ac,
+  # from Codex on cockpit's re-pin). In Actions it is a warning annotation.
+  if [ -n "$judged_skipped" ]; then
+    n=$(echo $judged_skipped | wc -w | tr -d ' ')
+    msg="$n judged suite(s) skipped, TYPESAFE_API_KEY is not set:$judged_skipped (a green sweep did not run them)"
+    echo "sweep summary: $msg" >&2
+    if [ "${GITHUB_ACTIONS:-}" = true ]; then
+      echo "::warning title=judged suites skipped::$msg"
+    fi
+  fi
   [ -n "$runnable" ] || { echo "no runnable suites in gentar/scenarios" >&2; exit 2; }
   echo "sweep:$runnable" >&2
   set -- $runnable
@@ -409,7 +422,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.9.0}
+REF=${GENTAR_REF:-v0.9.1}
 
 # --review: has this repo outgrown its suites?
 #
@@ -589,6 +602,9 @@ mkdir "subjects/$SUBJECT"
 (cd "$REPO" && tar \
   --exclude=./.git --exclude=./gentar/.arena --exclude=./gentar/reports \
   -cf - .) | tar -xf - -C "subjects/$SUBJECT"
+# History, when the policy asks for it ([stage] git = true): a fresh .git
+# built by a local clone, so no credential and no remote path come along.
+python3 "$HERE/plan.py" stage-git "$REPO" "subjects/$SUBJECT"
 # A worktree's .git is a pointer file with a host-absolute path — dead
 # on the bench — so `git describe` there finds nothing. Freeze the
 # version HERE, where git works; scenarios read it instead of trusting

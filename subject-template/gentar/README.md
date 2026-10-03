@@ -14,7 +14,7 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.9.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.9.1` |
 
 ## Quickstart (local)
 
@@ -206,9 +206,9 @@ workflow's first job asks it what this event should run.
 |---|---|
 | pull request | **phase 1**: bench-free checks on GitHub-hosted runners — `ubuntu-latest`, plus `macos-latest` if `[phase1] os` lists it — or on the self-hosted runner `GENTAR_CI_RUNNER` names (below) (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
 | push to the default branch | **phase 1**: the checks, plus `[phase1] floor` on the bench |
-| dispatch (no suites), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
+| dispatch (no suites; on any ref, a release tag included: a drift run), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
 | `arena-<suite>` tag, or a dispatch naming suites | exactly those suites (`arena / targeted`; never counts as phase 2) |
-| `v*` tag | nothing — a release is **gated** on a green phase 2 of its commit (below), not tested after it |
+| `v*` tag pushed | nothing — a release is **gated** on a green phase 2 of its commit (below), not tested after it |
 
 A fork's pull request never reaches the self-hosted runner, whatever the
 policy says: the bench job checks that from GitHub's own context. Try any
@@ -395,6 +395,15 @@ else is optional. Phase 2 is `gentar/run.sh --sweep`: suites whose credentials
 are absent are skipped and named, not run into a red refusal. It tears down
 with `gentar/run.sh --down`, which also removes the bench sandboxes a cancelled
 job left behind — and never touches an arena another live run holds.
+
+**Git history in the bench.** The subject is staged without `.git`: on
+CI it holds the job's auth header. A suite that needs history (one that
+clones an older release tag to test an update) sets `[stage] git = true`
+in `gentar/policy.toml`. The kit then gives the staged copy a fresh `.git`
+from a local clone: every commit and tag, a new config, no remote. The
+engine refuses a subject whose git config still holds a credential. The
+checkout must be full (the kit workflow's bench job uses `fetch-depth: 0`);
+a shallow one is refused.
 
 **Credential grouping.** `credentials` lists *alternatives*. A provider that is
 a pair must be a nested list — `[["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]`.
