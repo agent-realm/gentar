@@ -21,6 +21,16 @@ read this file before moving an adopter's `GENTAR_REF` across one.
 Adopters pin a release tag, not a branch.
 
 ## Unreleased
+### Security
+- **No credential rides into a bench in a subject's git metadata.** gentar's
+  own nightly and dispatch cloned private subjects with the token in the
+  clone URL, so git saved it in `.git/config`, and the engine copied the
+  subject, `.git` included, into benches where agents run with skipped
+  permissions (found in the 2026-10-02 design review). The workflow now
+  passes the token through env only, as an HTTP header in git's env config,
+  which is not saved into the clone. The engine refuses (exit 2, before any
+  bench) a subject whose `.git/config` holds a credential or that carries a
+  git credential store. Rotate any token that went through the old path.
 
 ## 0.9.0 — 2026-09-28
 ### Added

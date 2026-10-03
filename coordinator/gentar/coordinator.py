@@ -8,6 +8,7 @@ verdict: 0 pass · 1 fail · 2 usage/config refusal. Dispatches Python
 builtins (smoke) and TOML scenarios (oracle runner)."""
 
 import os
+import re
 import shlex
 import time
 
@@ -28,6 +29,52 @@ ARENA_SUBJECT = "arena"
 
 class RunError(RuntimeError):
     pass
+
+
+# A credential in a subject's git metadata: a user:password (or token) in a
+# remote URL, an http.extraheader (actions/checkout's auth header), or a
+# credential store file. The engine copies the subject, `.git` included,
+# into the bench, where agents may run with skipped permissions.
+# Any user info in an http(s) URL: `user:pass@`, `token@` (GitHub accepts a
+# bare token as the user), `:token@`, `token:@`, in a remote or in a
+# `[url "..."]` insteadOf header. For other schemes only a password counts:
+# `ssh://git@host` is a user name, not a secret.
+_CRED_IN_URL = re.compile(r"https?://[^/\s\"']*@|[a-z][a-z0-9+.-]*://[^/\s@:\"']*:[^/\s@\"']+@",
+                          re.IGNORECASE)
+_CRED_KEYS = re.compile(r"^\s*(extraheader|cookiefile)\s*=|x-access-token|authorization:",
+                        re.IGNORECASE | re.MULTILINE)
+
+
+def subject_credential_problems(subject_dir: str) -> list[str]:
+    """Why this subject must not be copied into a bench: a credential in
+    its .git/config or a .git-credentials file. Names the file and the kind,
+    never the value. A worktree's `.git` pointer file is not a directory
+    and holds no config."""
+    out = []
+    gitdir = os.path.join(subject_dir, ".git")
+    configs = []
+    if os.path.isdir(gitdir):
+        # Every git config the copy carries: the repo's, each submodule's
+        # (.git/modules/**/config) and each worktree's config.worktree.
+        for root, dirs, files in os.walk(gitdir):
+            dirs[:] = [d for d in dirs if d not in ("objects", "lfs", "logs")]
+            configs += [os.path.join(root, f) for f in files if f in ("config", "config.worktree")]
+    for config in sorted(configs):
+        try:
+            with open(config, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError as exc:
+            out.append(f"cannot read {config} to check it for credentials: {exc.strerror}")
+            continue
+        if _CRED_IN_URL.search(text):
+            out.append(f"{config} has a credential in a URL (a remote or an insteadOf)")
+        if _CRED_KEYS.search(text):
+            out.append(f"{config} has an auth header, token or cookie file "
+                       f"(http.extraheader / http.cookieFile)")
+    for name in (".git-credentials", os.path.join(".git", "credentials")):
+        if os.path.exists(os.path.join(subject_dir, name)):
+            out.append(f"{os.path.join(subject_dir, name)} exists (a git credential store)")
+    return out
 
 
 def _write_report(report: RunReport, cfg: Config) -> None:
@@ -395,6 +442,29 @@ def _run(name: str, cfg: Config | None = None) -> int:
     run_kind = "scripted" if (scenario and scenario.driver_command) else "oracle"
     # Bench tier: the scenario's `bench` key overrides the install default
     # (config bench_kind, "sbx"); builtins always use the default tier.
+    # -- subject guard: no credential rides into a bench -----------------
+    # The subject is copied whole, `.git` included. A token in its
+    # .git/config (a clone URL, actions/checkout's auth header) would reach
+    # a bench where agents run with skipped permissions (2026-10-02).
+    if scenario and scenario.subject:
+        why = subject_credential_problems(os.path.join(cfg.subjects_root, scenario.subject))
+        if why:
+            msg = ("subject guard: " + "; ".join(why) + " — strip it (git remote set-url "
+                   "origin <url without credentials>; unset http.extraheader) before staging. "
+                   "Refusing before any bench exists.")
+            print(f"Error: {msg}")
+            Spans(cfg).emit(ARENA_SUBJECT, "", name, "subject.refuse", "error",
+                            attrs={"subject": scenario.subject},
+                            detail="run refused: credential in subject git metadata")
+            report = RunReport(
+                scenario=name,
+                run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+                subject=scenario.subject,
+                reproduce=f"docker compose run --rm coordinator run {name}",
+                error=msg)
+            report.mark("refuse", 2)
+            _write_report(report, cfg)
+            return 2
     bench = make_bench(cfg, kind=(scenario.bench if scenario else ""))
     # -- host guard: refuse before any bench exists ----------------------
     # What the config cannot know: the state of the bench-host itself
