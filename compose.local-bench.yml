@@ -1,0 +1,19 @@
+# Local bench mode (GENTAR_BENCH_HOST=local): the arena runs ON the bench
+# host, so the coordinator calls the host's sbx directly instead of over
+# ssh: no bench key. Layered by bin/arena and the kit's run.sh only in that
+# mode. The coordinator runs as the host user, with the host's sbx binary,
+# its daemon state and config, and the workspace root mounted at the SAME
+# paths: sbx resolves a workspace path on the host. Benches never see any
+# of this; they get only their own workspace directory.
+services:
+  coordinator:
+    user: "${GENTAR_LOCAL_UID:?GENTAR_LOCAL_UID unset (local bench mode)}:${GENTAR_LOCAL_GID:?GENTAR_LOCAL_GID unset (local bench mode)}"
+    environment:
+      HOME: "${GENTAR_LOCAL_HOME:?GENTAR_LOCAL_HOME unset (local bench mode)}"
+      GENTAR_BENCH_WORKSPACE_ROOT: "${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}"
+    volumes:
+      - ${GENTAR_LOCAL_SBX_BIN:-/usr/bin/sbx}:/usr/bin/sbx:ro
+      - ${GENTAR_LOCAL_HOME}/.local/state/sandboxes:${GENTAR_LOCAL_HOME}/.local/state/sandboxes
+      - ${GENTAR_LOCAL_HOME}/.config/sandboxes:${GENTAR_LOCAL_HOME}/.config/sandboxes
+      - ${GENTAR_LOCAL_HOME}/.config/com.docker.sandboxes:${GENTAR_LOCAL_HOME}/.config/com.docker.sandboxes
+      - ${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}:${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}

@@ -153,7 +153,20 @@ class SbxBenchHost(BenchHost):
     sbx CLI shape (v0.39.0): `create [flags] AGENT PATH`, `exec [flags]
     SANDBOX COMMAND [ARG...]` (docker-exec semantics), `rm --force`."""
 
+    @property
+    def local(self) -> bool:
+        """GENTAR_BENCH_HOST=local: the arena runs ON the bench host (a
+        runner on the same VM), so sbx is called directly: no ssh, no
+        bench key. The coordinator container gets the host's sbx binary,
+        its state and config dirs and the workspace root mounted at the
+        same paths, and runs as the host user (compose.local-bench.yml)."""
+        return self.cfg.bench_host == "local"
+
     def _ssh_base(self) -> list[str]:
+        # Local: every `ssh host '<line>'` becomes `sh -c '<line>'`, the same
+        # quoting and semantics without the transport.
+        if self.local:
+            return ["sh", "-c"]
         return self._ssh_argv(self.cfg.bench_user, self.cfg.bench_host,
                               jump=self.cfg.bench_jump)
 
@@ -280,7 +293,8 @@ class SbxBenchHost(BenchHost):
 
     def pty_spawn_args(self, sandbox: str, columns: int, lines: int,
                        env: dict[str, str], command: str) -> list[str]:
-        ssh = self._ssh_base() + ["-tt", "--"]
+        # Local: the pty is the coordinator's own (pexpect), so no -tt.
+        ssh = ["sh", "-c"] if self.local else self._ssh_base() + ["-tt", "--"]
         # Extra env (credential transport, tier 1) is quoted per
         # assignment — a value with spaces/metachars stays one word.
         remote = " ".join([

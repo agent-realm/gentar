@@ -95,8 +95,11 @@ if [ -n "$resolved" ]; then
 fi
 case "${GENTAR_BENCH_KEY_FILE:-}" in "~/"*) GENTAR_BENCH_KEY_FILE="$HOME/${GENTAR_BENCH_KEY_FILE#\~/}" ;; esac
 
-HOST=${GENTAR_BENCH_HOST:-}
+HOST=$(printf '%s' "${GENTAR_BENCH_HOST:-}" | tr -d '[:space:]')
 USER_=${GENTAR_BENCH_USER:-}
+if [ "$HOST" = local ]; then
+  USER_=local                      # local bench mode: no account, no ssh
+fi
 if [ -z "$HOST" ] || [ -z "$USER_" ]; then
   echo "bench-reap: GENTAR_BENCH_HOST and GENTAR_BENCH_USER must be set" >&2
   exit 2
@@ -109,6 +112,9 @@ SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new
 [ -n "${GENTAR_BENCH_KEY_FILE:-}" ] && SSH+=(-i "$GENTAR_BENCH_KEY_FILE")
 [ -n "${GENTAR_BENCH_JUMP:-}" ] && SSH+=(-J "$GENTAR_BENCH_JUMP")
 SSH+=("$USER_@$HOST")
+# Local bench mode: this machine is the bench host; the same command lines
+# run through sh -c, with no ssh (as the coordinator does).
+[ "$HOST" = local ] && SSH=(sh -c)
 
 listing=$("${SSH[@]}" "$SBX ls --json") || {
   echo "bench-reap: could not list sandboxes on $HOST" >&2

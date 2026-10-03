@@ -21,6 +21,23 @@ read this file before moving an adopter's `GENTAR_REF` across one.
 Adopters pin a release tag, not a branch.
 
 ## Unreleased
+### Added
+- **Local bench mode** (engine and kit): `GENTAR_BENCH_HOST=local` when the
+  arena runs on the bench host itself (a runner on that VM). sbx is called
+  directly instead of over SSH, so an adopter needs no SSH account, no
+  bench key and no bench secrets: the runner and one repository variable.
+  - `SbxBenchHost`: `sh -c` in place of the ssh transport (the same
+    quoting), and the coordinator's own pty.
+  - `compose.local-bench.yml`: the coordinator runs as the host user, with
+    the host's `sbx` binary, state and config, and the workspace root
+    mounted at the same paths.
+  - `bin/arena` and the kit's `run.sh` layer it and create the workspace
+    root first. The kit workflow takes `GENTAR_BENCH_HOST` from a secret or
+    a variable and skips the key checks in local mode.
+  - `local` is a mode, not a locator, so it is never redacted.
+
+  Proven on VM 151: `smoke` and `scripted-onboarding` pass end to end,
+  with no sandbox left.
 ### Security
 - **No credential rides into a bench in a subject's git metadata.** gentar's
   own nightly and dispatch cloned private subjects with the token in the

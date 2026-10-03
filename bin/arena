@@ -41,8 +41,43 @@ cd "$HERE"
 # Local runs layer compose.rm.yml. The documented compose contract in
 # docker-compose.yml is untouched — `docker compose run --rm coordinator …`
 # still works exactly as the README and CI describe it.
+# Local bench mode: GENTAR_BENCH_HOST=local, from the environment or .env.
+# The arena runs on the bench host itself and calls sbx directly
+# (compose.local-bench.yml): no ssh, no bench key.
+bench_host_setting() {
+  if [ -n "${GENTAR_BENCH_HOST:-}" ]; then printf '%s' "$GENTAR_BENCH_HOST"
+  elif [ -f .env ]; then sed -n 's/^GENTAR_BENCH_HOST=//p' .env | tail -1 | tr -d "\"' [:space:]"
+  fi
+}
+local_bench() { [ "$(bench_host_setting)" = local ]; }
+if local_bench; then
+  export GENTAR_BENCH_HOST=local
+  SBX_PATH=$(command -v sbx 2>/dev/null || true)
+  [ -n "$SBX_PATH" ] || { echo "arena: GENTAR_BENCH_HOST=local but no sbx on PATH" >&2; exit 2; }
+  for d in "$HOME/.local/state/sandboxes" "$HOME/.config/sandboxes" "$HOME/.config/com.docker.sandboxes"; do
+    if [ ! -d "$d" ] || [ ! -O "$d" ]; then
+      echo "arena: $d is missing or not owned by $(id -un) — run sbx login as this user first" >&2
+      exit 2
+    fi
+  done
+  export GENTAR_LOCAL_SBX_BIN
+  GENTAR_LOCAL_SBX_BIN=$(readlink -f "$SBX_PATH" 2>/dev/null || echo "$SBX_PATH")
+  export GENTAR_LOCAL_UID GENTAR_LOCAL_GID GENTAR_LOCAL_HOME
+  GENTAR_LOCAL_UID=$(id -u); GENTAR_LOCAL_GID=$(id -g); GENTAR_LOCAL_HOME=$HOME
+  # The compose secret still needs a file to mount; there is no key.
+  export GENTAR_BENCH_KEY_FILE=/dev/null
+  # The workspace root must exist, owned by this user, BEFORE compose binds
+  # it: a missing bind source is created by Docker as root, and the
+  # coordinator (this user) then cannot make a bench's workspace in it.
+  export GENTAR_BENCH_WORKSPACE_ROOT="${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}"
+  mkdir -p "$GENTAR_BENCH_WORKSPACE_ROOT"
+fi
+
 compose() {
   local extra=()
+  if local_bench; then
+    extra+=(-f compose.local-bench.yml)
+  fi
   # Telemetry destination (otelcol/export.yaml); require_destination has
   # already refused half of one for every command that starts an arena.
   if [ -n "${GENTAR_OTLP_EXPORT:-}" ] && [ -n "${GENTAR_OTLP_KEY:-}" ]; then
@@ -126,6 +161,7 @@ forward_flags() {             # scenario names... -> FORWARD=(-e A -e B)
 }
 
 require_bench_key() {
+  local_bench && return 0      # local bench mode: no ssh, no key
   local key
   # `config --format json` PRETTY-PRINTS: "bench_ssh_key" and its "file"
   # land on different lines, so a single-line match finds nothing and the
