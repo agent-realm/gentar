@@ -47,7 +47,11 @@ more, from a container, so the login is also written as files:
     bin/sbx-file-login                 # device flow, as the runner's user
     printf %s "$PAT" | bin/sbx-file-login --username <user> --password-stdin
 
-The host's keyring login stays as it is. The arena refuses with exit 2
+The token goes through a pipe only: the script refuses a password on the
+command line (`ps` and `docker inspect` would show it) and
+`--password-stdin` from a terminal (a typed token would echo). After the
+login it makes the store owner-only (sbx writes its files 644). The host's
+keyring login stays as it is. The arena refuses with exit 2
 while that folder has no default account profile
 (`GENTAR_SBX_AUTH_CHECK=off` skips the check, for an sbx that keeps it
 elsewhere).

@@ -232,6 +232,100 @@ class KeyringLoginTest(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("not a directory owned by", r.stderr)
 
+class LoginSecrecyTest(unittest.TestCase):
+    """The pilot's second look at #65 (2026-10-04, Antigravity, gemini-3.8-
+    flash-high): no path may print the sbx login or its token."""
+
+    SBX_ERROR = ('ERROR: encode registry auth: registry credentials for "docker/sandbox-templates:'
+                 'shell-docker": get Docker Hub access token: user is not authenticated to Docker: '
+                 'no default account profile set: secret not found')
+
+    def test_token_shapes_are_masked(self):
+        from gentar.benchhost import mask_token_shapes as m
+        for raw, gone in (
+            ("t dckr_pat_AbCdEfGh12345678 e", "dckr_pat_AbCdEfGh12345678"),
+            ("t dckr_oat_AbCdEfGh12345678 e", "dckr_oat_AbCdEfGh12345678"),
+            ("x eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2lnbmF0dXJl y", "eyJhbGciOiJIUzI1NiJ9"),
+            ("Authorization: Bearer abcdefghijklmnop", "abcdefghijklmnop"),
+            ("authorization: basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA=="),
+            ("sent Bearer abcdefghijklmnopqrst", "abcdefghijklmnopqrst"),
+            ('{"access_token": "s3cr3t-value", "expires_in": 300}', "s3cr3t-value"),
+            ('{"refresh_token":"r3fr3sh"}', "r3fr3sh"),
+            ("g ghp_" + "a" * 36, "ghp_" + "a" * 36),
+            ("github_pat_" + "b" * 30, "github_pat_" + "b" * 30),
+        ):
+            with self.subTest(raw=raw[:20]):
+                out = m(raw)
+                self.assertNotIn(gone, out)
+                self.assertIn("redacted", out)
+
+    def test_sbx_errors_stay_readable(self):
+        from gentar.benchhost import clip, mask_token_shapes
+        self.assertEqual(mask_token_shapes(self.SBX_ERROR), self.SBX_ERROR)
+        self.assertIn("no default account profile set", clip("x" * 2000 + "\n" + self.SBX_ERROR))
+
+    def test_a_token_in_the_kept_tail_is_masked(self):
+        from gentar.benchhost import clip
+        out = clip("── PREPARE IMAGE\n" + "progress\n" * 300 + "ERROR: refresh failed: "
+                   '{"access_token": "LEAKME-123", "refresh_token": "LEAKME-456"} dckr_pat_LEAKME78901234')
+        self.assertNotIn("LEAKME", out)
+        self.assertIn("ERROR: refresh failed", out)
+
+    def _login(self, args, stdin=None, input=""):
+        import subprocess
+        tmp = Path(tempfile.mkdtemp())
+        home = tmp / "home"
+        (home / ".config" / "com.docker.sandboxes").mkdir(parents=True)
+        (home / ".config" / "com.docker.sandboxes").chmod(0o755)        # an older sbx left it 755
+        bindir = tmp / "bin"
+        bindir.mkdir()
+        called = tmp / "docker.called"
+        auth = home / ".config/com.docker.sandboxes/com.docker.sandboxes-auth/sandboxes-auth/ZG9j"
+        (bindir / "sbx").write_text("#!/bin/sh\nexit 0\n")
+        # the fake login writes the store as sbx does: 700 folders, 644 files
+        (bindir / "docker").write_text(
+            f"#!/bin/sh\ntouch {called}\nmkdir -p {auth}\nchmod 700 {auth}\n"
+            f"echo x > {auth}/secretpass\nchmod 644 {auth}/secretpass\n")
+        for f in ("sbx", "docker"):
+            (bindir / f).chmod(0o755)
+        kw = {"stdin": stdin} if stdin is not None else {"input": input}
+        r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "sbx-file-login"), *args],
+                           env={"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home)},
+                           capture_output=True, text=True, **kw)
+        return r, home, called.exists(), auth
+
+    @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
+    def test_a_password_on_the_command_line_is_refused(self):
+        for args in (["-p", "x"], ["--password", "x"], ["--password=x"]):
+            with self.subTest(args=args):
+                r, _, docker_called, _ = self._login(["--username", "u", *args])
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertFalse(docker_called)
+                self.assertIn("no password on the command line", r.stderr)
+
+    @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
+    def test_password_stdin_from_a_terminal_is_refused(self):
+        import pty
+        primary, secondary = pty.openpty()
+        try:
+            r, _, docker_called, _ = self._login(["--username", "u", "--password-stdin"], stdin=secondary)
+        finally:
+            os.close(primary)
+            os.close(secondary)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertFalse(docker_called)
+        self.assertIn("reads a pipe, not a terminal", r.stderr)
+
+    @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
+    def test_the_store_is_owner_only_after_login(self):
+        r, home, docker_called, auth = self._login(["--username", "u", "--password-stdin"], input="tok")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(docker_called)
+        self.assertEqual((home / ".config" / "com.docker.sandboxes").stat().st_mode & 0o777, 0o700)
+        self.assertEqual((auth / "secretpass").stat().st_mode & 0o077, 0)
+        self.assertEqual(auth.stat().st_mode & 0o077, 0)
+
+
 class RedactionTest(unittest.TestCase):
 
     def test_the_mode_word_is_not_scrubbed(self):

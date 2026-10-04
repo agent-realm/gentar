@@ -33,7 +33,14 @@ Adopters pin a release tag, not a branch.
   missing, instead of failing every suite.
 - **Bench errors keep the reason.** A failing bench command's output was cut
   to its first 400 characters, and sbx prints the reason last; errors now
-  keep the start and the last 400 characters.
+  keep the start and the last 400 characters, with credential shapes masked
+  first (Docker PAT/OAT, JWT, bearer/basic, GitHub tokens, token fields in
+  JSON): the run's redaction is value-based and knows nothing of the host's
+  sbx login, and an error text reaches the CI log, the report artifact and
+  the spans.
+- **`bin/sbx-file-login` keeps the token secret.** It refuses a password on
+  the command line and `--password-stdin` from a terminal, and makes the
+  login store owner-only after the login.
 
 ## 0.9.1 — 2026-10-03
 ### Added

@@ -31,6 +31,7 @@ pty_spawn_args. ``make_bench(cfg, kind)`` is the factory.
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -46,11 +47,40 @@ class BenchHostError(RuntimeError):
     pass
 
 
+# Credential SHAPES, masked in bench-host output before it becomes an error.
+# The run's redaction is value-based (it masks what the run knows), and the
+# host's sbx login is in no variable the run knows; an error text reaches the
+# CI log, the report artifact and the spans, so a token sbx ever printed
+# would go everywhere. Shapes, not values: a false positive costs a word.
+_TOKEN_SHAPES = [
+    (re.compile(r"\bdckr_(?:pat|oat)_[A-Za-z0-9_-]{8,}"), "docker-token"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,})?"), "jwt"),
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"), "github-token"),
+    (re.compile(r"(?i)\b(authorization\s*:\s*)(?:(bearer|basic|token)\s+)?[^\s\"',;]{8,}"), "authorization"),
+    (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}"), "authorization"),
+    (re.compile(r"(?i)(\"(?:access_token|refresh_token|id_token|token|password|secret)\"\s*:\s*)\"[^\"]+\""), "json"),
+]
+
+
+def mask_token_shapes(text: str) -> str:
+    for rx, kind in _TOKEN_SHAPES:
+        if kind == "authorization" and rx.groups:
+            text = rx.sub(lambda m: f"{m.group(1)}[redacted:{kind}]"
+                          if m.group(1).lower().startswith("authorization")
+                          else f"{m.group(1)} [redacted:{kind}]", text)
+        elif kind == "json":
+            text = rx.sub(lambda m: f'{m.group(1)}"[redacted]"', text)
+        else:
+            text = rx.sub(f"[redacted:{kind}]", text)
+    return text
+
+
 def clip(text: str, head: int = 120, tail: int = 400) -> str:
-    """Shorten command output for an error message, keeping both ends.
-    sbx prints its progress first and the reason last ("ERROR: ..."), so
-    a head-only cut hid every create failure behind "PREPARE IMAGE"."""
-    text = text.strip()
+    """Shorten command output for an error message, keeping both ends, with
+    credential shapes masked. sbx prints its progress first and the reason
+    last ("ERROR: ..."), so a head-only cut hid every create failure behind
+    "PREPARE IMAGE"."""
+    text = mask_token_shapes(text.strip())
     if len(text) <= head + tail + 5:
         return text
     return f"{text[:head]} … {text[-tail:]}"
