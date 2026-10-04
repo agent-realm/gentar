@@ -23,6 +23,14 @@ Adopters pin a release tag, not a branch.
 ## Unreleased
 
 ### Fixed
+- **A subject's own suite now wins over the engine's copy of the same
+  name.** The coordinator searched the engine's baked scenarios before the
+  subject's (`GENTAR_SCENARIOS_DIR`), so a subject suite named like one of
+  the suites gentar used to run for other repos was silently replaced by
+  the engine's copy: kommander-playbook's first own-arena run executed
+  gentar's stale `docs-honesty-kommander`, not its own. The subject's dir is
+  now searched first, and the coordinator prints a note when a subject
+  suite hides an engine one.
 - **Local bench mode on a host whose sbx login is in a keyring.** sbx in
   the coordinator has no session bus and reads the Docker login only from
   files, so on a host with gnome-keyring (arf VM 142, sbx 0.39) every bench
