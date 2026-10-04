@@ -70,6 +70,12 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                         # others). Skip, don't fail.
                         _ok(spans, subject, run_id, name, i,
                             f"pick /{turn['label']}/ skipped (optional)")
+                        # Said in the report too: a skip that only reached a
+                        # span hid cockpit's never-matching "No" pick.
+                        if report is not None:
+                            report.warnings.append(
+                                f"turn {i}: optional pick /{turn['label']}/ skipped: no "
+                                f"picker showing it appeared")
                         continue
                     raise TurnFailure(f"turn {i}: picker option /{turn['label']}/ not reachable")
                 _ok(spans, subject, run_id, name, i, f"pick /{turn['label']}/")
