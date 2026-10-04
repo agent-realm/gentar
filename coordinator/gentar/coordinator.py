@@ -385,7 +385,9 @@ def _run(name: str, cfg: Config | None = None) -> int:
     # A declared credential that is SET but sits outside the winning group
     # is dropped — correctly — but never silently: see dropped_credentials.
     # Names only; a value never reaches a log line.
-    cred_warnings: list[str] = []
+    cred_warnings: list[str] = list(getattr(scenario, "warnings", []) or [])
+    for w in cred_warnings:
+        print(f"warning: {w}")
     if scenario and scenario.credentials:
         dropped = dropped_credentials(scenario.credential_groups(), os.environ.get)
         if dropped:

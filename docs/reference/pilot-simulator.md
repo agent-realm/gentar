@@ -74,6 +74,37 @@ declares and passes them through with `-e NAME`, so exporting them is
 enough. Bare `docker compose run` does not — add the same `-e` flags, as
 the [CI contract](ci-and-releases.md) does.
 
+## Bounding an interactive command: `timeout --foreground`
+
+Wrap a TUI in `timeout --foreground N <cmd>`, never plain `timeout`. GNU
+`timeout` runs its child in a new **background** process group, so an
+interactive program under it is stopped by SIGTTIN (state `T`) on its first
+tty read and never draws; a headless `-p` run never notices. The engine
+warns when a scenario with driver turns starts its command under plain
+`timeout` (the warning is printed and lands in the report), and the failure
+snapshot's process tree shows the `T` state when it happens.
+
+## When a turn fails — the failure snapshot
+
+A failed turn, the final wait for EOF timing out, the danger gate or a
+failed goal pilot all end the driver before `[verify]` runs. Before the
+session is closed, the engine captures into the report:
+
+- the **last screen**, rendered from the cell model the turns read;
+- the **raw tail** of the pty byte stream, control bytes shown as `\xNN`;
+- the **process tree** inside the bench (`ps … --forest`);
+- the output of each `[on_failure]` command, run on the bench.
+
+```toml
+[on_failure]
+commands = ["devbox info", { command = "ls -la ~/.claude", timeout = 20 }]
+```
+
+A command is a string or `{ command, timeout }` (1..600 s, default 60,
+as for verify). `[on_failure]` needs a `[driver]`. Every part is scrubbed
+like the rest of the report, and a part that cannot be read says why
+instead of hiding the failure. It is never a verdict.
+
 ## Semantic turns — a judged `expect`
 
 A regex `expect` breaks the day a screen is reworded. A **judged** `expect`
