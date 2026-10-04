@@ -253,6 +253,19 @@ class LoginSecrecyTest(unittest.TestCase):
             ('{"refresh_token":"r3fr3sh"}', "r3fr3sh"),
             ("g ghp_" + "a" * 36, "ghp_" + "a" * 36),
             ("github_pat_" + "b" * 30, "github_pat_" + "b" * 30),
+            # the re-check's bypasses (2026-10-04)
+            ("{'access_token': 'LEAK-sq'}", "LEAK-sq"),
+            ('{"auths": {"https://index.docker.io/v1/": {"auth": "TEFBSzI="}}}', "TEFBSzI="),
+            ('"Authorization": "Bearer LEAKjsonhdr"', "LEAKjsonhdr"),
+            ("x eyJhbGciOiJIUzI1NiJ9.e30.c2lnbmF0dXJl y", "eyJhbGciOiJIUzI1NiJ9.e30"),
+            ("x eyJhbGciOiJSU0EifQ.YWJj.ZGVm.Z2hp.amts y", "amts"),           # JWE, 5 parts
+            ("pat 3f2b8c1e-9a4d-4e2f-b6c7-1d2e3f4a5b6c end", "3f2b8c1e-9a4d"),  # legacy Hub PAT
+            ("Authorization: Secret LEAKscheme", "LEAKscheme"),
+            ("X-Registry-Auth: eyLEAKxra", "eyLEAKxra"),
+            ("https://user:LEAKurl@registry.example.org/v2/", "LEAKurl"),
+            ("GET /token?scope=x&password=LEAKqs&a=b", "LEAKqs"),
+            ('{"token": "a\\"LEAKesc\\"b"}', "LEAKesc"),
+            ('{"identity_token": "LEAKid"}', "LEAKid"),
         ):
             with self.subTest(raw=raw[:20]):
                 out = m(raw)
@@ -262,6 +275,10 @@ class LoginSecrecyTest(unittest.TestCase):
     def test_sbx_errors_stay_readable(self):
         from gentar.benchhost import clip, mask_token_shapes
         self.assertEqual(mask_token_shapes(self.SBX_ERROR), self.SBX_ERROR)
+        for line in ("sandbox g1313821982-37109273706-a1-bench0-20261003-081933-549411",
+                     "workspace /tmp/gentar-workspaces/x (rw)", '"token_type": "bearer"',
+                     "image docker/sandbox-templates:shell-docker"):
+            self.assertEqual(mask_token_shapes(line), line)
         self.assertIn("no default account profile set", clip("x" * 2000 + "\n" + self.SBX_ERROR))
 
     def test_a_token_in_the_kept_tail_is_masked(self):
@@ -295,26 +312,35 @@ class LoginSecrecyTest(unittest.TestCase):
         return r, home, called.exists(), auth
 
     @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
-    def test_a_password_on_the_command_line_is_refused(self):
-        for args in (["-p", "x"], ["--password", "x"], ["--password=x"]):
+    def test_only_username_and_password_stdin_pass_and_refusals_never_echo(self):
+        tok = "dckr_pat_SHOULDNOTPRINT"
+        for args in (["-p", tok], ["--password", tok], [f"--password={tok}"], [f"-p{tok}"],
+                     [tok], ["--username", "u", tok], ["-D"], ["--debug"], ["--username"]):
             with self.subTest(args=args):
-                r, _, docker_called, _ = self._login(["--username", "u", *args])
+                r, _, docker_called, _ = self._login(args)
                 self.assertEqual(r.returncode, 2, r.stderr)
                 self.assertFalse(docker_called)
-                self.assertIn("no password on the command line", r.stderr)
+                self.assertNotIn("SHOULDNOTPRINT", r.stdout + r.stderr)
+        for args in (["--username", "u", "--password-stdin"], ["--username=u", "--password-stdin"], []):
+            with self.subTest(allowed=args):
+                r, _, docker_called, _ = self._login(args, input="tok")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertTrue(docker_called)
 
     @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
     def test_password_stdin_from_a_terminal_is_refused(self):
         import pty
         primary, secondary = pty.openpty()
         try:
-            r, _, docker_called, _ = self._login(["--username", "u", "--password-stdin"], stdin=secondary)
+            r, _, docker_called, _ = self._login(["--username", "uSHOWN", "--password-stdin"],
+                                                 stdin=secondary)
         finally:
             os.close(primary)
             os.close(secondary)
         self.assertEqual(r.returncode, 2, r.stderr)
         self.assertFalse(docker_called)
         self.assertIn("reads a pipe, not a terminal", r.stderr)
+        self.assertNotIn("uSHOWN", r.stderr)          # no argument is ever echoed
 
     @unittest.skipUnless(HAVE_CHECKOUT, "bin/ and the kit are not in the image build context")
     def test_the_store_is_owner_only_after_login(self):

@@ -52,24 +52,39 @@ class BenchHostError(RuntimeError):
 # host's sbx login is in no variable the run knows; an error text reaches the
 # CI log, the report artifact and the spans, so a token sbx ever printed
 # would go everywhere. Shapes, not values: a false positive costs a word.
+_Q = r"""["']"""     # either quote: JSON and Python reprs both reach error text
+_TOKEN_KEYS = (r"access_token|refresh_token|id_token|identity_?token|registry_?token|"
+               r"token|auth|password|passwd|secret|client_secret|api_?key|authorization|"
+               r"x-registry-auth")
 _TOKEN_SHAPES = [
+    # "key": "value" / 'key': 'value' (JSON, Python dicts; escaped quotes kept inside)
+    (re.compile(rf"(?i)({_Q}(?:{_TOKEN_KEYS}){_Q}\s*:\s*)(\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')"), "field"),
+    # header lines: Authorization / Proxy-Authorization / X-Registry-Auth, any scheme
+    (re.compile(r"(?i)\b((?:proxy-)?authorization|x-registry-auth)(\s*[:=]\s*)[^\"'\r\n]+"), "header"),
+    # key=value in URLs, query strings, env dumps
+    (re.compile(rf"(?i)\b((?:{_TOKEN_KEYS})=)[^&\s\"']+"), "kv"),
+    # user:password@ in a URL
+    (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://[^\s/:@]+:)[^\s/@]+@"), "url"),
     (re.compile(r"\bdckr_(?:pat|oat)_[A-Za-z0-9_-]{8,}"), "docker-token"),
-    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,})?"), "jwt"),
+    # JWT (3 parts) and JWE (5 parts); a payload can be as short as "e30" ({})
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{4,}(?:\.[A-Za-z0-9_-]{2,}){1,4}"), "jwt"),
     (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"), "github-token"),
-    (re.compile(r"(?i)\b(authorization\s*:\s*)(?:(bearer|basic|token)\s+)?[^\s\"',;]{8,}"), "authorization"),
-    (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}"), "authorization"),
-    (re.compile(r"(?i)(\"(?:access_token|refresh_token|id_token|token|password|secret)\"\s*:\s*)\"[^\"]+\""), "json"),
+    (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}"), "scheme"),
+    # legacy Docker Hub access tokens are bare UUIDs; a UUID in an error costs a word
+    (re.compile(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"), "uuid"),
 ]
 
 
 def mask_token_shapes(text: str) -> str:
     for rx, kind in _TOKEN_SHAPES:
-        if kind == "authorization" and rx.groups:
-            text = rx.sub(lambda m: f"{m.group(1)}[redacted:{kind}]"
-                          if m.group(1).lower().startswith("authorization")
-                          else f"{m.group(1)} [redacted:{kind}]", text)
-        elif kind == "json":
+        if kind == "field":
             text = rx.sub(lambda m: f'{m.group(1)}"[redacted]"', text)
+        elif kind == "header":
+            text = rx.sub(lambda m: f"{m.group(1)}{m.group(2)}[redacted:authorization]", text)
+        elif kind in ("kv", "url"):
+            text = rx.sub(lambda m: f"{m.group(1)}[redacted]" + ("@" if kind == "url" else ""), text)
+        elif kind == "scheme":
+            text = rx.sub(lambda m: f"{m.group(1)} [redacted:authorization]", text)
         else:
             text = rx.sub(f"[redacted:{kind}]", text)
     return text

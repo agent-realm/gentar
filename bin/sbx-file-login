@@ -17,23 +17,34 @@
 #   bin/sbx-file-login                                    # device flow
 #   printf %s "$PAT" | bin/sbx-file-login --username <user> --password-stdin
 #
-# Arguments are passed to `sbx login`. A password never goes on the command
-# line (ps, /proc and `docker inspect` would show it), and --password-stdin
-# needs a pipe: typed at a terminal, the token would echo.
+# Arguments are passed to `sbx login`, and only these: --username <name>,
+# --password-stdin, -h/--help. Anything else is refused WITHOUT echoing it:
+# a token on the command line (ps, /proc, `docker inspect` would show it) can
+# hide in any form (-p<token>, a bare word), and -D debug output may print
+# auth. --password-stdin needs a pipe: typed at a terminal, the token echoes.
 set -euo pipefail
 
+usage='usage: sbx-file-login [--username <name> --password-stdin]   (token on stdin, from a pipe)'
+expect_name=0
 for a in "$@"; do
+  if [ "$expect_name" = 1 ]; then expect_name=0; continue; fi
   case "$a" in
-    -p|--password|--password=*)
-      echo "sbx-file-login: no password on the command line; pipe it with --password-stdin, or use the device flow" >&2
-      exit 2 ;;
+    --username) expect_name=1 ;;
+    --username=?*) ;;
+    -h|--help) ;;
     --password-stdin)
       if [ -t 0 ]; then
-        echo "sbx-file-login: --password-stdin reads a pipe, not a terminal (a typed token would echo): printf %s \"\$PAT\" | $0 $*" >&2
+        echo "sbx-file-login: --password-stdin reads a pipe, not a terminal (a typed token would echo)" >&2
+        echo "$usage" >&2
         exit 2
       fi ;;
+    *)
+      echo "sbx-file-login: refused an argument (not shown: it may be a token); only --username, --password-stdin and --help are passed to sbx login" >&2
+      echo "$usage" >&2
+      exit 2 ;;
   esac
 done
+if [ "$expect_name" = 1 ]; then echo "sbx-file-login: --username needs a name" >&2; exit 2; fi
 
 SBX=$(command -v sbx 2>/dev/null || true)
 [ -n "$SBX" ] || { echo "sbx-file-login: no sbx on PATH" >&2; exit 2; }
