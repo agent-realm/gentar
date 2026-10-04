@@ -30,6 +30,7 @@ job to do. Use the reference when you need every detail of one part.
 | [End-to-end runner](reference/runner.md) | compose stack, benches, scenarios, the exit-code contract, `bin/arena` |
 | [Reviver](reference/reviver.md) | the run report and the fix loop |
 | [Pilot simulator](reference/pilot-simulator.md) | driver turns, the danger gate, credentials, semantic turns, goal pilots, rates, soft judgments |
+| [Drillers](reference/drillers.md) | persona agents with no target: the boundary, typed findings, frequency (core only, not runnable yet) |
 | [Telemetry](reference/telemetry.md) | what leaves the arena, and how it is scrubbed |
 | [Scenario inventory](reference/scenario-inventory.md) | the engine's own suites and what each proves |
 | [CI and releases](reference/ci-and-releases.md) | the engine's own workflow tiers, guards and release procedure |
