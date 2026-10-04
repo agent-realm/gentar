@@ -31,6 +31,7 @@ pty_spawn_args. ``make_bench(cfg, kind)`` is the factory.
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -44,6 +45,60 @@ from gentar.config import Config
 
 class BenchHostError(RuntimeError):
     pass
+
+
+# Credential SHAPES, masked in bench-host output before it becomes an error.
+# The run's redaction is value-based (it masks what the run knows), and the
+# host's sbx login is in no variable the run knows; an error text reaches the
+# CI log, the report artifact and the spans, so a token sbx ever printed
+# would go everywhere. Shapes, not values: a false positive costs a word.
+_Q = r"""["']"""     # either quote: JSON and Python reprs both reach error text
+_TOKEN_KEYS = (r"access_token|refresh_token|id_token|identity_?token|registry_?token|"
+               r"token|auth|password|passwd|secret|client_secret|api_?key|authorization|"
+               r"x-registry-auth")
+_TOKEN_SHAPES = [
+    # "key": "value" / 'key': 'value' (JSON, Python dicts; escaped quotes kept inside)
+    (re.compile(rf"(?i)({_Q}(?:{_TOKEN_KEYS}){_Q}\s*:\s*)(\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')"), "field"),
+    # header lines: Authorization / Proxy-Authorization / X-Registry-Auth, any scheme
+    (re.compile(r"(?i)\b((?:proxy-)?authorization|x-registry-auth)(\s*[:=]\s*)[^\"'\r\n]+"), "header"),
+    # key=value in URLs, query strings, env dumps
+    (re.compile(rf"(?i)\b((?:{_TOKEN_KEYS})=)[^&\s\"']+"), "kv"),
+    # user:password@ in a URL
+    (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://[^\s/:@]+:)[^\s/@]+@"), "url"),
+    (re.compile(r"\bdckr_(?:pat|oat)_[A-Za-z0-9_-]{8,}"), "docker-token"),
+    # JWT (3 parts) and JWE (5 parts); a payload can be as short as "e30" ({})
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{4,}(?:\.[A-Za-z0-9_-]{2,}){1,4}"), "jwt"),
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"), "github-token"),
+    (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}"), "scheme"),
+    # legacy Docker Hub access tokens are bare UUIDs; a UUID in an error costs a word
+    (re.compile(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"), "uuid"),
+]
+
+
+def mask_token_shapes(text: str) -> str:
+    for rx, kind in _TOKEN_SHAPES:
+        if kind == "field":
+            text = rx.sub(lambda m: f'{m.group(1)}"[redacted]"', text)
+        elif kind == "header":
+            text = rx.sub(lambda m: f"{m.group(1)}{m.group(2)}[redacted:authorization]", text)
+        elif kind in ("kv", "url"):
+            text = rx.sub(lambda m: f"{m.group(1)}[redacted]" + ("@" if kind == "url" else ""), text)
+        elif kind == "scheme":
+            text = rx.sub(lambda m: f"{m.group(1)} [redacted:authorization]", text)
+        else:
+            text = rx.sub(f"[redacted:{kind}]", text)
+    return text
+
+
+def clip(text: str, head: int = 120, tail: int = 400) -> str:
+    """Shorten command output for an error message, keeping both ends, with
+    credential shapes masked. sbx prints its progress first and the reason
+    last ("ERROR: ..."), so a head-only cut hid every create failure behind
+    "PREPARE IMAGE"."""
+    text = mask_token_shapes(text.strip())
+    if len(text) <= head + tail + 5:
+        return text
+    return f"{text[:head]} … {text[-tail:]}"
 
 
 class BenchHost:
@@ -86,11 +141,11 @@ class BenchHost:
                            and "ssh" in proc.stderr.lower())
         if transport_error:
             raise BenchHostError(
-                f"ssh transport error: {proc.stderr.strip()[:400]}")
+                f"ssh transport error: {clip(proc.stderr)}")
         if strict and proc.returncode != 0:
             raise BenchHostError(
                 f"remote failed rc={proc.returncode}: "
-                f"{(proc.stdout + proc.stderr).strip()[:400]}")
+                f"{clip(proc.stdout + proc.stderr)}")
         return proc
 
     # -- interface (subclass responsibility) -------------------------------
@@ -272,7 +327,7 @@ class SbxBenchHost(BenchHost):
         )
         if ssh.returncode != 0:
             raise BenchHostError(
-                f"push to {remote_dir} failed: {ssh.stderr.decode()[:400]}")
+                f"push to {remote_dir} failed: {clip(ssh.stderr.decode())}")
 
     def rm(self, name: str) -> None:
         # Never raises: teardown must not mask the real verdict.
@@ -416,7 +471,7 @@ class TartBenchHost(BenchHost):
         )
         if ssh.returncode != 0:
             raise BenchHostError(
-                f"push to {remote_dir} failed: {ssh.stderr.decode()[:400]}")
+                f"push to {remote_dir} failed: {clip(ssh.stderr.decode())}")
 
     def rm(self, name: str) -> None:
         # Never raises: teardown must not mask the real verdict.
@@ -673,7 +728,7 @@ class DaytonaBenchHost(BenchHost):
         )
         if ssh.returncode != 0:
             raise BenchHostError(
-                f"push to {remote_dir} failed: {ssh.stderr.decode()[:400]}")
+                f"push to {remote_dir} failed: {clip(ssh.stderr.decode())}")
 
     def rm(self, name: str) -> None:
         # Never raises: teardown must not mask the real verdict.
