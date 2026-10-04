@@ -22,6 +22,16 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Added
+- **`[scenario] bench_only = "<why>"`** for a suite only a bench can prove
+  (it deploys a service through the bench's Docker, say). The bench-free
+  dry-run reports it `UNVERIFIED (bench only: <why>)` without running or
+  preparing it; phase 1 accepts that, a plain dry-run does not, and the
+  arena runs it as before. `GENTAR_DRYRUN_BENCH_ONLY=run` runs it on a host
+  that has what it needs. Found by memhouse's adoption review: its house
+  suite's verify commands ran in the dry-run without the house and turned
+  every memhouse pull request red.
+
 ## 0.9.2 — 2026-10-04
 
 ### Fixed

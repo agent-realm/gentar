@@ -18,7 +18,8 @@ the isolation. Suites declaring `credentials` are skipped -- they need a real
 agent and a real key. Suites whose [driver] uses `pick` or `abort` turns, a judged `expect`, or a
 goal pilot come back UNVERIFIED with a nonzero exit: those turns need the real driver, and a
 picker that never matched or a danger gate that never fired must not read as
-a pass.
+a pass. A suite with `bench_only = "<why>"` in [scenario] is UNVERIFIED too,
+with its reason, and is not run (GENTAR_DRYRUN_BENCH_ONLY=run runs it).
 
 The adaptations live in gentar/hooks.py (yours; this file is the kit's):
 
@@ -482,6 +483,15 @@ def needs_prepare(path: Path) -> bool:
     return any(s in step for step in steps for s in SKIP_STEP_SUBSTR)
 
 
+def bench_only_of(path: Path) -> str:
+    """The suite's bench_only reason, or "" (a parse error is run_one's to
+    report)."""
+    try:
+        return TomlScenario(path).bench_only.strip()
+    except Exception:
+        return ""
+
+
 def template_of(path: Path):
     """The suite's template, or None when there is nothing to stage for:
     no template, a parse error (run_one reports it), or a suite declaring
@@ -526,6 +536,17 @@ def main() -> int:
         # step and needs your toolchain. The SUITE then runs sealed.
         env = dict(os.environ, HOME=home, WORKSPACE_DIR=workspace,
                    PATH=f"{bindir}:" + os.environ["PATH"])
+        # A suite only a bench can prove says so, with its reason: reported
+        # UNVERIFIED (phase 1 accepts that; a plain dry-run does not), and
+        # never prepared or run here. GENTAR_DRYRUN_BENCH_ONLY=run runs it
+        # anyway, on a host that has what its reason names.
+        why = bench_only_of(p)
+        if why and os.environ.get("GENTAR_DRYRUN_BENCH_ONLY") != "run":
+            print(f"{p.name}: UNVERIFIED (bench only: {why})")
+            if os.environ.get("GENTAR_DRYRUN_UNVERIFIED") != "ok":
+                fails += 1
+            shutil.rmtree(home, ignore_errors=True)
+            continue
         if needs_prepare(p):
             prepare(env)
         # A suite whose bench template supplies tools this host lacks: the
