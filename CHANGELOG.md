@@ -22,6 +22,8 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.9.2 — 2026-10-04
+
 ### Fixed
 - **A subject's own suite now wins over the engine's copy of the same
   name.** The coordinator searched the engine's baked scenarios before the
