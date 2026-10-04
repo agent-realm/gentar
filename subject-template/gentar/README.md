@@ -204,14 +204,16 @@ workflow's first job asks it what this event should run.
 
 | Event | Runs |
 |---|---|
-| pull request | **phase 1**: bench-free checks on GitHub-hosted runners — `ubuntu-latest`, plus `macos-latest` if `[phase1] os` lists it — or on the self-hosted runner `GENTAR_CI_RUNNER` names (below) (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
+| pull request | **phase 1**: bench-free checks on GitHub-hosted runners — `ubuntu-latest`, plus `macos-latest` if `[phase1] os` lists it — or on the self-hosted runner `GENTAR_CI_RUNNER` names (below; with it set, **only same-repository PRs** get checks, and a fork's PR gets none: an all-skipped run is not a passed phase 1) (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
 | push to the default branch | **phase 1**: the checks, plus `[phase1] floor` on the bench |
 | dispatch (no suites; on any ref, a release tag included: a drift run), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
 | `arena-<suite>` tag, or a dispatch naming suites | exactly those suites (`arena / targeted`; never counts as phase 2) |
 | `v*` tag pushed | nothing — a release is **gated** on a green phase 2 of its commit (below), not tested after it |
 
 A fork's pull request never reaches the self-hosted runner, whatever the
-policy says: the bench job checks that from GitHub's own context. Try any
+policy says: the bench job checks that from GitHub's own context. With
+`GENTAR_CI_RUNNER` set, a fork's PR skips even `plan` and the checks, so
+its run shows every job skipped: that is "not checked", never "passed". Try any
 event locally:
 
 ```bash
@@ -356,7 +358,12 @@ runner labeled `arena` with Docker + reach to the bench-host.
 organisation variable `GENTAR_CI_RUNNER` to a JSON runs-on value, e.g.
 `["self-hosted", "linux-ci"]`, and `plan` and `checks` run there instead
 (the plan output's `runner=` line says where). It needs `git`, `python3`
-and `bash`, plus `gh` for the release gate below. Three things change with it set:
+and `bash`, plus `gh` for the release gate below. **On GitHub Free, an
+organisation variable reaches public repositories only:** a private
+repository needs it set as a repository variable, or the workflow never
+sees it and falls back to `ubuntu-latest` (found by cockpit, 2026-09-30).
+Check the plan output's `runner=` line after setting it. Three things
+change with it set:
 
 - a **fork's** pull request runs nothing at all, not even the checks: its
   code never reaches a self-hosted runner;
@@ -388,6 +395,16 @@ Secrets/vars the workflow reads:
 - `vars.GENTAR_BUDGET_CAP` — ceiling the budget guard enforces (default 50000)
 - `vars.GENTAR_CLICKHOUSE_HOST_PORT`, `vars.GENTAR_OTLP_HOST_PORT` — move the
   arena's host ports when another arena shares the runner's Docker host
+- `secrets.GENTAR_OTLP_EXPORT`, `secrets.GENTAR_OTLP_KEY` — a telemetry
+  destination, both or neither (above)
+- `secrets.TYPESAFE_API_KEY` — the judge, for judged suites (semantic turns,
+  goal pilots, soft checks). **Unset, phase 2's `--sweep` skips every judged
+  suite by name** and can come out green without having run them: read the
+  run's `skipping … TYPESAFE_API_KEY is not set` lines before trusting it
+- `vars.GENTAR_CI_RUNNER` — run `plan` and `checks` on a self-hosted runner
+  (above); a repository variable on GitHub Free
+- `vars.GENTAR_FLOOR` — the floor suites, read only when there is no
+  `gentar/policy.toml` (the 0.3.x behaviour)
 
 The three bench values are required; the workflow refuses with a named error
 before staging anything if one is missing or still the placeholder. Everything

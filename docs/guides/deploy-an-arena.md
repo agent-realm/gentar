@@ -70,7 +70,7 @@ self-hosted one (section 3); that runner needs `git`, `python3` and
 | `TYPESAFE_API_KEY` | secret | the repository has judged suites (semantic turns, goal pilots, soft checks); unset, they are skipped by name |
 | `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` | secret / variable | agent-in-the-loop suites only |
 | `GENTAR_CLICKHOUSE_HOST_PORT`, `GENTAR_OTLP_HOST_PORT` | variables | another arena already uses the default ports on the runner machine |
-| `GENTAR_CI_RUNNER` | variable (repository or organisation) | the `plan` and `checks` jobs should run on a self-hosted runner instead of GitHub-hosted ones: a JSON runs-on value such as `["self-hosted", "linux-ci"]`, never mentioning `arena` in any case (such a run fails before anything is scheduled). Fork PRs then run nothing |
+| `GENTAR_CI_RUNNER` | variable (repository, or organisation; On GitHub Free, an organisation variable reaches public repositories only: set it on each private repository) | the `plan` and `checks` jobs should run on a self-hosted runner instead of GitHub-hosted ones: a JSON runs-on value such as `["self-hosted", "linux-ci"]`, never mentioning `arena` in any case (such a run fails before anything is scheduled). Fork PRs then run nothing |
 
 The bench-host values are **secrets, not variables**, because a public
 repository's Actions logs are public. Set every secret from a reference,
