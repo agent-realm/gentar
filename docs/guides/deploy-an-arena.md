@@ -26,7 +26,9 @@ Check: `ssh <user>@<host> sbx ls` works with that key.
 
 **A headless host with a session bus keeps the sbx login in gnome-keyring.**
 Nobody is there to unlock it, so the host needs three pieces (arf VM 142 has
-all three; a clone of it has them too):
+all three; a clone of it has them too). This auto-unlock pattern is for
+disposable test benches only, never a production host: the keyring password
+sits in a file next to the keyring it unlocks.
 
 1. A user unit that starts the keyring UNLOCKED, e.g.
    `~/.config/systemd/user/gnome-keyring.service` with
