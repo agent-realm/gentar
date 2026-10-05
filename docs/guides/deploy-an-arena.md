@@ -24,6 +24,41 @@ Any Linux machine reachable over SSH.
 
 Check: `ssh <user>@<host> sbx ls` works with that key.
 
+**A headless host with a session bus keeps the sbx login in gnome-keyring.**
+Nobody is there to unlock it, so the host needs three pieces (arf VM 142 has
+all three; a clone of it has them too):
+
+1. A user unit that starts the keyring UNLOCKED, e.g.
+   `~/.config/systemd/user/gnome-keyring.service` with
+   `ExecStart=/bin/sh -c "exec /usr/bin/gnome-keyring-daemon --foreground --components=secrets --unlock < $HOME/.keyring-pass"`
+   (the password file is mode 600, readable by that user only).
+2. A drop-in that brings it back after a crash:
+   `ExecStartPre=-/usr/bin/pkill -x gnome-keyring-d`, `Restart=always`,
+   `RestartSec=3`. gnome-keyring 46.1 crashed 14 times in 30 days on VM 142
+   (a GLib assertion when a client leaves during a session handshake).
+3. A D-Bus override, so that a client asking for the secrets service in
+   the 3-second restart gap starts THAT unit and waits for it, instead of
+   D-Bus starting the stock, LOCKED daemon, whose unlock prompt cannot
+   appear headless (sbx: "prompt dismissed", then `401 Unauthorized`; one
+   suite failed that way on 2026-10-05). In
+   `~/.local/share/dbus-1/services/org.freedesktop.secrets.service`:
+
+       [D-BUS Service]
+       Name=org.freedesktop.secrets
+       Exec=/bin/false
+       SystemdService=gnome-keyring.service
+
+   It needs a session bus with systemd activation (`dbus-daemon
+   --systemd-activation`, or dbus-broker). Leave the stock file under
+   `/usr/share` alone. Rollback: delete the override. Check: stop the
+   unit, call the service (`busctl --user call org.freedesktop.secrets
+   /org/freedesktop/secrets org.freedesktop.DBus.Peer Ping`), and the
+   journal says `Activating via systemd: ... unit='gnome-keyring.service'`
+   with no `gcr-prompter` line.
+
+Local bench mode reads a FILE login instead (below), so its coordinator never
+touches the keyring; the host's own `sbx` (ssh mode, `sbx daemon`) still does.
+
 **When the runner IS the bench host (local bench mode).** Put the runner
 (section 2) on the bench host itself and set `GENTAR_BENCH_HOST=local`, a
 plain repository variable: no SSH account, no key, no `BENCH_SSH_KEY`,
