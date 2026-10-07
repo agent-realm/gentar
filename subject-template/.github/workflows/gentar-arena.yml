@@ -135,6 +135,11 @@ jobs:
       # arena's lock and bench workspaces use fixed /tmp paths on purpose.
       - name: temp files into the job's temp dir
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      # A cancelled job can leave its key files behind in RUNNER_TEMP on a
+      # self-hosted runner (the runner does not always empty it). Start
+      # without them; the always() step at the end removes this job's own.
+      - name: remove stale key files
+        run: rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"
       - uses: actions/checkout@v4
       # Toolchains the dry-run's prepare() needs, declared in the policy
       # ([phase1] setup); anything else goes in gentar/phase1-setup.sh.
@@ -173,7 +178,7 @@ jobs:
           # it. A fork's PR gets no secrets; run.sh then names the skip
           # rather than passing silently.
           if [ -n "$CLONE_KEY" ]; then
-            printf '%s\n' "$CLONE_KEY" > "$RUNNER_TEMP/gentar_clone_key"
+            (umask 077; printf '%s\n' "$CLONE_KEY" > "$RUNNER_TEMP/gentar_clone_key")
             chmod 600 "$RUNNER_TEMP/gentar_clone_key"
             export GENTAR_CLONE_SSH_KEY="$RUNNER_TEMP/gentar_clone_key"
           fi
@@ -187,6 +192,12 @@ jobs:
           # on PRs and tags without editing a kit file; delete it after.
           GENTAR_REF: ${{ github.event.inputs.gentar_ref || vars.GENTAR_REF }}
           GENTAR_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+
+      - name: remove key files
+        # Last, and always (cancellation included): a key must not outlive
+        # its job on a self-hosted runner. Nothing slow runs before it here.
+        if: always()
+        run: rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"
 
   bench:
     name: arena / ${{ needs.plan.outputs.bench }}
@@ -229,6 +240,11 @@ jobs:
       # arena's lock and bench workspaces use fixed /tmp paths on purpose.
       - name: temp files into the job's temp dir
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      # A cancelled job can leave its key files behind in RUNNER_TEMP on a
+      # self-hosted runner (the runner does not always empty it). Start
+      # without them; the always() step at the end removes this job's own.
+      - name: remove stale key files
+        run: rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # .gentar-version floats via git describe
@@ -257,11 +273,11 @@ jobs:
                 exit 2 ;;
             esac
           done
-          printf '%s\n' "$BENCH_KEY" > "$RUNNER_TEMP/bench_key"
+          (umask 077; printf '%s\n' "$BENCH_KEY" > "$RUNNER_TEMP/bench_key")
           chmod 600 "$RUNNER_TEMP/bench_key"
           fi
           if [ -n "$CLONE_KEY" ]; then
-            printf '%s\n' "$CLONE_KEY" > "$RUNNER_TEMP/gentar_clone_key"
+            (umask 077; printf '%s\n' "$CLONE_KEY" > "$RUNNER_TEMP/gentar_clone_key")
             chmod 600 "$RUNNER_TEMP/gentar_clone_key"
           fi
         env:
@@ -310,6 +326,46 @@ jobs:
           # declared [budget] tokens. A repository variable overrides it.
           GENTAR_BUDGET_CAP: ${{ vars.GENTAR_BUDGET_CAP || '50000' }}
 
+      - name: remove the clone key
+        # Nothing after the suites needs it (teardown uses the engine already
+        # staged), so it goes before any step that can be slow.
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gentar_clone_key"
+
+      - name: teardown
+        # Frees this repo's arena and removes this job's stranded bench
+        # sandboxes (by GENTAR_NAME_PREFIX). Leaves the arena alone while
+        # another run of this repo holds the host lock — it is theirs.
+        # The bench key goes with this step however it ends (done, failed,
+        # or stopped by a cancellation): GitHub gives a cancelled run's
+        # always() steps five minutes in all, so a later step cannot be
+        # trusted to run. The timeout keeps a hung bench host from using
+        # them up; the reports upload comes after.
+        if: always()
+        run: |
+          # In the background with `wait`: a trapped signal interrupts `wait`
+          # at once, while a foreground child would hold the trap back until
+          # the runner's SIGKILL, a few seconds after its first signal.
+          # On a signal the teardown itself is stopped too; `timeout -k`
+          # also kills a run.sh that ignores TERM, and a runner without
+          # `timeout` (stock macOS) still tears down.
+          pid=
+          keys_gone() { rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"; }
+          on_signal() { if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi; keys_gone; exit "$1"; }
+          trap keys_gone EXIT
+          trap 'on_signal 130' INT
+          trap 'on_signal 143' TERM
+          if command -v timeout >/dev/null 2>&1; then
+            timeout -k 10 180 gentar/run.sh --down & pid=$!
+          else
+            gentar/run.sh --down & pid=$!
+          fi
+          wait "$pid" || true
+        env:
+          GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
+
       - name: upload reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -318,13 +374,9 @@ jobs:
           path: gentar/reports/
           if-no-files-found: error
 
-      - name: teardown
-        # Frees this repo's arena and removes this job's stranded bench
-        # sandboxes (by GENTAR_NAME_PREFIX). Leaves the arena alone while
-        # another run of this repo holds the host lock — it is theirs.
+      - name: remove key files
+        # A backstop, always (cancellation included): a key must not outlive
+        # its job on a self-hosted runner. The teardown's trap normally
+        # removed both already.
         if: always()
-        run: gentar/run.sh --down || true
-        env:
-          GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
-          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
-          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
+        run: rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"
