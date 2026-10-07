@@ -195,7 +195,7 @@ jobs:
 
       - name: remove key files
         # Last, and always (cancellation included): a key must not outlive
-        # its job on a self-hosted runner. After teardown, which still uses it.
+        # its job on a self-hosted runner. Nothing slow runs before it here.
         if: always()
         run: rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"
 
@@ -326,6 +326,36 @@ jobs:
           # declared [budget] tokens. A repository variable overrides it.
           GENTAR_BUDGET_CAP: ${{ vars.GENTAR_BUDGET_CAP || '50000' }}
 
+      - name: remove the clone key
+        # Nothing after the suites needs it (teardown uses the engine already
+        # staged), so it goes before any step that can be slow.
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gentar_clone_key"
+
+      - name: teardown
+        # Frees this repo's arena and removes this job's stranded bench
+        # sandboxes (by GENTAR_NAME_PREFIX). Leaves the arena alone while
+        # another run of this repo holds the host lock — it is theirs.
+        # The bench key goes with this step however it ends (done, failed,
+        # or stopped by a cancellation): GitHub gives a cancelled run's
+        # always() steps five minutes in all, so a later step cannot be
+        # trusted to run. The timeout keeps a hung bench host from using
+        # them up; the reports upload comes after.
+        if: always()
+        run: |
+          # In the background with `wait`: a trapped signal interrupts `wait`
+          # at once, while a foreground child would hold the trap back until
+          # the runner's SIGKILL, a few seconds after its first signal.
+          keys_gone() { rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"; }
+          trap keys_gone EXIT
+          trap 'keys_gone; exit 143' INT TERM
+          timeout 180 gentar/run.sh --down &
+          wait $! || true
+        env:
+          GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
+
       - name: upload reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -334,19 +364,9 @@ jobs:
           path: gentar/reports/
           if-no-files-found: error
 
-      - name: teardown
-        # Frees this repo's arena and removes this job's stranded bench
-        # sandboxes (by GENTAR_NAME_PREFIX). Leaves the arena alone while
-        # another run of this repo holds the host lock — it is theirs.
-        if: always()
-        run: gentar/run.sh --down || true
-        env:
-          GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
-          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
-          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
-
       - name: remove key files
-        # Last, and always (cancellation included): a key must not outlive
-        # its job on a self-hosted runner. After teardown, which still uses it.
+        # A backstop, always (cancellation included): a key must not outlive
+        # its job on a self-hosted runner. The teardown's trap normally
+        # removed both already.
         if: always()
         run: rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"
