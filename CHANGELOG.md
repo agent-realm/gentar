@@ -32,6 +32,15 @@ Adopters pin a release tag, not a branch.
   suite's verify commands ran in the dry-run without the house and turned
   every memhouse pull request red.
 
+### Fixed
+- **The kit's CI jobs keep temp files in the job's own temp dir.** `plan`,
+  `checks` and `bench` (the jobs that can run on a self-hosted runner) start
+  by pointing `TMPDIR` at `$RUNNER_TEMP`, which the runner empties after every
+  job. On a self-hosted runner `/tmp` is shared and never cleaned: a failing
+  dry-run keeps its scratch homes there, and a suite's own `mktemp` steps add
+  more (a runner LXC's tmpfs once filled with 7.4 GB of leaked test dirs).
+  The arena's lock and bench workspaces keep their fixed `/tmp` paths.
+
 ## 0.9.2 — 2026-10-04
 
 ### Fixed
