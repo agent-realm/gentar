@@ -483,13 +483,24 @@ def needs_prepare(path: Path) -> bool:
     return any(s in step for step in steps for s in SKIP_STEP_SUBSTR)
 
 
-def bench_only_of(path: Path) -> str:
-    """The suite's bench_only reason, or "" (a parse error is run_one's to
-    report)."""
+def bench_only_of(path: Path):
+    """(declared, reason), read straight from the TOML before the full
+    schema check: a bench-only suite with an unrelated schema error must
+    still never be prepared (Codex on #68). A file that is not TOML at all
+    cannot say anything; run_one reports it."""
     try:
-        return TomlScenario(path).bench_only.strip()
+        try:
+            import tomllib
+        except ModuleNotFoundError:
+            import tomli as tomllib
+        with open(path, "rb") as fh:
+            sc = tomllib.load(fh).get("scenario") or {}
     except Exception:
-        return ""
+        return False, ""
+    if not isinstance(sc, dict) or "bench_only" not in sc:
+        return False, ""
+    v = sc["bench_only"]
+    return True, (v.strip() if isinstance(v, str) else "")
 
 
 def template_of(path: Path):
@@ -540,8 +551,18 @@ def main() -> int:
         # UNVERIFIED (phase 1 accepts that; a plain dry-run does not), and
         # never prepared or run here. GENTAR_DRYRUN_BENCH_ONLY=run runs it
         # anyway, on a host that has what its reason names.
-        why = bench_only_of(p)
-        if why and os.environ.get("GENTAR_DRYRUN_BENCH_ONLY") != "run":
+        declared, why = bench_only_of(p)
+        if declared and os.environ.get("GENTAR_DRYRUN_BENCH_ONLY") != "run":
+            # It must still parse: a schema error, or an empty reason, is a
+            # FAILURE here, never "unverified", or a broken suite would pass
+            # phase 1 behind the key.
+            try:
+                TomlScenario(p)
+            except Exception as exc:
+                print(f"{p.name}: FAILURE (bench only, but the scenario does not parse: {exc})")
+                fails += 1
+                shutil.rmtree(home, ignore_errors=True)
+                continue
             print(f"{p.name}: UNVERIFIED (bench only: {why})")
             if os.environ.get("GENTAR_DRYRUN_UNVERIFIED") != "ok":
                 fails += 1

@@ -8,9 +8,7 @@ suites' own mktemp steps leak, so the jobs that can run self-hosted point
 TMPDIR at RUNNER_TEMP first.
 """
 
-import os
-import subprocess
-import sys
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,19 +21,47 @@ WORKFLOW = KIT.parent / ".github" / "workflows" / "gentar-arena.yml"
 @unittest.skipUnless(WORKFLOW.exists(), "the kit is not in the image build context")
 class WorkflowTest(unittest.TestCase):
 
+    @staticmethod
+    def jobs():
+        """{job: (runs-on text, first step's lines)}, read from the YAML
+        text: no PyYAML (it is not a coordinator dependency), so the test
+        runs on any checkout (Codex on #68)."""
+        out, job, runs_on, first, dashes, in_jobs = {}, None, "", None, 0, False
+        def close():
+            if job:
+                out[job] = (runs_on, first or [])
+        for line in WORKFLOW.read_text().splitlines():
+            if line.rstrip() == "jobs:":
+                in_jobs = True
+                continue
+            if not in_jobs or line.strip().startswith("#"):
+                continue
+            m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+            if m:
+                close()
+                job, runs_on, first, dashes = m.group(1), "", None, 0
+                continue
+            if line.startswith("    runs-on:"):
+                runs_on = line.split(":", 1)[1].strip()
+            elif line.rstrip() == "    steps:":
+                first = []
+            elif first is not None:
+                if line.startswith("      - "):
+                    dashes += 1
+                if dashes == 1 and line.startswith("      "):
+                    first.append(line.strip().lstrip("- ").strip())
+        close()
+        return out
+
     def test_every_job_that_can_run_self_hosted_sets_tmpdir_first(self):
-        try:
-            import yaml
-        except ImportError:
-            self.skipTest("pyyaml not installed")
-        jobs = yaml.safe_load(WORKFLOW.read_text())["jobs"]
-        can_self_host = [j for j, d in jobs.items()
-                         if "self-hosted" in str(d.get("runs-on")) or "GENTAR_CI_RUNNER" in str(d.get("runs-on"))]
-        self.assertEqual(sorted(can_self_host), ["bench", "checks", "plan"])
+        jobs = self.jobs()
+        can_self_host = sorted(j for j, (r, _) in jobs.items()
+                               if "self-hosted" in r or "GENTAR_CI_RUNNER" in r)
+        self.assertEqual(can_self_host, ["bench", "checks", "plan"])
         for j in can_self_host:
             with self.subTest(job=j):
-                first = jobs[j]["steps"][0]
-                self.assertEqual(first.get("run", "").strip(), 'echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"')
+                first = jobs[j][1]
+                self.assertIn('run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"', first, first)
 
     def test_the_arena_lock_and_bench_root_stay_fixed_paths(self):
         run = (KIT / "run.sh").read_text()

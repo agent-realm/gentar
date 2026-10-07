@@ -89,5 +89,27 @@ class DryrunBenchOnlyTest(_ScratchAdoption):
         self.assertIn("broken.toml", r.stdout)
 
 
+    def test_a_bench_only_suite_with_another_schema_error_fails_unprepared(self):
+        # Codex on #68: a later schema error made the suite look not
+        # bench-only, so prepare() ran for it. Now: never prepared, and a
+        # FAILURE (not UNVERIFIED) even under phase 1.
+        broken = HEAVY.replace('[[verify.commands]]\ncommand = "test -f \\"$HOME/ran\\" && echo ran"\n',
+                               '[[verify.commands]]\n')                  # a command entry without `command`
+        self.assertNotEqual(broken, HEAVY)
+        (self.repo / "gentar" / "scenarios" / "heavy.toml").write_text(broken)
+        r = self.dryrun(GENTAR_DRYRUN_UNVERIFIED="ok")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("heavy.toml: FAILURE (bench only, but the scenario does not parse", r.stdout)
+        self.assertNotIn("heavy.toml: UNVERIFIED", r.stdout)
+        self.assertEqual(self.prepared_for(), 1)              # light only
+
+    def test_an_empty_reason_fails_unprepared(self):
+        (self.repo / "gentar" / "scenarios" / "heavy.toml").write_text(
+            HEAVY.replace('bench_only = "deploys a ClickHouse through the bench\'s Docker"', 'bench_only = ""'))
+        r = self.dryrun(GENTAR_DRYRUN_UNVERIFIED="ok")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("heavy.toml: FAILURE (bench only", r.stdout)
+        self.assertEqual(self.prepared_for(), 1)
+
 if __name__ == "__main__":
     unittest.main()
