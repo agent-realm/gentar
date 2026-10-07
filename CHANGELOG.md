@@ -22,6 +22,10 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.9.3 — 2026-10-07
+
+Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed and why, upgrade, the lifted `--check` guard, the `/tmp/dryrun-home-*` cleanup, known limits).
+
 ### Added
 - **`[scenario] bench_only = "<why>"`** for a suite only a bench can prove
   (it deploys a service through the bench's Docker, say). The bench-free
