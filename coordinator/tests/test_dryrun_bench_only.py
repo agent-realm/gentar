@@ -139,5 +139,15 @@ class DryrunBenchOnlyTest(_ScratchAdoption):
         self.assertIn("light.toml: ALL PASS", r.stdout)     # the sweep went on
         self.assertEqual(self.prepared_for(), 1)
 
+    def test_a_suite_that_does_not_parse_is_never_prepared(self):
+        # agy's third look: an empty file is readable TOML with no
+        # [scenario]; it fails, so it must not be prepared either.
+        (self.repo / "gentar" / "scenarios" / "heavy.toml").write_text("")
+        r = self.dryrun(GENTAR_DRYRUN_UNVERIFIED="ok")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("heavy.toml: FAILURE (does not parse", r.stdout)
+        self.assertIn("light.toml: ALL PASS", r.stdout)
+        self.assertEqual(self.prepared_for(), 1)
+
 if __name__ == "__main__":
     unittest.main()

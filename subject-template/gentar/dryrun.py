@@ -582,9 +582,15 @@ def main() -> int:
                 fails += 1
             shutil.rmtree(home, ignore_errors=True)
             continue
-        # Not TOML, or no [scenario] table: run_one fails it whatever it
-        # declares, so nothing is prepared for it.
-        if readable and needs_prepare(p):
+        # A suite that does not parse (not TOML, no usable [scenario], a
+        # schema error) fails in run_one whatever it declares, so nothing is
+        # prepared for it (agy on #68).
+        try:
+            TomlScenario(p)
+            parses = True
+        except Exception:
+            parses = False
+        if readable and parses and needs_prepare(p):
             prepare(env)
         # A suite whose bench template supplies tools this host lacks: the
         # repo declares the template in hooks.TEMPLATES, with a stager that
