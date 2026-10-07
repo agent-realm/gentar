@@ -95,7 +95,10 @@ class SweepSummaryTest(unittest.TestCase):
             base + 'data = "synthetic"\n[driver]\ncommand = "bash"\n'
             '[[driver.turns]]\ntype = "expect"\njudge = { question = "q?", p_min = 0.8, hold = 2 }\n')
         e = dict(os.environ, GENTAR_REPO_URL=str(tmp / "no-engine"), **env)
-        for k in ("TYPESAFE_API_KEY", "GITHUB_EVENT_NAME", "CI"):
+        # GITHUB_ACTIONS too: under Actions, run.sh rightly prints the
+        # ::warning annotation, and this test asserts the plain-shell case
+        # (it only passed in the image build; the unit-checkout job ran it).
+        for k in ("TYPESAFE_API_KEY", "GITHUB_EVENT_NAME", "CI", "GITHUB_ACTIONS"):
             e.pop(k, None)
         e.update(env)
         return subprocess.run(["/bin/bash", "gentar/run.sh", "--sweep"], cwd=repo, env=e,
