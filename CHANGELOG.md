@@ -22,6 +22,15 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Fixed
+- **The kit's CI jobs do not leave SSH keys behind on a self-hosted runner.**
+  `checks` and `bench` write `bench_key` and `gentar_clone_key` under
+  `umask 077` (never readable by others, not even for a moment), remove stale
+  ones when they start, and remove their own in a last `if: always()` step
+  (cancellation included; in `bench` after teardown, which still needs the
+  key). A self-hosted runner does not always empty `RUNNER_TEMP` when a job
+  is cancelled.
+
 ## 0.9.3 — 2026-10-08
 
 Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed and why, upgrade, the lifted `--check` guard, the `/tmp/dryrun-home-*` cleanup, known limits).
