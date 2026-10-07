@@ -22,6 +22,25 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Added
+- **`[scenario] bench_only = "<why>"`** for a suite only a bench can prove
+  (it deploys a service through the bench's Docker, say). The bench-free
+  dry-run reports it `UNVERIFIED (bench only: <why>)` without running or
+  preparing it; phase 1 accepts that, a plain dry-run does not, and the
+  arena runs it as before. `GENTAR_DRYRUN_BENCH_ONLY=run` runs it on a host
+  that has what it needs. Found by memhouse's adoption review: its house
+  suite's verify commands ran in the dry-run without the house and turned
+  every memhouse pull request red.
+
+### Fixed
+- **The kit's CI jobs keep temp files in the job's own temp dir.** `plan`,
+  `checks` and `bench` (the jobs that can run on a self-hosted runner) start
+  by pointing `TMPDIR` at `$RUNNER_TEMP`, which the runner empties after every
+  job. On a self-hosted runner `/tmp` is shared and never cleaned: a failing
+  dry-run keeps its scratch homes there, and a suite's own `mktemp` steps add
+  more (a runner LXC's tmpfs once filled with 7.4 GB of leaked test dirs).
+  The arena's lock and bench workspaces keep their fixed `/tmp` paths.
+
 ## 0.9.2 — 2026-10-04
 
 ### Fixed

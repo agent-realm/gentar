@@ -240,6 +240,15 @@ the suite runs; not staged, it reports `UNVERIFIED (template …)` — named,
 never green by stub, never red by harness; a stager that raises is a
 failure. Undeclared templates run as before.
 
+**Suites only a bench can prove.** A suite that deploys a service through
+the bench's Docker (a database, say) cannot be dry-run on the host. Say so in
+the suite, with the reason: `bench_only = "<why>"` in `[scenario]`. The
+dry-run then reports `UNVERIFIED (bench only: <why>)` and does not run or
+prepare it; phase 1 (`--check`) accepts that, a plain dry-run does not, and
+the arena runs it like any other suite. `GENTAR_DRYRUN_BENCH_ONLY=run` runs it
+anyway on a host that has what the reason names. The reason is required:
+an unexplained skip is how checks rot.
+
 **Gating a release.** Make the first job of your release workflow
 
 ```yaml

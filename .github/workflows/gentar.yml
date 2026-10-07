@@ -429,3 +429,24 @@ jobs:
           # Same key file the coordinator used — reap BEFORE removing it.
           bin/bench-reap || true
           rm -f /tmp/gentar_ci_bench_key
+
+  unit-checkout:
+    name: unit tests (checkout)
+    # The engine's unit tests also run inside the coordinator image build,
+    # whose context (./coordinator) has no subject-template/: every test that
+    # reads the kit was skipped there (Codex on #68). This job runs the whole
+    # suite on the checkout. GitHub-hosted, read-only, no secrets (AK47, a
+    # narrow lift of the gentar workflow hold for this one job, 2026-10-07).
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: unit tests on the checkout
+        working-directory: coordinator
+        run: |
+          python3 -m pip install -r requirements.txt
+          python3 -m unittest discover -s tests
