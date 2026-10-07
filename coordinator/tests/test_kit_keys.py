@@ -97,38 +97,85 @@ class KeyHygieneTest(unittest.TestCase):
         self.assertIn('rm -f "$RUNNER_TEMP/gentar_clone_key"', steps[clone_rm])
         td = steps[teardown]
         self.assertIn("trap keys_gone EXIT", td)
-        self.assertIn("trap 'keys_gone; exit 143' INT TERM", td)
-        self.assertIn("timeout 180 gentar/run.sh --down &", td)
-        self.assertIn("wait $!", td)
+        self.assertIn("trap 'on_signal 130' INT", td)
+        self.assertIn("trap 'on_signal 143' TERM", td)
+        self.assertIn("timeout -k 10 180 gentar/run.sh --down & pid=$!", td)
+        self.assertIn('wait "$pid"', td)
 
-    def test_the_teardown_trap_removes_the_keys_when_signalled(self):
-        # The step's shell, run for real: a TERM while `run.sh --down` hangs
-        # removes both keys at once (well before a SIGKILL would come).
-        import os, signal, subprocess, tempfile, time
-        td = steps_by_job()["bench"][[s.splitlines()[0] for s in steps_by_job()["bench"]].index("name: teardown")]
-        body = "\n".join(l for l in td.splitlines() if not l.startswith(("name:", "if:", "run:", "env:", "GENTAR_", "#")))
+    def _teardown(self, with_timeout):
+        """Run the real teardown step body in a scratch RUNNER_TEMP, with a
+        run.sh that records its pid and hangs. Returns (proc, tmp)."""
+        import os, subprocess, tempfile, time
+        steps = steps_by_job()["bench"]
+        td = steps[[s.splitlines()[0] for s in steps].index("name: teardown")]
+        body = "\n".join(l for l in td.splitlines()
+                         if not l.startswith(("name:", "if:", "run:", "env:", "GENTAR_", "#")))
         tmp = Path(tempfile.mkdtemp())
         (tmp / "gentar").mkdir()
-        (tmp / "gentar" / "run.sh").write_text("#!/bin/sh\nsleep 60\n")
+        (tmp / "gentar" / "run.sh").write_text(f'#!/bin/sh\necho $$ > "{tmp}/runsh.pid"\nexec sleep 60\n')
+        (tmp / "gentar" / "run.sh").chmod(0o755)
         (tmp / "bin").mkdir()
-        # A `timeout` of our own (macOS has none by default): runs the command.
-        (tmp / "bin" / "timeout").write_text('#!/bin/sh\nshift\nexec "$@"\n')
-        for f in (tmp / "gentar" / "run.sh", tmp / "bin" / "timeout"):
-            f.chmod(0o755)
+        if with_timeout:
+            # macOS has no `timeout`; this one ignores its options and runs the command.
+            (tmp / "bin" / "timeout").write_text('#!/bin/sh\nwhile [ "${1#-}" != "$1" ] || [ "$1" = 10 ]; do shift; done\nshift\nexec "$@"\n')
+            (tmp / "bin" / "timeout").chmod(0o755)
+            path = f"{tmp / 'bin'}:{os.environ['PATH']}"
+        else:
+            # no `timeout` anywhere on PATH: only the tools the step needs
+            for tool in ("rm", "sleep"):
+                (tmp / "bin" / tool).symlink_to(next(Path(d) / tool for d in ("/bin", "/usr/bin") if (Path(d) / tool).exists()))
+            path = str(tmp / "bin")
         for k in ("bench_key", "gentar_clone_key"):
             (tmp / k).write_text("x")
         proc = subprocess.Popen(["/bin/bash", "-e", "-c", body], cwd=tmp,
-                                env={**os.environ, "RUNNER_TEMP": str(tmp),
-                                     "PATH": f"{tmp / 'bin'}:{os.environ['PATH']}"})
-        time.sleep(1.0)
-        self.assertIsNone(proc.poll(), "the teardown must still be running when the signal comes")
-        self.assertTrue((tmp / "bench_key").exists())
-        t0 = time.time()
-        proc.send_signal(signal.SIGTERM)
-        proc.wait(timeout=10)
-        self.assertLess(time.time() - t0, 5)
+                                env={"RUNNER_TEMP": str(tmp), "PATH": path, "HOME": str(tmp)})
+        for _ in range(50):
+            if (tmp / "runsh.pid").exists() and (tmp / "runsh.pid").read_text().strip():
+                break
+            time.sleep(0.1)
+        return proc, tmp
+
+    def _alive(self, pid):
+        import os
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+
+    def test_the_teardown_trap_removes_the_keys_and_stops_the_teardown_when_signalled(self):
+        import signal, time
+        for with_timeout in (True, False):
+            with self.subTest(with_timeout=with_timeout):
+                proc, tmp = self._teardown(with_timeout)
+                pid = int((tmp / "runsh.pid").read_text())
+                self.assertIsNone(proc.poll(), "the teardown must still be running when the signal comes")
+                self.assertTrue((tmp / "bench_key").exists())
+                t0 = time.time()
+                proc.send_signal(signal.SIGTERM)
+                rc = proc.wait(timeout=10)
+                self.assertLess(time.time() - t0, 5)
+                self.assertEqual(rc, 143)
+                self.assertFalse((tmp / "bench_key").exists())
+                self.assertFalse((tmp / "gentar_clone_key").exists())
+                for _ in range(20):
+                    if not self._alive(pid):
+                        break
+                    time.sleep(0.1)
+                self.assertFalse(self._alive(pid), "the hung teardown must be stopped too")
+
+    def test_sigint_exits_130(self):
+        import signal
+        proc, tmp = self._teardown(True)
+        proc.send_signal(signal.SIGINT)
+        self.assertEqual(proc.wait(timeout=10), 130)
         self.assertFalse((tmp / "bench_key").exists())
-        self.assertFalse((tmp / "gentar_clone_key").exists())
+
+    def test_without_timeout_the_teardown_still_runs(self):
+        import subprocess, tempfile
+        proc, tmp = self._teardown(False)
+        self.assertIsNone(proc.poll())                       # run.sh is running (not skipped)
+        proc.terminate(); proc.wait(timeout=10)
 
     def test_jobs_that_write_no_keys_are_untouched(self):
         jobs = steps_by_job()

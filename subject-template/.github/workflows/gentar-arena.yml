@@ -346,11 +346,21 @@ jobs:
           # In the background with `wait`: a trapped signal interrupts `wait`
           # at once, while a foreground child would hold the trap back until
           # the runner's SIGKILL, a few seconds after its first signal.
+          # On a signal the teardown itself is stopped too; `timeout -k`
+          # also kills a run.sh that ignores TERM, and a runner without
+          # `timeout` (stock macOS) still tears down.
+          pid=
           keys_gone() { rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"; }
+          on_signal() { if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi; keys_gone; exit "$1"; }
           trap keys_gone EXIT
-          trap 'keys_gone; exit 143' INT TERM
-          timeout 180 gentar/run.sh --down &
-          wait $! || true
+          trap 'on_signal 130' INT
+          trap 'on_signal 143' TERM
+          if command -v timeout >/dev/null 2>&1; then
+            timeout -k 10 180 gentar/run.sh --down & pid=$!
+          else
+            gentar/run.sh --down & pid=$!
+          fi
+          wait "$pid" || true
         env:
           GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
           GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
