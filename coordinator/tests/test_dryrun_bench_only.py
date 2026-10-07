@@ -111,5 +111,33 @@ class DryrunBenchOnlyTest(_ScratchAdoption):
         self.assertIn("heavy.toml: FAILURE (bench only", r.stdout)
         self.assertEqual(self.prepared_for(), 1)
 
+    def test_a_whitespace_reason_fails_unprepared(self):
+        (self.repo / "gentar" / "scenarios" / "heavy.toml").write_text(
+            HEAVY.replace('bench_only = "deploys a ClickHouse through the bench\'s Docker"', 'bench_only = "   "'))
+        r = self.dryrun(GENTAR_DRYRUN_UNVERIFIED="ok")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("heavy.toml: FAILURE (bench only", r.stdout)
+        self.assertNotIn("heavy.toml: UNVERIFIED", r.stdout)
+        self.assertEqual(self.prepared_for(), 1)
+
+    def test_a_suite_that_is_not_toml_is_never_prepared(self):
+        # agy on #68: a syntax error hid the marker, and prepare() ran.
+        (self.repo / "gentar" / "scenarios" / "heavy.toml").write_text(
+            HEAVY.replace('steps = [', 'steps = [ "unclosed'))
+        r = self.dryrun(GENTAR_DRYRUN_UNVERIFIED="ok")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("heavy.toml: FAILURE (does not parse", r.stdout)
+        self.assertIn("light.toml: ALL PASS", r.stdout)     # the sweep went on
+        self.assertEqual(self.prepared_for(), 1)              # light only
+
+    def test_a_scenario_array_is_never_prepared(self):
+        (self.repo / "gentar" / "scenarios" / "heavy.toml").write_text(
+            HEAVY.replace("[scenario]", "[[scenario]]", 1))
+        r = self.dryrun(GENTAR_DRYRUN_UNVERIFIED="ok")
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("heavy.toml: FAILURE (does not parse", r.stdout)
+        self.assertIn("light.toml: ALL PASS", r.stdout)     # the sweep went on
+        self.assertEqual(self.prepared_for(), 1)
+
 if __name__ == "__main__":
     unittest.main()

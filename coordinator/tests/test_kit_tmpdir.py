@@ -34,6 +34,8 @@ class WorkflowTest(unittest.TestCase):
             if line.rstrip() == "jobs:":
                 in_jobs = True
                 continue
+            if in_jobs and line and not line.startswith(" ") and not line.startswith("#"):
+                in_jobs = False                            # the next top-level key ends jobs:
             if not in_jobs or line.strip().startswith("#"):
                 continue
             m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
@@ -49,7 +51,7 @@ class WorkflowTest(unittest.TestCase):
                 if line.startswith("      - "):
                     dashes += 1
                 if dashes == 1 and line.startswith("      "):
-                    first.append(line.strip().lstrip("- ").strip())
+                    first.append(line.strip().removeprefix("- ").strip())
         close()
         return out
 
