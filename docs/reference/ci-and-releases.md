@@ -35,9 +35,19 @@ what each one contains.
 
 Cutting a release:
 
-1. Bump `VERSION`.
-2. Add the `CHANGELOG.md` entry.
-3. Tag `v$(cat VERSION)` and push the tag.
+1. Bump `VERSION` and the kit's pin (`GENTAR_REF` default in
+   `subject-template/gentar/run.sh`, and the kit READMEs).
+2. Write the release document, `docs/releases/v$(cat VERSION).md`: what
+   changed and why, the upgrade note for adopters, any lifted guard, any
+   cleanup an adopter must do, and known limits.
+3. Add the `CHANGELOG.md` entry, pointing to that document.
+4. Land 1–3 through a reviewed release PR, merged as a merge commit.
+5. Tag `v$(cat VERSION)` (annotated) on `main` and push the tag.
+6. Publish the GitHub release from the document:
+   `gh release create v$(cat VERSION) --title "gentar v$(cat VERSION)" --notes-file docs/releases/v$(cat VERSION).md`.
+
+Before any release, the repo must meet the docs standard: README, `docs/`
+tutorials and guides, `examples/` (each with its README) and `AGENTS.md`.
 
 The tag *is* the proof. A `v*` tag runs the full gate at that commit, and
 a guard in the workflow fails the job if the tag does not equal

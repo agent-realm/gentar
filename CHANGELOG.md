@@ -22,6 +22,10 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.9.3 — 2026-10-08
+
+Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed and why, upgrade, the lifted `--check` guard, the `/tmp/dryrun-home-*` cleanup, known limits).
+
 ### Added
 - **`[scenario] bench_only = "<why>"`** for a suite only a bench can prove
   (it deploys a service through the bench's Docker, say). The bench-free
@@ -33,6 +37,9 @@ Adopters pin a release tag, not a branch.
   every memhouse pull request red.
 
 ### Fixed
+- **A dry-run suite that does not parse is a reported FAILURE**, and the sweep
+  goes on; it used to end the whole dry-run with a traceback. Such a suite
+  is never prepared.
 - **The kit's CI jobs keep temp files in the job's own temp dir.** `plan`,
   `checks` and `bench` (the jobs that can run on a self-hosted runner) start
   by pointing `TMPDIR` at `$RUNNER_TEMP`, which the runner empties after every
@@ -40,6 +47,10 @@ Adopters pin a release tag, not a branch.
   dry-run keeps its scratch homes there, and a suite's own `mktemp` steps add
   more (a runner LXC's tmpfs once filled with 7.4 GB of leaked test dirs).
   The arena's lock and bench workspaces keep their fixed `/tmp` paths.
+
+### Engine CI
+- **`unit-checkout`**: the unit suite also runs on the checkout (GitHub-hosted,
+  read-only, no secrets), so the tests that read the kit run in CI too.
 
 ## 0.9.2 — 2026-10-04
 

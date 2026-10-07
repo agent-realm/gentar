@@ -43,6 +43,12 @@ job to do. Use the reference when you need every detail of one part.
 up to a full adopted subject. Each rung has its own README and is
 runnable as it stands.
 
+## Releases
+
+[`releases/`](releases/) holds one document per release: what changed and why,
+the upgrade note for adopters, and known limits. Each is also that
+release's GitHub release notes.
+
 ## For agents
 
 [`AGENTS.md`](../AGENTS.md) is the entry for an agent. It covers adopting
