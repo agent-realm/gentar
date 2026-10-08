@@ -264,13 +264,124 @@ class RunShRouteTest(unittest.TestCase):
         self.assertIn("skipping needs-key — no credential group of it is fully set", r.stderr)
 
     def test_routed_names_are_redacted_and_exported_only_when_declared(self):
+        # (the run path itself: RunPathRouteTest)
         text = RUN.read_text()
-        export = text[text.index("# Routed secrets ([secrets] route) leave this shell"):
-                      text.index("FORWARD=()")]
-        self.assertIn('grep -qx "$_n"', export)       # only names a suite declares
-        self.assertIn('export "$_n"', export)
-        self.assertEqual(text.count('export "$_n"'), 1, "exported somewhere else too")
+        loop = text[text.index("# Routed secrets ([secrets] route) leave this shell only here"):
+                    text.index("coordinator run \"$s\"")]
+        self.assertIn('extract_env_names "$HERE/scenarios/$s.toml" | grep -qx "$_n"', loop)
+        self.assertIn('export "$_n"', loop)
+        red = text[text.index("redact() ("):text.index('exec "$ARENA/bin/redact"')]
+        self.assertIn('export "$_n"', red)
+        self.assertEqual(text.count('export "$_n"'), 2, "exported somewhere else too")
+        after = text[text.index("coordinator run \"$s\""):]
+        self.assertIn('export -n "$_n"', after.split("set -e", 1)[0])
         self.assertIn('REDACT_NAMES="$REDACT_NAMES $_n"', text)
+
+
+FAKE_DOCKER = r"""#!/usr/bin/env bash
+# a fake docker: the arena's services are "up" and healthy; a coordinator
+# run records which -e names it was given and what its environment holds,
+# and writes the report the run loop looks for.
+case "$*" in
+  ps\ *) echo cid1; exit 0 ;;
+  inspect\ *) echo healthy; exit 0 ;;
+  stop\ *) exit 0 ;;
+esac
+[ "$1" = compose ] || exit 0
+args=" $* "
+case "$args" in
+  *" run "*" coordinator run "*)
+    suite=${args##* coordinator run }; suite=${suite%% *}
+    given=""; prev=""
+    for a in "$@"; do [ "$prev" = -e ] && given="$given $a"; prev=$a; done
+    {
+      echo "suite=$suite given=$given"
+      for n in SUBJECT_KEY OTHER_KEY; do
+        [ -n "${!n:-}" ] && echo "suite=$suite env-has=$n value-ok=$([ "${!n}" = "$EXPECT" ] && echo yes || echo no)"
+      done
+      env | cut -d= -f1 | grep '^GENTAR_ROUTE_' | sed "s/^/suite=$suite slot-in-env=/"
+    } >> "$FIX/docker.log"
+    mkdir -p out
+    sleep 1
+    echo "Reproduce: \`x\`" > "out/report-$suite-$$.md"
+    exit 0 ;;
+  *" run "*" dashboard "*) exit 1 ;;
+esac
+exit 0
+"""
+
+FAKE_REDACT = r"""#!/usr/bin/env bash
+# a fake bin/redact: records which named values it can see
+for n in $(printf '%s\n' $GENTAR_REDACT_NAMES | sort -u); do
+  case "$n" in SUBJECT_KEY|OTHER_KEY) [ -n "${!n:-}" ] && echo "redact sees $n" >> "$FIX/redact.log" ;; esac
+done
+exit 0
+"""
+
+
+@unittest.skipUnless(RUN.exists() and shutil.which("git"), "the kit is not in the image build context")
+class RunPathRouteTest(unittest.TestCase):
+    """The real run path, with a fake engine and a fake docker: a routed
+    secret reaches the coordinator of the suite declaring it, and no other
+    (agy, second look on the secret route, 2026-10-08)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        eng = self.tmp / "engine"
+        (eng / "bin").mkdir(parents=True)
+        (eng / ".env.example").write_text("")
+        (eng / "bin" / "redact").write_text(FAKE_REDACT)
+        (eng / "bin" / "redact").chmod(0o755)
+        g = lambda *a: subprocess.run(["git", "-C", str(eng), *a], check=True, capture_output=True,
+                                      env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                                           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+        g("init", "-q", "-b", "main")
+        g("add", "-A")
+        g("commit", "-q", "-m", "fake engine")
+        self.engine = eng
+        self.fix = self.tmp / "fix"
+        self.fix.mkdir()
+        (self.tmp / "bin").mkdir()
+        (self.tmp / "bin" / "docker").write_text(FAKE_DOCKER)
+        (self.tmp / "bin" / "docker").chmod(0o755)
+        (self.tmp / "key").write_text("not-a-real-key\n")
+
+    def run_suites(self, *suites):
+        _, repo = kit_repo('[secrets]\nroute = ["SUBJECT_KEY", "OTHER_KEY"]\n',
+                           {"needs-key": 'credentials = ["SUBJECT_KEY"]\n', "plain": ""})
+        self.addCleanup(shutil.rmtree, repo.parent, ignore_errors=True)
+        e = {k: v for k, v in os.environ.items()
+             if not k.startswith(("GENTAR_", "GITHUB_")) and k not in ("SUBJECT_KEY", "OTHER_KEY", "CI")}
+        e.update(PATH=f"{self.tmp / 'bin'}:{os.environ['PATH']}", FIX=str(self.fix), EXPECT=SECRET,
+                 GENTAR_REPO_URL=str(self.engine), GENTAR_REF="main",
+                 GENTAR_BENCH_HOST="bench.test", GENTAR_BENCH_USER="u",
+                 GENTAR_BENCH_KEY_FILE=str(self.tmp / "key"), GENTAR_LOCK_DIR=str(self.tmp),
+                 GENTAR_ROUTE_1=SECRET)
+        r = subprocess.run(["/bin/bash", "gentar/run.sh", *suites], cwd=repo, env=e,
+                           capture_output=True, text=True, timeout=120)
+        self.assertNotIn(SECRET, r.stdout + r.stderr, "a routed value was printed")
+        log = (self.fix / "docker.log").read_text() if (self.fix / "docker.log").exists() else ""
+        red = (self.fix / "redact.log").read_text() if (self.fix / "redact.log").exists() else ""
+        return r, log, red
+
+    def test_only_the_declaring_suite_gets_it_before_and_after(self):
+        r, log, red = self.run_suites("needs-key", "plain", "needs-key")
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        lines = log.splitlines()
+        given = [l for l in lines if " given=" in l]
+        self.assertEqual(len(given), 3, log)
+        self.assertEqual([l.split()[0] for l in given],
+                         ["suite=needs-key", "suite=plain", "suite=needs-key"])
+        self.assertIn(" SUBJECT_KEY", given[0])
+        self.assertNotIn("SUBJECT_KEY", given[1])          # not declared by plain
+        self.assertIn(" SUBJECT_KEY", given[2])
+        has = [l for l in lines if "env-has=" in l]
+        self.assertEqual(has, ["suite=needs-key env-has=SUBJECT_KEY value-ok=yes"] * 2)
+        self.assertNotIn("OTHER_KEY", log)                     # routed, but no slot value
+        self.assertNotIn("slot-in-env", log)                  # slots never reach a child
+        # every report is redacted with the routed value in view
+        self.assertEqual(red.splitlines(), ["redact sees SUBJECT_KEY"] * 3)
 
 
 if __name__ == "__main__":

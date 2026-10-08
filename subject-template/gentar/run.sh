@@ -1010,15 +1010,12 @@ declared=$(
       || extract_env_names ${SCENARIO_FILES[@]+"${SCENARIO_FILES[@]}"}
     echo GENTAR_BUDGET_CAP
   } | sort -u)
-# Routed secrets ([secrets] route) leave this shell here and only here, and
-# only those a suite about to run declares: exported for the -e below.
-for _n in ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"}; do
-  if printf '%s\n' "$declared" | grep -qx "$_n" && [ -n "${!_n:-}" ]; then
-    export "$_n"
-  fi
-done
+# Routed secrets ([secrets] route) are not in FORWARD: each goes, in the
+# run loop below, to the coordinator of the one suite that declares it.
+is_routed() { printf '%s\n' ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"} | grep -qx "$1"; }
 FORWARD=()
 for var in $declared; do
+  if is_routed "$var"; then continue; fi
   [ -n "${!var:-}" ] && FORWARD+=(-e "$var")
 done
 
@@ -1033,7 +1030,16 @@ for f in ${SCENARIO_FILES[@]+"${SCENARIO_FILES[@]}"}; do
 done
 # Every routed secret too, declared as a credential or only as pass_env.
 for _n in ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"}; do REDACT_NAMES="$REDACT_NAMES $_n"; done
-redact() { GENTAR_REDACT_NAMES="$REDACT_NAMES" "$ARENA/bin/redact" "$@"; }
+# bin/redact finds a value by its name in ITS environment, and a routed
+# secret is exported only while its suite's coordinator runs: so redact
+# runs in a subshell that exports them for it alone.
+redact() (
+  for _n in ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"}; do
+    # shellcheck disable=SC2163  # the variable NAMED by $_n
+    [ -z "${!_n:-}" ] || export "$_n"
+  done
+  GENTAR_REDACT_NAMES="$REDACT_NAMES" exec "$ARENA/bin/redact" "$@"
+)
 # Files are prepared and redacted HERE, outside gentar/reports/, and only
 # then moved in: a CI cancel between writing and redacting must not leave
 # an unredacted file where the always-run upload step would publish it.
@@ -1075,14 +1081,30 @@ RUN_T0=$(( $(date +%s) - 5 ))   # the dashboard shows this invocation's runs onl
 for s in "$SCENARIO" "$@"; do
   # Exit code is the verdict: 0 pass · 1 fail · 2 usage/config refusal.
   MARKER=$(mktemp)
+  # Routed secrets ([secrets] route) leave this shell only here: exported
+  # for the coordinator of a suite that declares them, and taken back out
+  # of the environment the moment it returns, so the next suite's
+  # coordinator never sees them.
+  ROUTED=()
+  for _n in ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"}; do
+    if [ -n "${!_n:-}" ] && [ -f "$HERE/scenarios/$s.toml" ] \
+       && extract_env_names "$HERE/scenarios/$s.toml" | grep -qx "$_n"; then
+      # shellcheck disable=SC2163  # the variable NAMED by $_n
+      export "$_n"
+      ROUTED+=(-e "$_n")
+    fi
+  done
   set +e
   GENTAR_SUBJECTS_DIR="$PWD/subjects" \
     arena run --rm --no-deps \
       -e GENTAR_SCENARIOS_DIR=/extra \
       ${FORWARD[@]+"${FORWARD[@]}"} \
+      ${ROUTED[@]+"${ROUTED[@]}"} \
       -v "$HERE/scenarios:/extra:ro" \
       coordinator run "$s"
   rc=$?
+  # shellcheck disable=SC2163  # the variable NAMED by $_n
+  for _n in ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"}; do export -n "$_n" 2>/dev/null; done
   set -e
   # Copy every report this run produced into the repo, with a
   # reproduce command that works for own-arena scenarios (the
