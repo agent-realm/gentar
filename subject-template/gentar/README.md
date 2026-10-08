@@ -397,6 +397,8 @@ Secrets/vars the workflow reads:
 - `vars.GENTAR_BUDGET_CAP` — ceiling the budget guard enforces (default 50000)
 - `vars.GENTAR_CLICKHOUSE_HOST_PORT`, `vars.GENTAR_OTLP_HOST_PORT` — move the
   arena's host ports when another arena shares the runner's Docker host
+- `secrets.<NAME>` for each name in `[secrets] route` — your subject's own
+  secrets (below)
 
 The three bench values are required; the workflow refuses with a named error
 before staging anything if one is missing or still the placeholder. Everything
@@ -404,6 +406,26 @@ else is optional. Phase 2 is `gentar/run.sh --sweep`: suites whose credentials
 are absent are skipped and named, not run into a red refusal. It tears down
 with `gentar/run.sh --down`, which also removes the bench sandboxes a cancelled
 job left behind — and never touches an arena another live run holds.
+
+**Your own secrets.** A suite that needs a secret the kit does not wire
+(a read key for your own service, say) declares it as usual, in
+`credentials` or `pass_env`, and `gentar/policy.toml` routes it by name:
+
+```toml
+[secrets]
+route = ["SUBJECT_READ_KEY"]   # up to 8 repository secrets
+```
+
+The workflow stays byte-identical. Its bench job has eight fixed slots,
+each looking up ONE declared name (`secrets[<name>]`), so it receives those
+secrets and no others. `run.sh` takes them out of the slots before it does
+anything else, and passes a name on to the coordinator only when a suite
+about to run declares it. Values are redacted from the reports like any
+credential, and are never printed: `gentar/run.sh --route` shows the names,
+whether each arrived, and which suites ask for it. Names the kit wires itself
+(`BENCH_SSH_KEY`, `ANTHROPIC_*`, `TYPESAFE_API_KEY`, `GENTAR_*`), GitHub's and
+the runner's, and names that steer a shell, git, ssh, docker or python are
+refused. So is a routed name no suite declares, at `--check`.
 
 **Git history in the bench.** The subject is staged without `.git`: on
 CI it holds the job's auth header. A suite that needs history (one that
@@ -441,7 +463,7 @@ gentar/
   scenarios/*.toml   # suites (this repo's own)
   policy.toml        # run policy — which suites run when (this repo's own)
   hooks.py           # dry-run hooks: prepare(), HIDE_FROM_PATH (this repo's own)
-  run.sh             # kit — stage, run, report; --check, --plan, --down
+  run.sh             # kit — stage, run, report; --check, --plan, --route, --down
   dryrun.py          # kit — local, bench-less step/assertion replay
   plan.py            # kit — the run policy's only reader
   release-gate.sh    # kit — may this commit be released?

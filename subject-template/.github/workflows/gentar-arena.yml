@@ -91,6 +91,15 @@ jobs:
       setup_go: ${{ steps.plan.outputs.setup_go }}
       setup_node: ${{ steps.plan.outputs.setup_node }}
       setup_python: ${{ steps.plan.outputs.setup_python }}
+      # [secrets] route: secret NAMES, one per slot (empty = unused).
+      route_1: ${{ steps.plan.outputs.route_1 }}
+      route_2: ${{ steps.plan.outputs.route_2 }}
+      route_3: ${{ steps.plan.outputs.route_3 }}
+      route_4: ${{ steps.plan.outputs.route_4 }}
+      route_5: ${{ steps.plan.outputs.route_5 }}
+      route_6: ${{ steps.plan.outputs.route_6 }}
+      route_7: ${{ steps.plan.outputs.route_7 }}
+      route_8: ${{ steps.plan.outputs.route_8 }}
     steps:
       # Temp files go to this job's own temp dir, which the runner empties
       # after every job. On a self-hosted runner /tmp is shared and never
@@ -325,6 +334,20 @@ jobs:
           # Ceiling the budget guard enforces; must be >= each agent suite's
           # declared [budget] tokens. A repository variable overrides it.
           GENTAR_BUDGET_CAP: ${{ vars.GENTAR_BUDGET_CAP || '50000' }}
+          # Subject secrets, routed BY NAME ([secrets] route in policy.toml):
+          # slot n holds the secret the plan named n-th, looked up one name
+          # at a time, so this step sees the declared secrets and no others.
+          # run.sh moves each value to its own name, clears the slots, and
+          # forwards a name only to suites that declare it. An unused slot
+          # is empty without a lookup.
+          GENTAR_ROUTE_1: ${{ needs.plan.outputs.route_1 && secrets[needs.plan.outputs.route_1] || '' }}
+          GENTAR_ROUTE_2: ${{ needs.plan.outputs.route_2 && secrets[needs.plan.outputs.route_2] || '' }}
+          GENTAR_ROUTE_3: ${{ needs.plan.outputs.route_3 && secrets[needs.plan.outputs.route_3] || '' }}
+          GENTAR_ROUTE_4: ${{ needs.plan.outputs.route_4 && secrets[needs.plan.outputs.route_4] || '' }}
+          GENTAR_ROUTE_5: ${{ needs.plan.outputs.route_5 && secrets[needs.plan.outputs.route_5] || '' }}
+          GENTAR_ROUTE_6: ${{ needs.plan.outputs.route_6 && secrets[needs.plan.outputs.route_6] || '' }}
+          GENTAR_ROUTE_7: ${{ needs.plan.outputs.route_7 && secrets[needs.plan.outputs.route_7] || '' }}
+          GENTAR_ROUTE_8: ${{ needs.plan.outputs.route_8 && secrets[needs.plan.outputs.route_8] || '' }}
 
       - name: remove the clone key
         # Nothing after the suites needs it (teardown uses the engine already

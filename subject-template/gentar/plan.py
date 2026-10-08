@@ -3,6 +3,7 @@
 
     gentar/plan.py plan     # what should THIS CI event run?  (the kit's plan job)
     gentar/plan.py lint     # bench-free adaptation checks    (part of run.sh --check)
+    gentar/plan.py route    # [secrets] route, one name a line (run.sh maps the slots)
 
 The policy is declared in gentar/policy.toml at adaptation (AGENTS.md,
 decision 5) and read here, and only here. The workflow does what `plan`
@@ -82,7 +83,28 @@ SCHEMA = {
     # tags, an update path). Off by default: .git on CI holds the job's
     # auth header, so it is never copied; stage-git builds a fresh one.
     "stage": {"git": False},
+    # Repository secrets the bench job receives BY NAME, for suites that
+    # declare them (`credentials` / `pass_env`). See route_names().
+    "secrets": {"route": []},
 }
+
+# [secrets] route: how many names the kit's workflow has slots for. Each
+# slot is one `secrets[<name>]` lookup in the bench job, so the job sees
+# exactly the declared secrets and never the whole set (no toJSON(secrets)).
+ROUTE_SLOTS = 8
+ROUTE_NAME = re.compile(r"[A-Z][A-Z0-9_]*")
+# Names a route may not take. The kit already wires its own secrets
+# (bench key, provider keys, judge key, telemetry), GitHub and the runner
+# own theirs, and a routed value becomes an environment variable of
+# run.sh and everything it starts, so names that steer a shell, a loader,
+# git, ssh, docker or python would let a policy line change how the arena
+# itself runs, not just what a suite sees.
+ROUTE_RESERVED_PREFIXES = ("GITHUB_", "ACTIONS_", "RUNNER_", "GENTAR_", "LD_", "DYLD_",
+                           "BASH_", "DOCKER_", "COMPOSE_", "GIT_", "SSH_", "PYTHON",
+                           "ANTHROPIC_", "TYPESAFE_", "OTEL_")
+ROUTE_RESERVED = {"BENCH_SSH_KEY", "PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD",
+                  "OLDPWD", "IFS", "ENV", "CDPATH", "PS4", "SHELLOPTS", "TMPDIR", "TERM",
+                  "LANG", "CI", "HOSTNAME", "PROMPT_COMMAND", "NODE_OPTIONS"}
 
 README_MAX_LINES = 150
 # [text](target) and [text](target "title") / (target 'title')
@@ -164,11 +186,35 @@ def load_policy(path=POLICY):
     if not isinstance(p2["max_age_days"], int) or isinstance(p2["max_age_days"], bool) \
             or p2["max_age_days"] < 0:
         raise Refuse("[phase2] max_age_days must be a whole number of days (0 = no limit)")
+    route_names(out)
     for f in _strings(out["check"]["allow_drift"], "[check] allow_drift"):
         if f not in KIT_FILES:
             raise Refuse(f"[check] allow_drift: {f!r} is not a kit file "
                          f"(kit files: {', '.join(KIT_FILES)})")
     return out
+
+
+def route_names(policy):
+    """[secrets] route, validated: the repository secrets the bench job
+    receives, in slot order. Names only -- a value never passes through
+    here, or through the plan's outputs."""
+    names = _strings(((policy or {}).get("secrets") or {}).get("route", []),
+                     "[secrets] route")
+    if len(names) > ROUTE_SLOTS:
+        raise Refuse(f"[secrets] route names {len(names)} secrets; the kit's workflow "
+                     f"has {ROUTE_SLOTS} slots")
+    seen = set()
+    for n in names:
+        if not ROUTE_NAME.fullmatch(n):
+            raise Refuse(f"[secrets] route: {n!r} is not a secret name (UPPER_SNAKE_CASE: "
+                         "capitals, digits, underscore, starting with a letter)")
+        if n in ROUTE_RESERVED or n.startswith(ROUTE_RESERVED_PREFIXES):
+            raise Refuse(f"[secrets] route: {n!r} is reserved (the kit, GitHub or the "
+                         "arena's own environment uses it); give the secret another name")
+        if n in seen:
+            raise Refuse(f"[secrets] route: {n!r} is listed twice")
+        seen.add(n)
+    return list(names)
 
 
 def _strings(v, where):
@@ -281,7 +327,7 @@ def plan(env, policy):
                 for w in (env.get("SCENARIO_INPUT") or "").split()]
 
     res = {"checks": False, "bench": "none", "suites": [], "reason": "",
-           "setup": {}, "os": ["ubuntu-latest"]}
+           "setup": {}, "os": ["ubuntu-latest"], "route": route_names(policy)}
     runner = ci_runner(env)
     # Where plan and checks ran, in the plan output (claude-playbooks-dc):
     # a subject can see it without reading repository settings.
@@ -393,6 +439,12 @@ def emit(res):
         f"os={json.dumps(res['os'])}",
         f"runner={res.get('runner', 'github-hosted')}",
     ] + [f"setup_{t}={res['setup'].get(t, '')}" for t in SETUP_TOOLS]
+    # Secret NAMES for the bench job's slots (route_1 .. route_8, empty when
+    # unused); the workflow looks each one up as secrets[<name>].
+    route = res.get("route", [])
+    lines.append(f"route={' '.join(route)}")
+    lines += [f"route_{i}={route[i - 1] if i <= len(route) else ''}"
+              for i in range(1, ROUTE_SLOTS + 1)]
     out = "\n".join(lines) + "\n"
     sys.stdout.write(out)
     gh = os.environ.get("GITHUB_OUTPUT")
@@ -514,10 +566,25 @@ def lint(policy, engine_root):
                     problems.append(
                         f"{j['file']}: judged turn {i} has {have} {label} fixture(s) under "
                         f"gentar/judge-fixtures/{name}/{i}/{label}/ — needs {MIN_FIXTURES}+")
-    # 4. the docs standard, when the policy opts in ([check] docs = true).
+    # 4. a routed secret no suite declares reaches nothing: run.sh forwards
+    #    only names a suite asks for (`credentials` / `pass_env`). Said here,
+    #    so a typo in either place is caught before a bench is spent.
+    asked = set()
+    for f in sorted(SCENARIOS.glob("*.toml")):
+        try:
+            sc = tomllib.loads(f.read_text()).get("scenario") or {}
+        except tomllib.TOMLDecodeError:
+            continue                          # reported by check 1
+        for c in (sc.get("credentials") or []) + (sc.get("pass_env") or []):
+            asked.update([c] if isinstance(c, str) else [x for x in c if isinstance(x, str)])
+    for n in route_names(policy):
+        if n not in asked:
+            problems.append(f"policy.toml: [secrets] route has {n}, but no suite declares it "
+                            f"in `credentials` or `pass_env`, so it would reach nothing")
+    # 5. the docs standard, when the policy opts in ([check] docs = true).
     if policy and policy["check"]["docs"]:
         problems += [f"docs: {p}" for p in docs_problems(HERE.parent)]
-    # 5. the PR invariant rests on the kit's workflow; say so when it cannot.
+    # 6. the PR invariant rests on the kit's workflow; say so when it cannot.
     wf = ".github/workflows/gentar-arena.yml"
     if wf in allowed:
         print(f"note: {wf} is allowed to drift, so 'no pull_request job reaches "
@@ -568,6 +635,10 @@ def main(argv):
                 print("staged: git history (fresh local clone, no remote, no config "
                       "carried over)", file=sys.stderr)
             return 0
+        if cmd == "route":                 # run.sh's view of [secrets] route
+            for n in route_names(policy):
+                print(n)
+            return 0
         if cmd == "gate-config":           # release-gate.sh's view of [phase2]
             p2 = (policy or {}).get("phase2") or SCHEMA["phase2"]
             print(f"release_gate={'true' if p2['release_gate'] else 'false'}")
@@ -584,7 +655,8 @@ def main(argv):
     except Refuse as exc:
         print(f"plan: {exc}", file=sys.stderr)
         return 2
-    print("usage: gentar/plan.py plan | lint [engine-root] | gate-config | stage-git <repo> <dest>",
+    print("usage: gentar/plan.py plan | lint [engine-root] | gate-config | route | "
+          "stage-git <repo> <dest>",
           file=sys.stderr)
     return 2
 

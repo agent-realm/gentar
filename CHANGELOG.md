@@ -22,6 +22,19 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Added
+- **`[secrets] route` — a subject's own secrets reach its suites by name.**
+  Declare up to 8 repository secrets in `gentar/policy.toml`; the kit's bench
+  job looks each one up in a fixed slot (`secrets[<declared name>]`, never the
+  whole set), and `run.sh` clears the slots at once, gives each value its
+  name inside the script, and exports a name only for a suite about to run
+  that declares it (`credentials` or `pass_env`). Routed values are redacted
+  from reports. Reserved names (the kit's own, GitHub's, the runner's, and
+  names that steer a shell, loader, git, ssh, docker or python) are refused,
+  and `--check` flags a route no suite declares. `gentar/run.sh --route`
+  reports names and state, never values. The workflow stays byte-identical,
+  so a subject with its own secret no longer has to fork it.
+
 ### Fixed
 - **The kit's CI jobs do not leave SSH keys behind on a self-hosted runner.**
   `checks` and `bench` write `bench_key` and `gentar_clone_key` under
