@@ -51,7 +51,8 @@ Adopters pin a release tag, not a branch.
   mirror holding `GENTAR_STATUS_TOKEN` posts the status itself.
 - **`[phase2] evidence = "status"`**: `release-gate.sh` then requires the
   latest `arena/phase2` commit status on exactly the release sha to be
-  `success` (`max_age_days` applies). Mirror mode requires it whenever the
+  `success` and, with `[arena] mirror` set, to link a run of that mirror
+  (`max_age_days` applies). Mirror mode requires it whenever the
   gate is on.
 - **`[secrets] route` — a subject's own secrets reach its suites by name.**
   Declare up to 8 repository secrets in `gentar/policy.toml`; the kit's bench

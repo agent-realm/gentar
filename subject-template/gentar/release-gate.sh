@@ -24,8 +24,9 @@
 # evidence = "status" (a PUBLIC repository whose phase 2 runs in a private
 # arena mirror, [arena] bench = "mirror"): the proof is instead a SUCCESS
 # commit status `arena/phase2` on exactly that commit -- the latest one
-# for that context, which the mirror or gentar/mirror.sh posted. Its age
-# counts from when it was posted. Needs GH_TOKEN with statuses: read.
+# for that context, which the mirror or gentar/mirror.sh posted, linking a
+# run of the mirror [arena] mirror names. Its age counts from when it was
+# posted. Needs GH_TOKEN with statuses: read.
 #
 # Exit: 0 releasable · 1 not releasable (reasons printed) · 2 usage.
 
@@ -47,6 +48,7 @@ cfg=$(python3 "$HERE/plan.py" gate-config) || exit 2
 GATE=$(printf '%s\n' "$cfg" | sed -n 's/^release_gate=//p')
 MAXAGE=$(printf '%s\n' "$cfg" | sed -n 's/^max_age_days=//p')
 EVIDENCE=$(printf '%s\n' "$cfg" | sed -n 's/^evidence=//p')
+MIRROR=$(python3 "$HERE/plan.py" arena-config | sed -n 's/^mirror=//p') || exit 2
 
 if [ "${EVIDENCE:-job}" = status ]; then
   CONTEXT=arena/phase2
@@ -66,6 +68,16 @@ if [ "${EVIDENCE:-job}" = status ]; then
 $line
 EOF
   age=$(( ${secs:-0} / 86400 ))
+  # With [arena] mirror set, only a status linking a run of THAT mirror
+  # counts: another tool posting the same context name proves nothing.
+  # Owner and repository names are case-insensitive on GitHub.
+  if [ -n "$MIRROR" ]; then
+    lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+    case "$(lc "$url")" in
+      "https://github.com/$(lc "$MIRROR")/actions/runs/"*) ;;
+      *) unproven "$CONTEXT links $url, not a run of the arena mirror $MIRROR" ;;
+    esac
+  fi
   case "$state" in
     success)
       if [ "${MAXAGE:-0}" -gt 0 ] && [ "${secs:-0}" -gt $(( MAXAGE * 86400 )) ]; then

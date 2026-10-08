@@ -115,7 +115,7 @@ its `plan.py`, still reaches no secret the mirror did not offer.
 | a few suites | `gentar/mirror.sh dispatch <sha> suite-a suite-b`: a targeted run, never posts the status |
 | what a commit has | `gentar/mirror.sh status <sha>` |
 | the default branch covered | the mirror's daily schedule; a no-op when that head is already green there |
-| a release | `gentar/release-gate.sh <sha>` passes on a success `arena/phase2` on exactly that sha |
+| a release | `gentar/release-gate.sh <sha>` passes on a success `arena/phase2` on exactly that sha, linking a run of the mirror `[arena] mirror` names |
 
 `mirror.sh` needs `gh`, authenticated as someone who can run the mirror's
 workflows and write commit statuses on the public repository. The status

@@ -363,7 +363,8 @@ class MirrorRouteTest(unittest.TestCase):
                 self.assertEqual(r.returncode, 2)
 
     def test_a_malformed_commit_policy_is_refused(self):
-        for bad in ('[secrets]\nroute = "A_KEY"\n', '[secrets\n',
+        for bad in ('[secrets]\nroute = "A_KEY"\n', '[secrets\n', 'secrets = "none"\n',
+                    'secrets = ["A_KEY"]\n',
                     '[secrets]\nroute = [%s]\n' % ", ".join(f'"K{i}"' for i in range(9))):
             with self.subTest(policy=bad):
                 r, _, _ = self.route(bad, "A_KEY")
@@ -565,8 +566,9 @@ class StatusEvidenceGateTest(unittest.TestCase):
 
     def statuses(self, *entries):
         (self.fix / "status.json").write_text(json.dumps({"statuses": [
-            {"context": c, "state": s, "updated_at": iso(age), "target_url": f"https://mirror/{c}"}
-            for c, s, age in entries]}))
+            {"context": c, "state": s, "updated_at": iso(age),
+             "target_url": url or "https://github.com/owner/repo-arena/actions/runs/9"}
+            for c, s, age, *rest in entries for url in [rest[0] if rest else None]]}))
 
     def gate(self):
         e = {**os.environ, "PATH": f"{self.tmp / 'bin'}:{os.environ['PATH']}",
@@ -578,7 +580,19 @@ class StatusEvidenceGateTest(unittest.TestCase):
         self.statuses(("ci", "failure", 0), ("arena/phase2", "success", 1))
         r = self.gate()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("arena/phase2 success, 1 day(s) ago: https://mirror/arena/phase2", r.stdout)
+        self.assertIn("arena/phase2 success, 1 day(s) ago: "
+                      "https://github.com/owner/repo-arena/actions/runs/9", r.stdout)
+
+    def test_a_status_not_linking_the_mirror_proves_nothing(self):
+        for url in ("https://example.com/ci/1", "https://github.com/owner/repo-arena-evil/actions/runs/9",
+                    "https://github.com/other/repo-arena/actions/runs/9", "-"):
+            with self.subTest(url=url):
+                self.statuses(("arena/phase2", "success", 0, url))
+                r = self.gate()
+                self.assertEqual(r.returncode, 1, r.stdout)
+                self.assertIn("not a run of the arena mirror owner/repo-arena", r.stderr)
+        self.statuses(("arena/phase2", "success", 0, "https://github.com/Owner/Repo-Arena/actions/runs/9"))
+        self.assertEqual(self.gate().returncode, 0)
 
     def test_anything_else_refuses_and_says_what(self):
         for entries, words in (((("arena/phase2", "failure", 0),), "arena/phase2 is failure"),

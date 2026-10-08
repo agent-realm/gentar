@@ -64,7 +64,10 @@ def main(argv):
                 data = tomllib.load(f)
         except tomllib.TOMLDecodeError as exc:
             refuse(f"the commit's policy.toml is not valid TOML: {exc}")
-        wanted = (data.get("secrets") or {}).get("route") or []
+        secrets = data.get("secrets", {})
+        if not isinstance(secrets, dict):
+            refuse("the commit's [secrets] is not a table")
+        wanted = secrets.get("route") or []
         if not isinstance(wanted, list) or not all(isinstance(n, str) for n in wanted):
             refuse("the commit's [secrets] route is not a list of names")
         if len(wanted) > SLOTS:

@@ -59,8 +59,13 @@ if [ -z "$head" ]; then
   exit 2
 fi
 
-specs=("+refs/heads/$head:refs/remotes/origin/$head" "+refs/tags/v*:refs/tags/v*")
-[ "$ALLOW_HEADS" = 1 ] && specs+=("+refs/heads/*:refs/remotes/origin/*")
+# Every branch head with the flag (the default branch among them), or only
+# the default branch; one spec per destination either way.
+if [ "$ALLOW_HEADS" = 1 ]; then
+  specs=("+refs/heads/*:refs/remotes/origin/*" "+refs/tags/v*:refs/tags/v*")
+else
+  specs=("+refs/heads/$head:refs/remotes/origin/$head" "+refs/tags/v*:refs/tags/v*")
+fi
 if ! g fetch --quiet --no-tags --no-write-fetch-head -- "$URL" "${specs[@]}" 2>"$TMP/fetch.err"; then
   echo "verify-ref: fetching $URL failed: $(head -c 300 "$TMP/fetch.err" | tr '\n' ' ')" >&2
   exit 2
