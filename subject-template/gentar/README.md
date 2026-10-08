@@ -428,8 +428,8 @@ route = ["SUBJECT_READ_KEY"]   # up to 8 repository secrets
 The workflow stays byte-identical. Its bench job has eight fixed slots,
 each looking up ONE declared name (`secrets[<name>]`), so it receives those
 secrets and no others. `run.sh` takes them out of the slots before it does
-anything else, and passes a name on to the coordinator only when a suite
-about to run declares it. Values are redacted from the reports like any
+anything else, and passes a name only to the coordinator of a suite that
+declares it, taking it back when that suite ends. Values are redacted from the reports like any
 credential, and are never printed: `gentar/run.sh --route` shows the names,
 whether each arrived, and which suites ask for it. Names the kit wires itself
 (`BENCH_SSH_KEY`, `ANTHROPIC_*`, `TYPESAFE_API_KEY`, `GENTAR_*`), GitHub's and
