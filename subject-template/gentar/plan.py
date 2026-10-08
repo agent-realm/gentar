@@ -29,6 +29,11 @@ Phases (the pilot's words: phase 1 for every PR, phase 2 only when asked):
   release   a `v*` tag runs nothing here. A release is GATED on a green
             phase 2 of its commit (release-gate.sh), not tested after it.
 
+With [arena] bench = "mirror" (a PUBLIC repository), nothing here reaches a
+bench: phase 2 runs in a private mirror repository that pulls this one
+(subject-template/mirror/), and its result comes back as the commit status
+`arena/phase2`, which release-gate.sh reads ([phase2] evidence = "status").
+
 Without a policy.toml, `plan` reproduces the 0.3.x kit's behaviour, so an
 engine bump alone changes nothing an adopter did not choose.
 
@@ -77,7 +82,13 @@ SCHEMA = {
     "phase1": {"checks": True, "bench": "off", "floor": [], "setup": {},
                "os": ["ubuntu-latest"]},
     "phase2": {"on": list(PHASE2_TRIGGERS), "release_gate": True,
-               "max_age_days": 0},
+               "max_age_days": 0, "evidence": "job"},
+    # Where the bench runs. "self-hosted": this repository's own runner
+    # (label `arena`). "mirror": a PRIVATE mirror repository runs phase 2 on
+    # its runner, and this one has no self-hosted job at all -- for a PUBLIC
+    # repository, where a fork can bring its own workflow to any runner it
+    # can reach. See subject-template/mirror/README.md.
+    "arena": {"bench": "self-hosted", "mirror": ""},
     "check": {"allow_drift": [], "docs": False},
     # Ship git history into the bench (scenarios that clone their own
     # tags, an update path). Off by default: .git on CI holds the job's
@@ -119,10 +130,29 @@ KIT_FILES = {
     "gentar/dryrun.py": "subject-template/gentar/dryrun.py",
     "gentar/plan.py": "subject-template/gentar/plan.py",
     "gentar/release-gate.sh": "subject-template/gentar/release-gate.sh",
+    "gentar/mirror.sh": "subject-template/gentar/mirror.sh",
     ".github/workflows/gentar-arena.yml":
         "subject-template/.github/workflows/gentar-arena.yml",
 }
-OPTIONAL_KIT_FILES = {".github/workflows/gentar-arena.yml", "gentar/release-gate.sh"}
+OPTIONAL_KIT_FILES = {".github/workflows/gentar-arena.yml", "gentar/release-gate.sh",
+                      "gentar/mirror.sh"}
+# With [arena] bench = "mirror", this repository's workflow is the kit's
+# PUBLIC variant: plan and checks, GitHub-hosted, and no self-hosted job.
+MIRROR_WORKFLOW = "subject-template/mirror/public/.github/workflows/gentar-arena.yml"
+MIRROR_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+EVIDENCE = ("job", "status")
+
+
+def kit_files(policy):
+    """KIT_FILES, with the workflow this repository's [arena] mode needs."""
+    files = dict(KIT_FILES)
+    if mirror_mode(policy):
+        files[".github/workflows/gentar-arena.yml"] = MIRROR_WORKFLOW
+    return files
+
+
+def mirror_mode(policy):
+    return bool(policy) and policy["arena"]["bench"] == "mirror"
 
 
 class Refuse(Exception):
@@ -186,6 +216,25 @@ def load_policy(path=POLICY):
     if not isinstance(p2["max_age_days"], int) or isinstance(p2["max_age_days"], bool) \
             or p2["max_age_days"] < 0:
         raise Refuse("[phase2] max_age_days must be a whole number of days (0 = no limit)")
+    if p2["evidence"] not in EVIDENCE:
+        raise Refuse(f"[phase2] evidence must be \"job\" or \"status\" (got {p2['evidence']!r})")
+    arena = out["arena"]
+    if arena["bench"] not in ("self-hosted", "mirror"):
+        raise Refuse(f"[arena] bench must be \"self-hosted\" or \"mirror\" (got {arena['bench']!r})")
+    if not isinstance(arena["mirror"], str) or (arena["mirror"] and not MIRROR_REPO.fullmatch(arena["mirror"])):
+        raise Refuse(f"[arena] mirror must be the private mirror as \"owner/name\" (got {arena['mirror']!r})")
+    if arena["bench"] == "mirror":
+        # No self-hosted runner serves this repository, so nothing here may
+        # need one, and phase 2's proof is the mirror's commit status.
+        if not arena["mirror"]:
+            raise Refuse("[arena] bench = \"mirror\" needs [arena] mirror = \"owner/name\"")
+        if p1["bench"] != "off" or p1["floor"]:
+            raise Refuse("[arena] bench = \"mirror\": this repository has no bench runner, so "
+                         "[phase1] bench must be \"off\" and [phase1] floor empty (the mirror "
+                         "runs phase 2; its schedule covers the default branch)")
+        if p2["release_gate"] and p2["evidence"] != "status":
+            raise Refuse("[arena] bench = \"mirror\": the arena / phase2 job runs in the mirror, "
+                         "so the release gate reads its commit status: set [phase2] evidence = \"status\"")
     route_names(out)
     for f in _strings(out["check"]["allow_drift"], "[check] allow_drift"):
         if f not in KIT_FILES:
@@ -373,8 +422,24 @@ def plan(env, policy):
             return {**res, "bench": "phase2", "reason": "no policy.toml: full sweep"}
         return {**res, "reason": f"no policy.toml: nothing runs on {event or 'this event'}"}
 
+    if mirror_mode(policy):
+        if runner is not None:
+            raise Refuse("[arena] bench = \"mirror\": this repository's checks run GitHub-hosted "
+                         "(its workflow has no self-hosted job); unset GENTAR_CI_RUNNER")
+        out = _plan_policy(env, policy, res, event, ref, default, fork, tag, dispatch, targeted)
+        if out["bench"] != "none":
+            out = {**out, "bench": "none", "suites": [],
+                   "reason": f"{out['reason']} -- runs in the private mirror "
+                             f"{policy['arena']['mirror']}, not here (gentar/mirror.sh dispatch <sha>)"}
+        return out
+    return _plan_policy(env, policy, res, event, ref, default, fork, tag, dispatch, targeted)
+
+
+def _plan_policy(env, policy, res, event, ref, default, fork, tag, dispatch, targeted):
+    """plan() under a policy.toml."""
     p1, p2 = policy["phase1"], policy["phase2"]
     res["setup"] = dict(p1["setup"])
+    runner = ci_runner(env)
     if runner is None:
         res["os"] = list(dict.fromkeys(p1["os"]))
     elif any(o != "ubuntu-latest" for o in p1["os"]):
@@ -522,7 +587,7 @@ def lint(policy, engine_root):
     #    policy.toml, scenarios/.
     allowed = set(policy["check"]["allow_drift"]) if policy else set()
     repo = HERE.parent
-    for mine, theirs in KIT_FILES.items():
+    for mine, theirs in kit_files(policy).items():
         a, b = repo / mine, Path(engine_root) / theirs
         if not b.exists():
             continue                      # an older engine without this file
@@ -643,6 +708,12 @@ def main(argv):
             p2 = (policy or {}).get("phase2") or SCHEMA["phase2"]
             print(f"release_gate={'true' if p2['release_gate'] else 'false'}")
             print(f"max_age_days={p2['max_age_days']}")
+            print(f"evidence={p2.get('evidence', 'job')}")
+            return 0
+        if cmd == "arena-config":          # mirror.sh's view of [arena]
+            arena = (policy or {}).get("arena") or SCHEMA["arena"]
+            print(f"bench={arena['bench']}")
+            print(f"mirror={arena['mirror']}")
             return 0
         if cmd == "lint":
             engine = argv[2] if len(argv) > 2 else str(HERE / ".arena")
@@ -655,8 +726,8 @@ def main(argv):
     except Refuse as exc:
         print(f"plan: {exc}", file=sys.stderr)
         return 2
-    print("usage: gentar/plan.py plan | lint [engine-root] | gate-config | route | "
-          "stage-git <repo> <dest>",
+    print("usage: gentar/plan.py plan | lint [engine-root] | gate-config | arena-config | "
+          "route | stage-git <repo> <dest>",
           file=sys.stderr)
     return 2
 

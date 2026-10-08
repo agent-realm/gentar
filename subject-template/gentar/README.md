@@ -407,6 +407,15 @@ are absent are skipped and named, not run into a red refusal. It tears down
 with `gentar/run.sh --down`, which also removes the bench sandboxes a cancelled
 job left behind — and never touches an arena another live run holds.
 
+**A PUBLIC repository.** Register no self-hosted runner on it: a fork can
+bring its own workflow to any runner there. Use the arena mirror instead
+(`[arena] bench = "mirror"`): the public repository runs the kit's public
+variant workflow (GitHub-hosted plan and checks only), and a private mirror
+pulls it, verifies the commit, and runs phase 2 on its own runner. The
+result comes back as the commit status `arena/phase2`, which the release
+gate reads with `[phase2] evidence = "status"`. Run it with
+`gentar/mirror.sh dispatch <sha>`. Setup: `subject-template/mirror/README.md`.
+
 **Your own secrets.** A suite that needs a secret the kit does not wire
 (a read key for your own service, say) declares it as usual, in
 `credentials` or `pass_env`, and `gentar/policy.toml` routes it by name:
@@ -464,6 +473,7 @@ gentar/
   policy.toml        # run policy — which suites run when (this repo's own)
   hooks.py           # dry-run hooks: prepare(), HIDE_FROM_PATH (this repo's own)
   run.sh             # kit — stage, run, report; --check, --plan, --route, --down
+  mirror.sh          # kit — phase 2 in the arena mirror (public repos)
   dryrun.py          # kit — local, bench-less step/assertion replay
   plan.py            # kit — the run policy's only reader
   release-gate.sh    # kit — may this commit be released?

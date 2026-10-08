@@ -1,0 +1,9 @@
+# A suite that needs a secret of the subject's own. It declares the NAME;
+# the policy routes it ([secrets] route), and the mirror holds the value.
+[scenario]
+name = "example-reads-its-service"
+subject = "example"
+pass_env = ["EXAMPLE_READ_KEY"]
+
+[oracle]
+steps = ['test -n "$EXAMPLE_READ_KEY"']   # present in the bench; never printed

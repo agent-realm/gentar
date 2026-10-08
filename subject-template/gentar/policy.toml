@@ -31,6 +31,17 @@ on = ["dispatch", "arena", "rc"]   # manual dispatch · the `arena` tag · v*-rc
 release_gate = true    # gentar/release-gate.sh refuses a v* release whose
                        # commit has no green `arena / phase2` job
 max_age_days = 0       # >0: that phase 2 must also be this recent
+evidence = "job"       # what proves phase 2 to the release gate: "job" = a
+                       # green `arena / phase2` job in this repo's runs;
+                       # "status" = a success commit status `arena/phase2`
+                       # (what a private arena mirror posts, below)
+
+[arena]
+bench = "self-hosted"  # "self-hosted": this repo's runner (label `arena`)
+                       # runs the bench. "mirror": a PRIVATE mirror repo runs
+                       # phase 2 and this repo has no self-hosted job -- for
+                       # a PUBLIC repo (subject-template/mirror/README.md)
+mirror = ""            # with bench = "mirror": the mirror, "owner/name"
 
 [check]
 docs = true            # the docs standard, checked by --check (missing, not

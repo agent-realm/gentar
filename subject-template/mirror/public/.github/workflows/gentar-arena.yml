@@ -1,0 +1,156 @@
+# gentar own arena, PUBLIC-repository variant: plan and checks only, both
+# GitHub-hosted. There is NO self-hosted job here, so nothing in this file
+# -- or in a fork's copy of it -- can be scheduled on a runner holding the
+# bench key: no self-hosted runner is registered to this repository at all.
+# Phase 2 runs in a PRIVATE mirror repository, which pulls this one and
+# reports back as the commit status `arena/phase2` (subject-template/mirror/,
+# `gentar/mirror.sh dispatch <sha>`).
+#
+# Selected by [arena] bench = "mirror" in gentar/policy.toml; `gentar/run.sh
+# --check` then compares this file, byte for byte, with the kit's copy of
+# this variant. Its plan and checks steps are the default workflow's own.
+#
+#   plan     GitHub-hosted. Reads the policy and the event, decides.
+#   checks   GitHub-hosted. Phase 1's bench-free checks: dry-run of every
+#            suite, adaptation lint, kit drift.
+name: arena
+
+on:
+  pull_request:
+  push:
+    # Every branch: only the planner knows the default one, from the event.
+    branches: ['**']
+    tags: ['v*']
+
+concurrency:
+  group: gentar-arena-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    # GitHub-hosted, always: GENTAR_CI_RUNNER is refused in this mode
+    # (plan.py), because a public repository's pull requests run here.
+    runs-on: ubuntu-latest
+    outputs:
+      checks: ${{ steps.plan.outputs.checks }}
+      bench: ${{ steps.plan.outputs.bench }}
+      suites: ${{ steps.plan.outputs.suites }}
+      os: ${{ steps.plan.outputs.os }}
+      runner: ${{ steps.plan.outputs.runner }}
+      setup_go: ${{ steps.plan.outputs.setup_go }}
+      setup_node: ${{ steps.plan.outputs.setup_node }}
+      setup_python: ${{ steps.plan.outputs.setup_python }}
+      # [secrets] route: secret NAMES, one per slot (empty = unused).
+      route_1: ${{ steps.plan.outputs.route_1 }}
+      route_2: ${{ steps.plan.outputs.route_2 }}
+      route_3: ${{ steps.plan.outputs.route_3 }}
+      route_4: ${{ steps.plan.outputs.route_4 }}
+      route_5: ${{ steps.plan.outputs.route_5 }}
+      route_6: ${{ steps.plan.outputs.route_6 }}
+      route_7: ${{ steps.plan.outputs.route_7 }}
+      route_8: ${{ steps.plan.outputs.route_8 }}
+    steps:
+      # Temp files go to this job's own temp dir, which the runner empties
+      # after every job. On a self-hosted runner /tmp is shared and never
+      # cleaned: a failing dry-run keeps its scratch homes there, and a
+      # suite's own mktemp steps add more (a runner LXC's tmpfs once filled
+      # 7.4 GB this way, 2026-10-07). Harmless on GitHub-hosted runners. The
+      # arena's lock and bench workspaces use fixed /tmp paths on purpose.
+      - name: temp files into the job's temp dir
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - id: plan
+        # Event text reaches the planner through env, never pasted into
+        # the script: a PR body is text a stranger can write.
+        run: python3 gentar/plan.py plan
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          SCENARIO_INPUT: ${{ github.event.inputs.scenario }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GENTAR_FLOOR: ${{ vars.GENTAR_FLOOR }}   # only read without a policy.toml
+          GENTAR_CI_RUNNER: ${{ vars.GENTAR_CI_RUNNER }}   # validated, and logged as runner=
+
+  checks:
+    needs: plan
+    if: needs.plan.outputs.checks == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Temp files go to this job's own temp dir, which the runner empties
+      # after every job. On a self-hosted runner /tmp is shared and never
+      # cleaned: a failing dry-run keeps its scratch homes there, and a
+      # suite's own mktemp steps add more (a runner LXC's tmpfs once filled
+      # 7.4 GB this way, 2026-10-07). Harmless on GitHub-hosted runners. The
+      # arena's lock and bench workspaces use fixed /tmp paths on purpose.
+      - name: temp files into the job's temp dir
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      # A cancelled job can leave its key files behind in RUNNER_TEMP on a
+      # self-hosted runner (the runner does not always empty it). Start
+      # without them; the always() step at the end removes this job's own.
+      - name: remove stale key files
+        run: rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"
+      - uses: actions/checkout@v4
+      # Toolchains the dry-run's prepare() needs, declared in the policy
+      # ([phase1] setup); anything else goes in gentar/phase1-setup.sh.
+      - if: needs.plan.outputs.setup_go != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ needs.plan.outputs.setup_go }}
+      - if: needs.plan.outputs.setup_node != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.plan.outputs.setup_node }}
+      - if: needs.plan.outputs.setup_python != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ needs.plan.outputs.setup_python }}
+      - if: hashFiles('gentar/phase1-setup.sh') != ''
+        run: bash gentar/phase1-setup.sh
+      - name: make the runner bench-like
+        # A bench runs as an unprivileged user, so system bin dirs are not
+        # writable there. On a hosted runner they are, and an install a suite
+        # runs would land in /usr/local/bin instead of ~/.local/bin — passing
+        # or failing for the runner's reasons, not the bench's. After the
+        # toolchain setup above, which may still need them. Hosted runners
+        # only: on a persistent self-hosted runner this would change the
+        # host itself, and its unprivileged user cannot write there anyway.
+        if: runner.environment == 'github-hosted'
+        run: |
+          group=root; [ "$(uname)" = Darwin ] && group=wheel
+          for d in /usr/local/bin /usr/local/sbin; do
+            [ -d "$d" ] || continue
+            sudo chown "root:$group" "$d" && sudo chmod 755 "$d"
+          done
+      - name: bench-free checks
+        run: |
+          # Only when the ENGINE repo is private: a read-only deploy key on
+          # it. A fork's PR gets no secrets; run.sh then names the skip
+          # rather than passing silently.
+          if [ -n "$CLONE_KEY" ]; then
+            (umask 077; printf '%s\n' "$CLONE_KEY" > "$RUNNER_TEMP/gentar_clone_key")
+            chmod 600 "$RUNNER_TEMP/gentar_clone_key"
+            export GENTAR_CLONE_SSH_KEY="$RUNNER_TEMP/gentar_clone_key"
+          fi
+          gentar/run.sh --check
+        env:
+          CLONE_KEY: ${{ secrets.GENTAR_CLONE_KEY }}
+          GENTAR_REPO_URL: ${{ vars.GENTAR_REPO_URL }}
+          # Engine ref: a dispatch input, else the repository variable
+          # GENTAR_REF, else run.sh's pin. The variable is how an adopter
+          # proves an untagged engine (a branch, a release candidate) in CI
+          # on PRs and tags without editing a kit file; delete it after.
+          GENTAR_REF: ${{ github.event.inputs.gentar_ref || vars.GENTAR_REF }}
+          GENTAR_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+
+      - name: remove key files
+        # Last, and always (cancellation included): a key must not outlive
+        # its job on a self-hosted runner. Nothing slow runs before it here.
+        if: always()
+        run: rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"

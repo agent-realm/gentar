@@ -23,6 +23,30 @@ Adopters pin a release tag, not a branch.
 ## Unreleased
 
 ### Added
+- **The arena mirror: phase 2 for a PUBLIC repository, with no self-hosted
+  runner on it.** `[arena] bench = "mirror"` (with `mirror = "owner/name"`)
+  puts the repository on the kit's public variant workflow
+  (`subject-template/mirror/public/`: plan and checks, GitHub-hosted, no
+  self-hosted job), which `--check` holds it to; `plan.py` then plans no
+  bench here, and refuses a floor, `bench = "declared"` or a
+  `GENTAR_CI_RUNNER`. A private mirror (`subject-template/mirror/arena/`)
+  pulls the public repository and runs the kit's own bench job on a commit
+  `verify-ref.sh` admitted: reachable from the default branch or a `v*` tag,
+  or any branch head when the MIRROR's variable `GENTAR_ALLOW_BRANCH_HEADS`
+  is `true` (default off). Since GitHub serves a fork's commit by sha
+  through the parent's URL, it fetches only those refs (never
+  `refs/pull/*`, no partial clone) and checks ancestry. `verify-ref.sh` is
+  self-contained, so a mirror can vendor one file. The mirror's daily
+  schedule is a no-op on an already-green default-branch head.
+- **`gentar/mirror.sh dispatch <sha> [suites]`** runs the mirror, waits, and
+  for a full phase 2 posts the commit status `arena/phase2` (success,
+  failure, or error) linking the mirror run. It finds its own run by a
+  request id, never "the newest". `mirror.sh status <sha>` reads it back. A
+  mirror holding `GENTAR_STATUS_TOKEN` posts the status itself.
+- **`[phase2] evidence = "status"`**: `release-gate.sh` then requires the
+  latest `arena/phase2` commit status on exactly the release sha to be
+  `success` (`max_age_days` applies). Mirror mode requires it whenever the
+  gate is on.
 - **`[secrets] route` — a subject's own secrets reach its suites by name.**
   Declare up to 8 repository secrets in `gentar/policy.toml`; the kit's bench
   job looks each one up in a fixed slot (`secrets[<declared name>]`, never the

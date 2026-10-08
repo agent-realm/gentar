@@ -1,0 +1,378 @@
+# gentar arena MIRROR: the workflow of a PRIVATE repository that runs a
+# PUBLIC repository's phase 2 on a self-hosted runner. Copy this directory
+# (subject-template/mirror/arena/) into the mirror repository as it is; the
+# public repository uses the kit's public variant workflow, which has no
+# self-hosted job. Setup: subject-template/mirror/README.md.
+#
+# Trust. This file and verify-ref.sh are the MIRROR's own: the public
+# repository's files never supply a workflow here, and nothing pushes to
+# the mirror. A run admits one public commit, verified to be reachable from
+# the public repository's default branch or a `v*` tag (or any branch head,
+# with the variable GENTAR_ALLOW_BRANCH_HEADS = true) -- refs only its
+# collaborators write. Never refs/pull/*: GitHub serves a fork's commit by
+# sha through the parent's URL, which is why verify-ref.sh checks ancestry
+# after fetching only those refs, and why the bench job checks out the
+# verified sha and nothing else. Admitting a commit is trusting its authors
+# with this runner: its run.sh runs here, with the bench key.
+#
+#   plan     GitHub-hosted, no secrets. Verifies the commit, reads the
+#            public repository's [secrets] route at it, and skips a
+#            scheduled run whose commit already has a green phase 2 here.
+#   bench    self-hosted, label `arena`: the kit's own bench steps.
+#            `arena / phase2` (the full regression) or `arena / targeted`.
+#   status   GitHub-hosted. With the secret GENTAR_STATUS_TOKEN (a token
+#            allowed to write commit statuses on the public repository),
+#            posts `arena/phase2` on the public commit. Without it, the
+#            dispatcher posts it (gentar/mirror.sh dispatch).
+#
+# Variables: GENTAR_PUBLIC_REPO (owner/name, required),
+# GENTAR_ALLOW_BRANCH_HEADS (true to admit branch heads; default off), and
+# the kit bench job's own (GENTAR_BENCH_HOST, GENTAR_REF, ...). Secrets:
+# the kit bench job's (BENCH_SSH_KEY, GENTAR_BENCH_USER, provider keys, and
+# every name the public repository routes), plus GENTAR_STATUS_TOKEN.
+name: arena
+run-name: arena ${{ inputs.sha || 'default branch' }} ${{ inputs.request }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: public commit, full 40-character sha (empty = its default branch head)
+        default: ''
+      scenario:
+        description: suites to run (empty = phase 2, the full regression)
+        default: ''
+      gentar_ref:
+        description: gentar ref to run the arena from (empty = the pin in run.sh)
+        default: ''
+      request:
+        description: an id the dispatcher finds its run by (gentar/mirror.sh sets it)
+        default: ''
+  schedule:
+    # Daily; a no-op (one short hosted job) when the public default branch
+    # head already has a green phase 2 here.
+    - cron: "41 3 * * *"
+
+# No concurrency group: GitHub cancels a PENDING run when a newer one
+# queues. Arenas are serialised on the runner host by run.sh's lock.
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.verify.outputs.sha }}
+      via: ${{ steps.verify.outputs.via }}
+      bench: ${{ steps.plan.outputs.bench }}
+      suites: ${{ steps.plan.outputs.suites }}
+      route_1: ${{ steps.plan.outputs.route_1 }}
+      route_2: ${{ steps.plan.outputs.route_2 }}
+      route_3: ${{ steps.plan.outputs.route_3 }}
+      route_4: ${{ steps.plan.outputs.route_4 }}
+      route_5: ${{ steps.plan.outputs.route_5 }}
+      route_6: ${{ steps.plan.outputs.route_6 }}
+      route_7: ${{ steps.plan.outputs.route_7 }}
+      route_8: ${{ steps.plan.outputs.route_8 }}
+    steps:
+      # This repository: verify-ref.sh comes from here, never from the tree
+      # it checks.
+      - uses: actions/checkout@v4
+        with:
+          path: mirror
+          persist-credentials: false
+      - id: verify
+        run: |
+          case "$PUBLIC" in
+            */*/*|-*|*[!A-Za-z0-9._/-]*) echo "::error::GENTAR_PUBLIC_REPO is not owner/name: $PUBLIC" >&2; exit 2 ;;
+            */*) ;;
+            *) echo "::error::set the repository variable GENTAR_PUBLIC_REPO (owner/name)" >&2; exit 2 ;;
+          esac
+          flag=""; [ "$ALLOW" = true ] && flag=--allow-branch-heads
+          bash mirror/verify-ref.sh $flag "https://github.com/$PUBLIC.git" "$SHA"
+        env:
+          PUBLIC: ${{ vars.GENTAR_PUBLIC_REPO }}
+          ALLOW: ${{ vars.GENTAR_ALLOW_BRANCH_HEADS }}
+          SHA: ${{ inputs.sha }}
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GENTAR_PUBLIC_REPO }}
+          ref: ${{ steps.verify.outputs.sha }}
+          path: subject
+          persist-credentials: false
+      - id: plan
+        # The public repository's plan.py, at the verified commit, on this
+        # hosted runner with no secrets: it reads names (routes, suites),
+        # never a value.
+        working-directory: subject
+        run: |
+          test "$(git rev-parse HEAD)" = "$SHA" || { echo "::error::not the verified commit" >&2; exit 2; }
+          routes=$(python3 gentar/plan.py route)
+          i=0
+          for n in $routes; do i=$((i + 1)); echo "route_$i=$n"; done >> "$GITHUB_OUTPUT"
+          bench=phase2 suites=""
+          if [ -n "$SCENARIO" ]; then
+            for s in $SCENARIO; do
+              case "$s" in *[!A-Za-z0-9._-]*) echo "::error::not a suite name: $s" >&2; exit 2 ;; esac
+              [ -f "gentar/scenarios/$s.toml" ] || { echo "::error::no suite $s at $SHA" >&2; exit 2; }
+            done
+            bench=targeted suites=$SCENARIO
+          elif [ "$EVENT" = schedule ]; then
+            green=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=phase2-green-$SHA" \
+                      --jq '[.artifacts[] | select(.expired | not)] | length')
+            if [ "${green:-0}" -gt 0 ]; then
+              echo "phase 2 is already green on $SHA ($VIA): nothing to do"
+              bench=none
+            fi
+          fi
+          echo "bench=$bench" >> "$GITHUB_OUTPUT"
+          echo "suites=$suites" >> "$GITHUB_OUTPUT"
+          echo "plan: $bench on $SHA ($VIA)${suites:+: $suites}"
+        env:
+          SHA: ${{ steps.verify.outputs.sha }}
+          VIA: ${{ steps.verify.outputs.via }}
+          SCENARIO: ${{ inputs.scenario }}
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+
+  bench:
+    name: arena / ${{ needs.plan.outputs.bench }}
+    needs: plan
+    # Never a fork's pull request, whatever the plan says: checked from
+    # GitHub's context, which the PR's files cannot change.
+    if: needs.plan.outputs.bench != 'none'
+    runs-on: [self-hosted, arena]
+    env:
+      # Names every bench sandbox this job creates, so teardown removes the
+      # ones a CANCELLED job strands and nothing else on the shared
+      # bench-host (whole-name match). Unique per repository, run, attempt
+      # and job. sbx allows letters, digits and hyphens here and caps a
+      # name at 64 characters, 23 of them the run id.
+      GENTAR_NAME_PREFIX: g${{ github.repository_id }}-${{ github.run_id }}-a${{ github.run_attempt }}-${{ github.job }}${{ strategy.job-index }}
+      # Host port moves, from repository VARIABLES so this file stays the
+      # kit's: set them when another arena shares this Docker host (the
+      # ClickHouse debug binding 8123 and the OTLP receiver 4318 collide).
+      # Empty = the engine's default.
+      GENTAR_CLICKHOUSE_HOST_PORT: ${{ vars.GENTAR_CLICKHOUSE_HOST_PORT }}
+      GENTAR_OTLP_HOST_PORT: ${{ vars.GENTAR_OTLP_HOST_PORT }}
+      # Telemetry destination (optional): the collector every run ALSO
+      # forwards its whole trace to — ClickStack, say. Both or neither.
+      # SECRETS, not variables: an internal address and an ingestion key.
+      GENTAR_OTLP_EXPORT: ${{ secrets.GENTAR_OTLP_EXPORT }}
+      # Judge key for semantic (judged) turns — the arena coordinator's
+      # only, never forwarded to a bench. Unset = judged suites skipped by
+      # name in a sweep. A SECRET: it is an API key.
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      GENTAR_OTLP_KEY: ${{ secrets.GENTAR_OTLP_KEY }}
+    steps:
+      # Temp files go to this job's own temp dir, which the runner empties
+      # after every job. On a self-hosted runner /tmp is shared and never
+      # cleaned: a failing dry-run keeps its scratch homes there, and a
+      # suite's own mktemp steps add more (a runner LXC's tmpfs once filled
+      # 7.4 GB this way, 2026-10-07). Harmless on GitHub-hosted runners. The
+      # arena's lock and bench workspaces use fixed /tmp paths on purpose.
+      - name: temp files into the job's temp dir
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      # A cancelled job can leave its key files behind in RUNNER_TEMP on a
+      # self-hosted runner (the runner does not always empty it). Start
+      # without them; the always() step at the end removes this job's own.
+      - name: remove stale key files
+        run: rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"
+      # The PUBLIC repository at the commit the plan job verified -- never an
+      # input's sha directly. persist-credentials: false leaves no token in
+      # .git/config; the repository is public, so none is needed after this.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.GENTAR_PUBLIC_REPO }}
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0   # .gentar-version floats via git describe
+          persist-credentials: false
+      - name: the verified commit, and only it
+        run: |
+          test "$(git rev-parse HEAD)" = "$SHA" || {
+            echo "::error::checked out $(git rev-parse HEAD), not the verified $SHA" >&2; exit 2; }
+        env:
+          SHA: ${{ needs.plan.outputs.sha }}
+
+      - name: stage bench access
+        run: |
+          # Refuse BEFORE staging. A blank or whitespace-only secret would
+          # still be written as a file of a byte or two, pass every
+          # readability check here, and only be refused later by run.sh.
+          # Local bench mode: this runner IS the bench host, sbx is called
+          # directly, and there is no key, user or ssh at all.
+          if [ "$(printf '%s' "$GENTAR_BENCH_HOST" | tr -d '[:space:]')" = local ]; then
+            echo "bench: local (this runner's host; no ssh, no bench key)"
+          else
+          if [ -z "$(printf '%s' "$BENCH_KEY" | tr -d '[:space:]')" ]; then
+            echo "::error::repo secret BENCH_SSH_KEY is not set (or is blank)" >&2
+            exit 2
+          fi
+          # The engine ships NO bench-host; unset would fall back to the
+          # seeded .env's placeholder and fail every suite at ssh.
+          for v in GENTAR_BENCH_HOST GENTAR_BENCH_USER; do
+            eval "val=\${$v:-}"
+            case "$val" in
+              ''|*example.internal*)
+                echo "::error::$v is not set to a real bench-host (repo secret $v)" >&2
+                exit 2 ;;
+            esac
+          done
+          (umask 077; printf '%s\n' "$BENCH_KEY" > "$RUNNER_TEMP/bench_key")
+          chmod 600 "$RUNNER_TEMP/bench_key"
+          fi
+          if [ -n "$CLONE_KEY" ]; then
+            (umask 077; printf '%s\n' "$CLONE_KEY" > "$RUNNER_TEMP/gentar_clone_key")
+            chmod 600 "$RUNNER_TEMP/gentar_clone_key"
+          fi
+        env:
+          BENCH_KEY: ${{ secrets.BENCH_SSH_KEY }}
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
+          CLONE_KEY: ${{ secrets.GENTAR_CLONE_KEY }}
+
+      - name: run suites
+        # The plan decided; this only carries it out. phase2 = every suite
+        # this environment can run (credential-less ones skipped by name).
+        run: |
+          if [ "$BENCH" = phase2 ]; then
+            exec gentar/run.sh --sweep
+          fi
+          exec gentar/run.sh $SUITES
+        env:
+          BENCH: ${{ needs.plan.outputs.bench }}
+          SUITES: ${{ needs.plan.outputs.suites }}
+          # Engine ref: a dispatch input, else the repository variable
+          # GENTAR_REF, else run.sh's pin. The variable is how an adopter
+          # proves an untagged engine (a branch, a release candidate) in CI
+          # on PRs and tags without editing a kit file; delete it after.
+          GENTAR_REF: ${{ github.event.inputs.gentar_ref || vars.GENTAR_REF }}
+          GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
+          # SECRETS rather than variables: a public repo's logs are public.
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
+          GENTAR_CLONE_SSH_KEY: ${{ secrets.GENTAR_CLONE_KEY && format('{0}/gentar_clone_key', runner.temp) || '' }}
+          GENTAR_REPO_URL: ${{ vars.GENTAR_REPO_URL }}
+          # Agent-in-the-loop suites. Providers are alternatives: a
+          # first-party key, or any Anthropic-compatible endpoint via token
+          # + base URL. All unset leaves those suites out of a sweep.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
+          # Model pins: SLOT vars, all four for a routed endpoint (claude-code
+          # picks a slot itself; an unpinned one sends an Anthropic ID to an
+          # endpoint that never heard of it). repo var -> here -> run.sh ->
+          # coordinator -> bench; a pin added only downstream does nothing.
+          ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
+          ANTHROPIC_DEFAULT_OPUS_MODEL: ${{ vars.ANTHROPIC_DEFAULT_OPUS_MODEL }}
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: ${{ vars.ANTHROPIC_DEFAULT_HAIKU_MODEL }}
+          ANTHROPIC_DEFAULT_FABLE_MODEL: ${{ vars.ANTHROPIC_DEFAULT_FABLE_MODEL }}
+          # Ceiling the budget guard enforces; must be >= each agent suite's
+          # declared [budget] tokens. A repository variable overrides it.
+          GENTAR_BUDGET_CAP: ${{ vars.GENTAR_BUDGET_CAP || '50000' }}
+          # Subject secrets, routed BY NAME ([secrets] route in policy.toml):
+          # slot n holds the secret the plan named n-th, looked up one name
+          # at a time, so this step sees the declared secrets and no others.
+          # run.sh moves each value to its own name, clears the slots, and
+          # forwards a name only to suites that declare it. An unused slot
+          # is empty without a lookup.
+          GENTAR_ROUTE_1: ${{ needs.plan.outputs.route_1 && secrets[needs.plan.outputs.route_1] || '' }}
+          GENTAR_ROUTE_2: ${{ needs.plan.outputs.route_2 && secrets[needs.plan.outputs.route_2] || '' }}
+          GENTAR_ROUTE_3: ${{ needs.plan.outputs.route_3 && secrets[needs.plan.outputs.route_3] || '' }}
+          GENTAR_ROUTE_4: ${{ needs.plan.outputs.route_4 && secrets[needs.plan.outputs.route_4] || '' }}
+          GENTAR_ROUTE_5: ${{ needs.plan.outputs.route_5 && secrets[needs.plan.outputs.route_5] || '' }}
+          GENTAR_ROUTE_6: ${{ needs.plan.outputs.route_6 && secrets[needs.plan.outputs.route_6] || '' }}
+          GENTAR_ROUTE_7: ${{ needs.plan.outputs.route_7 && secrets[needs.plan.outputs.route_7] || '' }}
+          GENTAR_ROUTE_8: ${{ needs.plan.outputs.route_8 && secrets[needs.plan.outputs.route_8] || '' }}
+
+      - name: remove the clone key
+        # Nothing after the suites needs it (teardown uses the engine already
+        # staged), so it goes before any step that can be slow.
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gentar_clone_key"
+
+      - name: teardown
+        # Frees this repo's arena and removes this job's stranded bench
+        # sandboxes (by GENTAR_NAME_PREFIX). Leaves the arena alone while
+        # another run of this repo holds the host lock — it is theirs.
+        # The bench key goes with this step however it ends (done, failed,
+        # or stopped by a cancellation): GitHub gives a cancelled run's
+        # always() steps five minutes in all, so a later step cannot be
+        # trusted to run. The timeout keeps a hung bench host from using
+        # them up; the reports upload comes after.
+        if: always()
+        run: |
+          # In the background with `wait`: a trapped signal interrupts `wait`
+          # at once, while a foreground child would hold the trap back until
+          # the runner's SIGKILL, a few seconds after its first signal.
+          # On a signal the teardown itself is stopped too; `timeout -k`
+          # also kills a run.sh that ignores TERM, and a runner without
+          # `timeout` (stock macOS) still tears down.
+          pid=
+          keys_gone() { rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"; }
+          on_signal() { if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi; keys_gone; exit "$1"; }
+          trap keys_gone EXIT
+          trap 'on_signal 130' INT
+          trap 'on_signal 143' TERM
+          if command -v timeout >/dev/null 2>&1; then
+            timeout -k 10 180 gentar/run.sh --down & pid=$!
+          else
+            gentar/run.sh --down & pid=$!
+          fi
+          wait "$pid" || true
+        env:
+          GENTAR_BENCH_KEY_FILE: ${{ runner.temp }}/bench_key
+          GENTAR_BENCH_HOST: ${{ secrets.GENTAR_BENCH_HOST || vars.GENTAR_BENCH_HOST }}
+          GENTAR_BENCH_USER: ${{ secrets.GENTAR_BENCH_USER }}
+
+      - name: upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arena-reports
+          path: gentar/reports/
+          if-no-files-found: error
+
+      - name: remove key files
+        # A backstop, always (cancellation included): a key must not outlive
+        # its job on a self-hosted runner. The teardown's trap normally
+        # removed both already.
+        if: always()
+        run: rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"
+
+      # Green phase 2 on this commit: a marker the next scheduled run looks
+      # for, so an unchanged default branch is not swept again.
+      - name: mark phase 2 green
+        if: success() && needs.plan.outputs.bench == 'phase2'
+        run: printf '%s\n' "$SHA" > "$RUNNER_TEMP/phase2-green"
+        env:
+          SHA: ${{ needs.plan.outputs.sha }}
+      - if: success() && needs.plan.outputs.bench == 'phase2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-green-${{ needs.plan.outputs.sha }}
+          path: ${{ runner.temp }}/phase2-green
+
+  status:
+    needs: [plan, bench]
+    if: always() && needs.plan.outputs.bench == 'phase2' && needs.bench.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: post arena/phase2 on the public commit
+        run: |
+          if [ -z "$STATUS_TOKEN" ]; then
+            echo "no GENTAR_STATUS_TOKEN here: the dispatcher posts arena/phase2 (gentar/mirror.sh dispatch)"
+            exit 0
+          fi
+          case "$RESULT" in success|failure) state=$RESULT ;; *) state=error ;; esac
+          GH_TOKEN="$STATUS_TOKEN" gh api -X POST "repos/$PUBLIC/statuses/$SHA" \
+            -f state="$state" -f context=arena/phase2 -f target_url="$RUN_URL" \
+            -f description="phase 2: $RESULT (arena mirror)" >/dev/null
+          echo "posted arena/phase2 = $state on $PUBLIC@$SHA"
+        env:
+          STATUS_TOKEN: ${{ secrets.GENTAR_STATUS_TOKEN }}
+          RESULT: ${{ needs.bench.result }}
+          PUBLIC: ${{ vars.GENTAR_PUBLIC_REPO }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
