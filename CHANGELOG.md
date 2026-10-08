@@ -38,6 +38,12 @@ Adopters pin a release tag, not a branch.
   `refs/pull/*`, no partial clone) and checks ancestry. `verify-ref.sh` is
   self-contained, so a mirror can vendor one file. The mirror's daily
   schedule is a no-op on an already-green default-branch head.
+  Routed secrets have an upper bound in the MIRROR: its variable
+  `GENTAR_ROUTE_ALLOW` names what it will route, and a commit's
+  `[secrets] route` can only narrow it (`route.py`; a dropped name keeps its
+  slot empty and is logged by name). The mirror's plan job runs none of the
+  public repository's code, so a branch editing its own policy or `plan.py`
+  reaches no secret the mirror did not offer.
 - **`gentar/mirror.sh dispatch <sha> [suites]`** runs the mirror, waits, and
   for a full phase 2 posts the commit status `arena/phase2` (success,
   failure, or error) linking the mirror run. It finds its own run by a

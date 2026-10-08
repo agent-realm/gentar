@@ -20,7 +20,7 @@ The fix is to register no self-hosted runner there at all.
 ```
 public repo (owner/name)                       private mirror (owner/name-arena)
   .github/workflows/gentar-arena.yml  <-- this    .github/workflows/arena.yml  <-- arena/
-    (public/ variant: plan + checks)               verify-ref.sh                <-- arena/
+    (public/ variant: plan + checks)               verify-ref.sh, route.py      <-- arena/
   gentar/  (the kit, as usual)
   gentar/policy.toml: [arena] bench = "mirror"     runner: label `arena`
                                                    secrets: bench key, provider keys,
@@ -50,6 +50,14 @@ ancestry. The bench job checks out the verified sha and nothing else.
 from the public repository's files, so a branch cannot widen its own
 admission.
 
+The same holds for secrets. The mirror's variable `GENTAR_ROUTE_ALLOW`
+names the subject secrets it will route, and it is the upper bound. A
+commit's `[secrets] route` can only narrow it: a name the mirror does not
+allow gets an empty slot, and the plan job names it (the name only).
+`route.py` reads the commit's policy as data; the plan job runs none of
+the public repository's code. So a branch that edits its own policy, or
+its `plan.py`, still reaches no secret the mirror did not offer.
+
 ## Set it up
 
 1. **The public repository.**
@@ -77,16 +85,19 @@ admission.
 
 2. **The mirror** (private, created by whoever owns the organisation).
    - Copy `subject-template/mirror/arena/` into its root:
-     `.github/workflows/arena.yml` and `verify-ref.sh`.
+     `.github/workflows/arena.yml`, `verify-ref.sh` and `route.py`.
    - Variables:
      - `GENTAR_PUBLIC_REPO = owner/name`
      - `GENTAR_ALLOW_BRANCH_HEADS = true` (optional)
+     - `GENTAR_ROUTE_ALLOW = "NAME_A NAME_B"`: the subject secrets this
+       mirror will route (empty: none). `GENTAR_*`, `GITHUB_*`,
+       `ACTIONS_*`, `RUNNER_*` and `BENCH_SSH_KEY` are refused.
      - the kit bench job's own: `GENTAR_BENCH_HOST`, `GENTAR_REF`,
        `ANTHROPIC_BASE_URL`, the model pins, the host ports.
    - Secrets, set by reference (`with-secret`, piped), never pasted:
      - `BENCH_SSH_KEY`, `GENTAR_BENCH_USER`
      - the provider keys the agent suites need
-     - every name the public policy routes (`[secrets] route`)
+     - every name in `GENTAR_ROUTE_ALLOW`
      - optionally `GENTAR_STATUS_TOKEN`: a fine-grained token allowed to
        write commit statuses on the public repository, so the mirror posts
        `arena/phase2` itself.

@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -294,12 +295,128 @@ class MirrorWorkflowTest(unittest.TestCase):
         self.assertIn('GH_TOKEN="$STATUS_TOKEN" gh api -X POST', steps[0])
         self.assertIn("context=arena/phase2", steps[0])
 
-    def test_routes_are_read_at_the_verified_commit(self):
+    def test_routes_are_the_mirrors_allowlist_narrowed_by_the_commit(self):
         _, steps = self.jobs["plan"]
-        self.assertIn("python3 gentar/plan.py route", steps[3])
+        self.assertIn('python3 ../mirror/route.py gentar/policy.toml "$ROUTE_ALLOW"', steps[3])
+        self.assertIn("ROUTE_ALLOW: ${{ vars.GENTAR_ROUTE_ALLOW }}", steps[3])
         self.assertIn("working-directory: subject", steps[3])
+        self.assertEqual(self.text.count("GENTAR_ROUTE_ALLOW }}"), 1)
         for i in range(1, 9):
             self.assertIn(f"route_{i}: ${{{{ steps.plan.outputs.route_{i} }}}}", self.text)
+
+    def test_the_plan_job_runs_none_of_the_public_trees_code(self):
+        _, steps = self.jobs["plan"]
+        for s in steps:
+            with self.subTest(step=s.splitlines()[0]):
+                self.assertNotRegex(s, r"(python3|bash|sh) gentar/|\./gentar/|gentar/(run|mirror)\.sh|plan\.py")
+
+
+ROUTE_PY = ROOT / "subject-template" / "mirror" / "arena" / "route.py"
+
+
+@unittest.skipUnless(ROUTE_PY.exists(), "the kit is not in the image build context")
+class MirrorRouteTest(unittest.TestCase):
+    """The mirror's GENTAR_ROUTE_ALLOW is the upper bound; a commit's
+    policy can only narrow it (AK47, required before v0.10.0)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def route(self, policy, allow):
+        f = self.tmp / "policy.toml"
+        if policy is None:
+            f.unlink(missing_ok=True)
+        else:
+            f.write_text(policy)
+        out = self.tmp / "gh-output"
+        out.unlink(missing_ok=True)
+        r = subprocess.run([sys.executable, str(ROUTE_PY), str(f), allow], capture_output=True,
+                           text=True, env={**os.environ, "GITHUB_OUTPUT": str(out)})
+        slots = dict(l.split("=", 1) for l in r.stdout.splitlines())
+        return r, slots, (out.read_text() if out.exists() else "")
+
+    def test_only_names_both_sides_name_and_positions_hold(self):
+        r, slots, out = self.route('[secrets]\nroute = ["A_KEY", "EXTRA_KEY", "C_KEY"]\n', "A_KEY C_KEY OTHER")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([slots[f"route_{i}"] for i in range(1, 9)],
+                         ["A_KEY", "", "C_KEY", "", "", "", "", ""])
+        self.assertEqual(out, r.stdout)
+        self.assertIn("not routed: EXTRA_KEY", r.stderr)
+
+    def test_an_empty_allowlist_routes_nothing(self):
+        r, slots, _ = self.route('[secrets]\nroute = ["A_KEY"]\n', "")
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(set(slots.values()), {""})
+        self.assertIn("not routed: A_KEY", r.stderr)
+
+    def test_no_policy_routes_nothing(self):
+        r, slots, _ = self.route(None, "A_KEY")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(slots), 8)
+        self.assertEqual(set(slots.values()), {""})
+
+    def test_the_allowlist_never_hands_out_the_arenas_own(self):
+        for bad in ("BENCH_SSH_KEY", "GENTAR_STATUS_TOKEN", "GITHUB_TOKEN", "lower", "A;B"):
+            with self.subTest(name=bad):
+                r, _, _ = self.route('[secrets]\nroute = ["A_KEY"]\n', f"A_KEY {bad}")
+                self.assertEqual(r.returncode, 2)
+
+    def test_a_malformed_commit_policy_is_refused(self):
+        for bad in ('[secrets]\nroute = "A_KEY"\n', '[secrets\n',
+                    '[secrets]\nroute = [%s]\n' % ", ".join(f'"K{i}"' for i in range(9))):
+            with self.subTest(policy=bad):
+                r, _, _ = self.route(bad, "A_KEY")
+                self.assertEqual(r.returncode, 2)
+
+    def test_a_branch_that_widens_its_own_route_gets_nothing_for_it(self):
+        # End to end with branch heads admitted: a collaborator's branch adds
+        # a secret name to its policy. verify-ref admits the branch; the
+        # mirror's allowlist does not name the secret; so its slot is empty,
+        # the refusal names it, and run.sh at that commit reports it missing.
+        from tests.test_verify_ref import VERIFY, git
+        srv, w = str(self.tmp / "srv.git"), str(self.tmp / "w")
+        git("init", "-q", "--bare", srv)
+        git("-C", srv, "symbolic-ref", "HEAD", "refs/heads/main")
+        git("init", "-q", w)
+        git("-C", w, "checkout", "-q", "-b", "main")
+        shutil.copytree(KIT, Path(w) / "gentar", dirs_exist_ok=True)
+        shutil.rmtree(Path(w) / "gentar" / "scenarios")
+        (Path(w) / "gentar" / "scenarios").mkdir()
+        (Path(w) / "gentar" / "scenarios" / "s.toml").write_text(
+            '[scenario]\nsubject = "x"\npass_env = ["SUBJECT_KEY", "MIRROR_SECRET"]\n'
+            '[oracle]\nsteps = ["true"]\n')
+        (Path(w) / "gentar" / "policy.toml").write_text('[secrets]\nroute = ["SUBJECT_KEY"]\n')
+        git("-C", w, "add", "-A")
+        git("-C", w, "commit", "-q", "-m", "main")
+        git("-C", w, "push", "-q", srv, "main")
+        git("-C", w, "checkout", "-q", "-b", "widen")
+        (Path(w) / "gentar" / "policy.toml").write_text(
+            '[secrets]\nroute = ["SUBJECT_KEY", "MIRROR_SECRET"]\n')
+        git("-C", w, "commit", "-q", "-am", "route one more")
+        git("-C", w, "push", "-q", srv, "widen")
+        sha = git("-C", w, "rev-parse", "HEAD")
+
+        v = subprocess.run(["/bin/bash", str(VERIFY), "--allow-branch-heads", srv, sha],
+                           capture_output=True, text=True)
+        self.assertEqual(v.returncode, 0, v.stderr)          # the branch IS admitted
+        r = subprocess.run([sys.executable, str(ROUTE_PY), f"{w}/gentar/policy.toml", "SUBJECT_KEY"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        slots = dict(l.split("=", 1) for l in r.stdout.splitlines())
+        self.assertEqual((slots["route_1"], slots["route_2"]), ("SUBJECT_KEY", ""))
+        self.assertEqual(r.stderr.strip(), "route: not allowed by this mirror "
+                         "(GENTAR_ROUTE_ALLOW), so not routed: MIRROR_SECRET")
+        # The workflow fills a slot only for a name it was given: slot 2 empty.
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("GENTAR_ROUTE_") and k not in ("SUBJECT_KEY", "MIRROR_SECRET")}
+        env.update(GENTAR_ROUTE_1="value-one", GENTAR_REPO_URL=str(self.tmp / "no-engine"))
+        rr = subprocess.run(["/bin/bash", "gentar/run.sh", "--route"], cwd=w, env=env,
+                            capture_output=True, text=True)
+        self.assertEqual(rr.returncode, 0, rr.stderr)
+        self.assertIn("secret route: SUBJECT_KEY set", rr.stdout)
+        self.assertIn("secret route: MIRROR_SECRET missing", rr.stdout)
+        self.assertNotIn("value-one", rr.stdout + rr.stderr)
 
 
 FAKE_GH = r"""#!/usr/bin/env bash

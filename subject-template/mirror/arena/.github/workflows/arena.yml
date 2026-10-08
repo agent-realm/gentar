@@ -15,9 +15,11 @@
 # verified sha and nothing else. Admitting a commit is trusting its authors
 # with this runner: its run.sh runs here, with the bench key.
 #
-#   plan     GitHub-hosted, no secrets. Verifies the commit, reads the
-#            public repository's [secrets] route at it, and skips a
-#            scheduled run whose commit already has a green phase 2 here.
+#   plan     GitHub-hosted, no secrets, and none of the public repository's
+#            code: verifies the commit, reads its [secrets] route as data
+#            (route.py: only names the mirror allows, GENTAR_ROUTE_ALLOW),
+#            and skips a scheduled run whose commit already has a green
+#            phase 2 here.
 #   bench    self-hosted, label `arena`: the kit's own bench steps.
 #            `arena / phase2` (the full regression) or `arena / targeted`.
 #   status   GitHub-hosted. With the secret GENTAR_STATUS_TOKEN (a token
@@ -26,10 +28,12 @@
 #            dispatcher posts it (gentar/mirror.sh dispatch).
 #
 # Variables: GENTAR_PUBLIC_REPO (owner/name, required),
-# GENTAR_ALLOW_BRANCH_HEADS (true to admit branch heads; default off), and
-# the kit bench job's own (GENTAR_BENCH_HOST, GENTAR_REF, ...). Secrets:
-# the kit bench job's (BENCH_SSH_KEY, GENTAR_BENCH_USER, provider keys, and
-# every name the public repository routes), plus GENTAR_STATUS_TOKEN.
+# GENTAR_ALLOW_BRANCH_HEADS (true to admit branch heads; default off),
+# GENTAR_ROUTE_ALLOW (the subject secrets this mirror will route, by name;
+# a commit's policy can only narrow it), and the kit bench job's own
+# (GENTAR_BENCH_HOST, GENTAR_REF, ...). Secrets: the kit bench job's
+# (BENCH_SSH_KEY, GENTAR_BENCH_USER, provider keys, and every name in
+# GENTAR_ROUTE_ALLOW), plus GENTAR_STATUS_TOKEN.
 name: arena
 run-name: arena ${{ inputs.sha || 'default branch' }} ${{ inputs.request }}
 
@@ -102,15 +106,15 @@ jobs:
           path: subject
           persist-credentials: false
       - id: plan
-        # The public repository's plan.py, at the verified commit, on this
-        # hosted runner with no secrets: it reads names (routes, suites),
-        # never a value.
+        # The mirror's own code only. The public tree is read as DATA (its
+        # policy, its suite names); nothing from it runs here, beside this
+        # job's token. Routes: the commit's [secrets] route, narrowed to the
+        # names this mirror allows (route.py), so a branch editing its own
+        # policy or plan.py reaches no secret the mirror did not offer.
         working-directory: subject
         run: |
           test "$(git rev-parse HEAD)" = "$SHA" || { echo "::error::not the verified commit" >&2; exit 2; }
-          routes=$(python3 gentar/plan.py route)
-          i=0
-          for n in $routes; do i=$((i + 1)); echo "route_$i=$n"; done >> "$GITHUB_OUTPUT"
+          python3 ../mirror/route.py gentar/policy.toml "$ROUTE_ALLOW"
           bench=phase2 suites=""
           if [ -n "$SCENARIO" ]; then
             for s in $SCENARIO; do
@@ -134,6 +138,7 @@ jobs:
           VIA: ${{ steps.verify.outputs.via }}
           SCENARIO: ${{ inputs.scenario }}
           EVENT: ${{ github.event_name }}
+          ROUTE_ALLOW: ${{ vars.GENTAR_ROUTE_ALLOW }}
           GH_TOKEN: ${{ github.token }}
 
   bench:
