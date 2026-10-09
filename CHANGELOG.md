@@ -22,6 +22,14 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Changed
+- **License: MIT to Apache-2.0**, from v0.10.0 (the pilot's decision,
+  2026-10-10). `LICENSE` is the Apache License 2.0 verbatim, and `NOTICE`
+  holds the copyright line, which Apache-2.0 asks redistributors to keep.
+  Releases up to v0.9.3 remain MIT.
+
+## Unreleased
+
 ## 0.9.3 — 2026-10-08
 
 Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed and why, upgrade, the lifted `--check` guard, the `/tmp/dryrun-home-*` cleanup, known limits).
