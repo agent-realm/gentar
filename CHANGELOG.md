@@ -32,8 +32,6 @@ Adopters pin a release tag, not a branch.
   behind `:-`, so an empty value also falls back (config.py treats empty as
   set).
 
-## Unreleased
-
 ## 0.9.3 — 2026-10-08
 
 Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed and why, upgrade, the lifted `--check` guard, the `/tmp/dryrun-home-*` cleanup, known limits).
