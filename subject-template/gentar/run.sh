@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 # Kick this repo's arena: stage the working tree as the subject, run a
 # scenario, land the report in gentar/reports/.
 #

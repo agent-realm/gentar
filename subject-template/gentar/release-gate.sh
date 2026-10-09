@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 # release-gate: may this commit be released?
 #
 #   gentar/release-gate.sh <sha>
