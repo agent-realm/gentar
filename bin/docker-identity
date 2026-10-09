@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# docker-identity: which Docker daemon this arena uses, and, in local bench
+# mode, which uid the coordinator runs as on it.
+#
+#   bin/docker-identity           # sock=  (any mode)
+#   bin/docker-identity --local   # sock=, rootless=, uid=, gid=  (local bench mode)
+#
+# One answer for every docker call of a run. The daemon is the one this
+# shell's docker would use: DOCKER_HOST, else the current context. bin/arena
+# and the kit's run.sh export DOCKER_HOST as `host=` below, so the rootless
+# check, every later `docker compose`, and the socket mounted into a
+# container (GENTAR_DOCKER_SOCK, osb-server's) are all that same daemon.
+#
+# Local bench mode runs the coordinator as a host uid (compose.local-bench.yml),
+# and on which uid depends on the daemon, decided here and nowhere else:
+#   rootless  the coordinator runs as 0:0. Under rootless Docker container
+#             root IS the host user running the daemon; the user's own uid
+#             inside a container maps to a subordinate uid that owns none of
+#             the user's files (its workspace root, its sbx state).
+#   rootful   the coordinator runs as this user (id -u / id -g), as before.
+#             Never 0:0: there, container root is real root. Running local
+#             mode AS root on rootful Docker is refused for the same reason.
+#   unknown   refused. `docker info` failed, timed out or said something
+#             this cannot parse; the daemon is not a unix socket; or the
+#             socket a caller pinned (GENTAR_DOCKER_SOCK) is not the daemon
+#             checked. Never a guess.
+# Nothing in the environment can choose the uid: GENTAR_LOCAL_UID/GID are
+# outputs of this script, never inputs.
+#
+# Output: KEY=value lines on stdout. Refusals: one line on stderr.
+# Exit: 0 · 2 refused (a configuration the arena will not run on).
+
+set -euo pipefail
+
+LOCAL=0
+[ $# -le 1 ] || { echo "usage: bin/docker-identity [--local]" >&2; exit 2; }
+case "${1:-}" in
+  --local) LOCAL=1 ;;
+  '') ;;
+  *) echo "usage: bin/docker-identity [--local]" >&2; exit 2 ;;
+esac
+DEFAULT_SOCK=/var/run/docker.sock
+refuse() { echo "docker-identity: $*" >&2; exit 2; }
+
+# The endpoint: DOCKER_HOST, else the current context's (which honours
+# DOCKER_CONTEXT). Only a unix socket can be mounted into a container.
+host=${DOCKER_HOST:-}
+if [ -z "$host" ]; then
+  host=$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null) || host=""
+fi
+case "$host" in
+  unix:///*) sock=${host#unix://} ;;
+  *) sock="" ;;
+esac
+if [ -z "$sock" ]; then
+  # Outside local mode nothing is decided from the daemon: keep the
+  # behaviour every rootful arena has always had.
+  [ "$LOCAL" = 1 ] || { echo "sock=$DEFAULT_SOCK"; exit 0; }
+  refuse "local bench mode needs a unix-socket Docker daemon; this shell's docker uses '${host:-nothing it could resolve}'"
+fi
+# A socket the caller pinned must be the daemon we resolved and check.
+if [ -n "${GENTAR_DOCKER_SOCK:-}" ] && [ "$GENTAR_DOCKER_SOCK" != "$sock" ]; then
+  refuse "GENTAR_DOCKER_SOCK=$GENTAR_DOCKER_SOCK is not the daemon this run uses ($sock); unset it, or point DOCKER_HOST at that daemon"
+fi
+echo "host=unix://$sock"
+echo "sock=$sock"
+[ "$LOCAL" = 1 ] || exit 0
+
+# Rootless or rootful, asked of THAT daemon, with a time limit.
+limit=${GENTAR_DOCKER_INFO_TIMEOUT:-20}
+case "$limit" in ''|*[!0-9]*) limit=20 ;; esac
+tmo=(); command -v timeout >/dev/null 2>&1 && tmo=(timeout -k 2 "$limit")
+if ! info=$(${tmo[@]+"${tmo[@]}"} docker -H "unix://$sock" info --format '{{json .SecurityOptions}}' 2>/dev/null); then
+  refuse "cannot tell whether the Docker daemon at $sock is rootless: 'docker info' failed or timed out; local bench mode will not guess"
+fi
+# A JSON array of strings, e.g. ["name=seccomp,profile=builtin","name=rootless"].
+# Rootless only on an entry whose name field is exactly name=rootless.
+info=$(printf '%s' "$info" | tr -d '\r\n' | sed 's/", *"/","/g')
+case "$info" in
+  '['*']') ;;
+  *) refuse "cannot tell whether the Docker daemon at $sock is rootless: unexpected 'docker info' output" ;;
+esac
+body=${info#[}; body=${body%]}
+rootless=no
+if [ -n "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
+  rest=$body
+  while [ -n "$rest" ]; do
+    case "$rest" in
+      '"'*) ;;
+      *) refuse "cannot tell whether the Docker daemon at $sock is rootless: unexpected 'docker info' output" ;;
+    esac
+    rest=${rest#\"}
+    entry=${rest%%\"*}
+    [ "$entry" != "$rest" ] || refuse "cannot tell whether the Docker daemon at $sock is rootless: unexpected 'docker info' output"
+    rest=${rest#*\"}
+    [ "${entry%%,*}" = name=rootless ] && rootless=yes
+    rest=${rest#,}
+  done
+fi
+
+if [ "$rootless" = yes ]; then
+  echo "rootless=yes"; echo "uid=0"; echo "gid=0"
+  exit 0
+fi
+uid=$(id -u); gid=$(id -g)
+case "$uid:$gid" in
+  *[!0-9:]*|:*|*:) refuse "cannot read this user's uid/gid" ;;
+esac
+[ "$uid" != 0 ] || refuse "local bench mode as root on a rootful Docker daemon would run the coordinator as real root; run it as an unprivileged user"
+echo "rootless=no"; echo "uid=$uid"; echo "gid=$gid"

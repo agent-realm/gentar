@@ -11,6 +11,7 @@ Where each part of the repository lives.
 | `bench-template/` | deterministic bench template builder; `VERSION` pins the agent CLI |
 | `dashboard/generate.py` | stateless HTML renderer over the spans table |
 | `bin/redact`, `bin/bench-reap` | publish-time redaction; stranded-sandbox cleanup |
+| `bin/docker-identity` | the run's Docker daemon (socket), and local mode's coordinator uid: rootless 0:0, rootful the user, unknown refused |
 | `subject-template/` | the copyable adoption kit |
 | `docs/design.md` | the design of record, with every decision and why |
 | `docs/subject-integration.md` | the adoption contract |

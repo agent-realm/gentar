@@ -183,7 +183,10 @@ services:
       SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
       OPENSANDBOX_INSECURE_SERVER: "YES"   # dev arena; set api_key for real
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      # The daemon bin/arena / run.sh resolved and checked (bin/docker-identity),
+      # e.g. $XDG_RUNTIME_DIR/docker.sock under rootless; the rootful default
+      # for a direct `docker compose`.
+      - ${GENTAR_DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
       - osb-data:/data
     ports:
       - "127.0.0.1:${GENTAR_OSB_HOST_PORT:-8180}:8080"

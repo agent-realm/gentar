@@ -22,6 +22,21 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Fixed
+- **Local bench mode on rootless Docker.** The local coordinator ran as the
+  user's own uid, which under rootless Docker maps to a subordinate uid
+  owning none of the user's files (workspace root, sbx state). The new
+  `bin/docker-identity` asks the daemon the run actually uses: rootless runs
+  the coordinator as `0:0` (there, the user); rootful keeps the user's uid
+  and refuses local mode run as root (never `0:0`); a daemon it cannot read
+  is refused, never guessed. No variable or flag chooses the uid. `bin/arena`
+  and the kit's `run.sh` export that daemon as `DOCKER_HOST` and its socket
+  as `GENTAR_DOCKER_SOCK`, which the `osb` tier's server now mounts instead
+  of a hard-coded `/var/run/docker.sock` (unchanged for rootful). The kit's
+  local mode refuses an engine without the script.
+
+## Unreleased
+
 ## 0.9.3 — 2026-10-08
 
 Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed and why, upgrade, the lifted `--check` guard, the `/tmp/dryrun-home-*` cleanup, known limits).

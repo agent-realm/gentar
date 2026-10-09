@@ -73,6 +73,23 @@ paths. The runner's user must be the one that ran `sbx login`. Benches see
 none of it; each gets only its own workspace directory. Proven on an arf VM
 (sbx 0.45.1) with the `smoke` and `scripted-onboarding` suites.
 
+**Rootless Docker.** Which uid "the runner's user" is inside the coordinator
+depends on the daemon, and `bin/docker-identity` decides it from the daemon
+the run actually uses (`DOCKER_HOST`, else the current context):
+
+| the daemon | the coordinator runs as | why |
+|---|---|---|
+| rootless (`docker info` lists `name=rootless`) | `0:0` | container root IS the user running the daemon; the user's own uid would map to a subordinate uid owning none of its files |
+| rootful | the user's own uid and gid, as before | container root is real root: never `0:0`, so local mode run AS root is refused |
+| cannot tell (`docker info` fails, times out, or is unreadable; not a unix socket) | nothing: refused | it never guesses |
+
+Nothing a caller sets chooses the uid: `GENTAR_LOCAL_UID`/`GID` are outputs.
+The same daemon is the one every later `docker` call uses (`DOCKER_HOST` is
+exported) and the socket the `osb` tier's server mounts
+(`GENTAR_DOCKER_SOCK`, e.g. `$XDG_RUNTIME_DIR/docker.sock`); a
+`GENTAR_DOCKER_SOCK` that is not that daemon is refused. On a host running
+both daemons, point `DOCKER_HOST` at the one the runner's user owns.
+
 The login must be in **files**. sbx in the coordinator has no session bus,
 so it reads the Docker login only from
 `~/.config/com.docker.sandboxes/com.docker.sandboxes-auth/`. On a host with

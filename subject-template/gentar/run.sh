@@ -703,14 +703,34 @@ if [ "$LOCAL_BENCH" = 1 ]; then
     exit 2
   fi
   ARENA_FILES+=(-f compose.local-bench.yml)
-  export GENTAR_LOCAL_UID GENTAR_LOCAL_GID GENTAR_LOCAL_HOME GENTAR_BENCH_KEY_FILE
-  GENTAR_LOCAL_UID=$(id -u); GENTAR_LOCAL_GID=$(id -g); GENTAR_LOCAL_HOME=$HOME
+  export GENTAR_LOCAL_HOME GENTAR_BENCH_KEY_FILE
+  GENTAR_LOCAL_HOME=$HOME
   GENTAR_BENCH_KEY_FILE=/dev/null     # the compose secret needs a file; there is no key
   # Create the workspace root as this user before compose binds it: a
   # missing bind source is created by Docker as root, and the coordinator
   # (this user) could then not make a bench's workspace in it.
   export GENTAR_BENCH_WORKSPACE_ROOT="${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}"
   mkdir -p "$GENTAR_BENCH_WORKSPACE_ROOT"
+fi
+# One Docker daemon for the whole run (the engine's bin/docker-identity):
+# every docker call below, the socket a container mounts (GENTAR_DOCKER_SOCK),
+# and in local mode the uid the coordinator runs as -- rootless: 0:0, which
+# is this user; rootful: this user; cannot tell: refused. Read as values,
+# never eval'd; GENTAR_LOCAL_UID/GID set by a caller are overwritten, not
+# used. Local mode refuses an engine without the script (it would guess).
+if [ -x "$ARENA/bin/docker-identity" ]; then
+  if [ "$LOCAL_BENCH" = 1 ]; then ident=$("$ARENA/bin/docker-identity" --local) || exit 2
+  else ident=$("$ARENA/bin/docker-identity") || exit 2; fi
+  ident_get() { printf '%s\n' "$ident" | sed -n "s/^$1=//p"; }
+  export GENTAR_DOCKER_SOCK; GENTAR_DOCKER_SOCK=$(ident_get sock)
+  if [ -n "$(ident_get host)" ]; then export DOCKER_HOST; DOCKER_HOST=$(ident_get host); fi
+  if [ "$LOCAL_BENCH" = 1 ]; then
+    export GENTAR_LOCAL_UID GENTAR_LOCAL_GID
+    GENTAR_LOCAL_UID=$(ident_get uid); GENTAR_LOCAL_GID=$(ident_get gid)
+  fi
+elif [ "$LOCAL_BENCH" = 1 ]; then
+  echo "GENTAR_BENCH_HOST=local needs an engine with bin/docker-identity (GENTAR_REF $REF has none): it decides the coordinator's uid on rootless Docker" >&2
+  exit 2
 fi
 # Telemetry destination (optional; AGENTS.md decision 6): the arena's
 # collector forwards what the coordinator scrubbed to GENTAR_OTLP_EXPORT

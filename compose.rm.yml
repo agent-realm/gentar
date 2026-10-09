@@ -22,7 +22,7 @@ services:
       - /var/lib/clickhouse
   osb-server:
     volumes: !override
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ${GENTAR_DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
       - /data
 
 volumes:
