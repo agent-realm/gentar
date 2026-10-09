@@ -96,4 +96,5 @@ Agents adapting a repo: read [`AGENTS.md`](AGENTS.md) first. Humans:
 
 Apache-2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-Relicensed from MIT to Apache-2.0 from v0.10.0; earlier releases remain MIT.
+Relicensed from MIT to Apache-2.0 from v0.10.0; releases v0.1.1 through v0.9.3
+remain MIT (v0.1.0 shipped without a license).
