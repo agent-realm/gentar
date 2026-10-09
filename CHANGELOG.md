@@ -22,6 +22,18 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Fixed
+- **`GENTAR_BENCH_WORKSPACE_ROOT` reaches the coordinator in SSH mode.**
+  `docker-compose.yml` forwarded it only in local bench mode, so over SSH the
+  coordinator always used `/tmp/gentar-workspaces` while `bin/bench-reap`
+  followed the caller's value. An arena whose bench user has its own
+  workspace root (D5: one 0700 root per bench user) made its workspaces in
+  the shared default instead. The compose default repeats config.py's,
+  behind `:-`, so an empty value also falls back (config.py treats empty as
+  set).
+
+## Unreleased
+
 ## 0.9.3 — 2026-10-08
 
 Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed and why, upgrade, the lifted `--check` guard, the `/tmp/dryrun-home-*` cleanup, known limits).
