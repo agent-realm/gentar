@@ -405,6 +405,10 @@ are absent are skipped and named, not run into a red refusal. It tears down
 with `gentar/run.sh --down`, which also removes the bench sandboxes a cancelled
 job left behind — and never touches an arena another live run holds.
 
+**License.** The kit's files are Apache-2.0, as gentar is; each one says so
+in a two-line header (`SPDX-License-Identifier: Apache-2.0`, copyright).
+They are copied byte for byte, so the header travels with them: keep it.
+
 **Git history in the bench.** The subject is staged without `.git`: on
 CI it holds the job's auth header. A suite that needs history (one that
 clones an older release tag to test an update) sets `[stage] git = true`

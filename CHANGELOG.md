@@ -28,6 +28,12 @@ Adopters pin a release tag, not a branch.
   holds the copyright line, which Apache-2.0 asks redistributors to keep.
   Releases v0.1.1 through v0.9.3 remain MIT (v0.1.0 shipped without a
   license).
+- **The kit's files carry their license.** Each file a subject copies byte
+  for byte (`gentar/run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh` and
+  the arena workflow) starts with `SPDX-License-Identifier: Apache-2.0` and
+  the copyright line, after a shebang where there is one, so the license
+  travels with the copy (AK47's ruling on #73). Subjects pick it up at
+  their next kit re-copy.
 
 ## 0.9.3 — 2026-10-08
 

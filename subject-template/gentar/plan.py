@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 """This repo's run policy: which suites run when, decided once.
 
     gentar/plan.py plan     # what should THIS CI event run?  (the kit's plan job)

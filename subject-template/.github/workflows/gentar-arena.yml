@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 # gentar own arena. WHAT runs WHEN is this repo's run policy, declared in
 # gentar/policy.toml and read by gentar/plan.py — not here. This file is
 # the kit's and stays byte-identical to it (`gentar/run.sh --check`
