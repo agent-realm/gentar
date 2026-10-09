@@ -35,8 +35,6 @@ Adopters pin a release tag, not a branch.
   of a hard-coded `/var/run/docker.sock` (unchanged for rootful). The kit's
   local mode refuses an engine without the script.
 
-## Unreleased
-
 ## 0.9.3 — 2026-10-08
 
 Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed and why, upgrade, the lifted `--check` guard, the `/tmp/dryrun-home-*` cleanup, known limits).
