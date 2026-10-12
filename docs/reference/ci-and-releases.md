@@ -41,9 +41,10 @@ admits a commit only when it is reachable from gentar's `main` or from a
   key, and its subject suites skip without a subject token, each with a
   notice.
 
-These times are nominal: GitHub can start a scheduled run hours late. A
-merge is therefore swept by the next scheduled gate at the latest, unless
-someone dispatches the gate sooner.
+These times are nominal, and the schedule is best-effort. A merge is
+normally swept by the next scheduled gate, but GitHub can delay a scheduled
+run, and under heavy load drop it. To be certain a merge commit was swept,
+dispatch the gate on it, as the release steps do.
 
 A fork's pull request runs the hosted unit tests and nothing else. The
 mirror is private, so its runs and reports are visible to its maintainers
