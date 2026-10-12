@@ -8,9 +8,12 @@ GitHub shape actually wired today.
 Two modes, pick either or both. Both are first-class; the difference is
 who operates the arena, not what a subject declares.
 
-- **Central arena** (below) — an arena someone else runs does the work;
-  your repo fires a dispatch. Nothing to host. One bench-host, one
-  dashboard.
+- **Central arena** (below): **the central arena is retired** as of
+  2026-10-12. gentar's public workflow no longer has a bench job, so a
+  dispatch to `agent-realm/gentar` (with `GENTAR_DISPATCH_TOKEN`) has
+  nothing to run. gentar's own bench suites run in a private mirror, and
+  only on gentar's own commits. Use the own arena. The section below is
+  kept as the record of how the mode worked.
 - **Own arena** (bottom) — your repo runs the compose stack itself in
   its own CI. Scenarios live in your repo; any trigger conditions you
   want; the engine is a `git clone` away.
@@ -145,11 +148,16 @@ the kit wires it end to end.
 
 ## Trigger tiers
 
+These were the central arena's tiers. gentar's own suites now run them in
+the private mirror after merge
+([CI and releases](reference/ci-and-releases.md)), and a subject runs its
+own tiers in its own arena (the kit's run policy).
+
 | Tier | Fires | Suites |
 |---|---|---|
-| gate | every gentar PR / push, every subject dispatch | deterministic subjectless (smoke, bench-template-verify, otlp-selfreport, budget-sim, scripted pair) |
-| nightly | cron (arena repo) | subject suites behind `GENTAR_BUDGET_CAP`; `agent-smoke` when `ANTHROPIC_API_KEY` is set |
-| dispatch | manual / subject repo | one named scenario, arbitrary gentar ref |
+| gate | was: every gentar PR / push, every subject dispatch | deterministic subjectless (smoke, bench-template-verify, otlp-selfreport, budget-sim, scripted pair) |
+| nightly | was: cron (arena repo) | subject suites behind `GENTAR_BUDGET_CAP`; `agent-smoke` when `ANTHROPIC_API_KEY` is set |
+| dispatch | was: manual / subject repo | one named scenario, arbitrary gentar ref |
 
 ## Credentials (agent-in-the-loop suites)
 
