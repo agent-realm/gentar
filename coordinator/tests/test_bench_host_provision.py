@@ -163,12 +163,22 @@ exit 2
         self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx"),
                                       "gentarbenchx exists with uid 1002, not 1001")
 
-    def test_an_existing_privileged_account_is_refused_first(self):
-        for g in ("docker", "sudo", "adm", "lxd", "wheel"):
+    def test_an_existing_account_in_any_other_group_is_refused_first(self):
+        # An allow list: own group + kvm only. disk (raw block devices) is
+        # root; an arbitrary group is refused too.
+        for g in ("docker", "sudo", "adm", "lxd", "wheel", "disk", "shadow", "foo"):
             with self.subTest(group=g):
                 self.fake_account(uid="1001", groups=f"gentarbenchx kvm {g}")
-                self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx"),
-                                              "is in a privileged group")
+                r = self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx")
+                self.assert_refused_untouched(r, "other groups than its own and kvm: " + g)
+
+    def test_an_existing_account_with_the_layouts_groups_passes_the_preflight(self):
+        self.fake_account(uid="1001", groups="gentarbenchx kvm")
+        r = self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx")
+        # past every refusal: the first change (a stubbed, failing sudo) is reached
+        self.assertNotEqual(r.returncode, 2, r.stderr)
+        self.assertTrue(self.calls.exists())
+        self.assertNotIn("other groups", r.stderr)
 
     def test_a_uid_held_by_another_account_is_refused_first(self):
         self.fake_account(uid=None, uid_owner="someoneelse")
@@ -188,6 +198,12 @@ exit 2
         if not re.fullmatch(r"[a-z][a-z0-9_-]*", me):
             self.skipTest("this user's name is not a valid account name for the check")
         self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT=me), "not as " + me)
+
+    def test_the_final_proof_uses_the_same_allow_list(self):
+        text = SCRIPT.read_text()
+        tail = text[text.index("# --- end proofs"):]
+        self.assertIn("extra=$(extra_groups)", tail)
+        self.assertIn('FAIL (groups other than $ACCOUNT and kvm)', tail)
 
     def test_the_account_joins_no_privileged_group(self):
         text = SCRIPT.read_text()

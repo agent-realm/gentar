@@ -16,8 +16,8 @@ an admin with sudo (`ssh <admin>@<host> 'bash -s' < bin/bench-host-provision`).
 Running it again is safe. It sets up:
 
 - **The bench account** (`arena` by default): the only account the arena
-  and the CI runner use. Its password is locked, it has no sudo, and its
-  groups are its own plus `kvm`, never `docker`, `adm`, `lxd` or `sudo`.
+  and the CI runner use. Its password is locked, it has no sudo, and it is
+  in no group other than its own and `kvm`.
 - **Rootless Docker** for that account, with the rootful daemon disabled.
 - **sbx**, pinned (`SBX_VERSION`) and held.
 - **The headless keyring** described below, all three pieces.
@@ -30,8 +30,8 @@ It refuses before it changes anything when:
 - a parameter is bad;
 - the workspace root is not a dedicated directory (at least two levels
   deep, no `..`, and if it exists, already the bench account's);
-- the bench account already exists with another uid or in a privileged
-  group, or its uid belongs to another account.
+- the bench account already exists with another uid, or in another group
+  than its own and kvm, or its uid belongs to another account.
 
 It also checks the Docker apt key's fingerprint before trusting it, and
 masks the rootful daemon.

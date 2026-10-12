@@ -10,8 +10,9 @@
 #   - the admin account: administration only, no CI anything;
 #   - the bench account (GENTAR_BENCH_ACCOUNT, default `arena`, uid
 #     GENTAR_BENCH_UID, default 1001): the ONLY account the arena and the CI
-#     runner use. Password locked, no sudo, groups <account> + kvm only (never
-#     docker, adm, lxd or sudo), home 750;
+#     runner use. Password locked, no sudo, groups <account> + kvm only and no
+#     other (an allow list: docker, sudo, adm, lxd, disk, shadow... never),
+#     home 750;
 #   - rootless Docker for that account; the rootful daemon is installed (a
 #     package dependency) but disabled, so no socket gives root;
 #   - sbx (docker-sbx) pinned (SBX_VERSION) and held, its daemon as a user
@@ -34,8 +35,8 @@
 # a single change is made, as are a bad parameter, a workspace root that is
 # not a dedicated directory, being run as the bench account or as root, and
 # a bench account (or uid) that already exists in a way this layout cannot
-# take over: another uid, the uid held by another account, or membership of a
-# privileged group. One refusal can only come after the apt base packages are
+# take over: another uid, the uid held by another account, or any group
+# other than its own and kvm. One refusal can only come after the apt base packages are
 # installed: a Docker apt key whose fingerprint is not Docker's.
 #
 # Exit: 0 provisioned, every proof passed · 1 a proof failed (printed as
@@ -83,14 +84,16 @@ ADMIN=$(id -un)
 [ "$ADMIN" != "$ACCOUNT" ] || refuse "run it as an admin with sudo, not as $ACCOUNT"
 [ "$(id -u)" != 0 ] || refuse "run it as an admin with sudo, not as root (the proofs compare against the admin's home)"
 RUN="/run/user/$ACCOUNT_UID"
+# Groups other than the account's own and kvm. An ALLOW list: disk, shadow,
+# root, systemd-journal, libvirt and the like are as privileged as docker.
+extra_groups() { id -nG "$ACCOUNT" | tr ' ' '\n' | { grep -vxE "$ACCOUNT|kvm" || true; } | tr '\n' ' ' | sed 's/ *$//'; }
 # An account that already exists is taken over only if it already has the
 # layout's shape. Refused here, before any change, rather than after apt.
 if id "$ACCOUNT" >/dev/null 2>&1; then
   have_uid=$(id -u "$ACCOUNT")
   [ "$have_uid" = "$ACCOUNT_UID" ] || refuse "$ACCOUNT exists with uid $have_uid, not $ACCOUNT_UID"
-  if id -nG "$ACCOUNT" | tr ' ' '\n' | grep -qxE 'docker|sudo|adm|lxd|wheel'; then
-    refuse "$ACCOUNT exists and is in a privileged group ($(id -nG "$ACCOUNT")); remove it from docker/sudo/adm/lxd/wheel first"
-  fi
+  extra=$(extra_groups)
+  [ -z "$extra" ] || refuse "$ACCOUNT exists and is in other groups than its own and kvm: $extra; remove them first"
 else
   uid_owner=$(getent passwd "$ACCOUNT_UID" 2>/dev/null | cut -d: -f1 || true)
   [ -z "$uid_owner" ] || refuse "uid $ACCOUNT_UID is taken by $uid_owner; set GENTAR_BENCH_UID"
@@ -256,9 +259,10 @@ p "read $ADMIN's authorized_keys"   "permission denied"  head -c1 "$ADMIN_HOME/.
 p "sudo -n"                         "password is required|not in the sudoers|may not run sudo"  sudo -n true
 p "rootful docker socket (info)"    "permission denied|no such file|cannot connect|is the docker daemon running" \
   docker -H unix:///var/run/docker.sock info
-if id -nG "$ACCOUNT" | tr " " "\n" | grep -qxE "docker|sudo|adm|lxd"; then
-  echo "FAIL (privileged group): $(id -nG "$ACCOUNT")"; fails=$((fails + 1))
-else echo "REFUSED: no docker/sudo/adm/lxd group ($(id -nG "$ACCOUNT"))"; fi
+extra=$(extra_groups)
+if [ -n "$extra" ]; then
+  echo "FAIL (groups other than $ACCOUNT and kvm): $extra"; fails=$((fails + 1))
+else echo "REFUSED: no group other than its own and kvm ($(id -nG "$ACCOUNT"))"; fi
 A=(sudo -u "$ACCOUNT" -H env XDG_RUNTIME_DIR="$RUN" DOCKER_HOST="unix://$RUN/docker.sock")
 if "${A[@]}" docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q '"name=rootless'; then
   echo "ok: rootless docker"
