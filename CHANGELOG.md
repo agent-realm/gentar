@@ -22,6 +22,18 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Added
+- **`bin/bench-host-provision`** builds an Ubuntu 24.04 bench host. The
+  isolated bench account (`arena` by default) has its password locked, no
+  sudo, and the groups its own plus `kvm`. The host gets rootless Docker
+  with the rootful daemon disabled, sbx pinned and held, the headless
+  unlocked keyring with its restart and D-Bus pieces, and a 0700 workspace
+  root. The script refuses another OS or a bad parameter before any change,
+  prints refusal proofs at the end, and contains no secret value. It is
+  adopted from the operator's build of the 2026-10-11 bench host. The guide
+  (section 1) now points to it, and section 2 adds the runner's rootless
+  `DOCKER_HOST` and repository-level registration.
+
 ### Changed
 - **License: MIT to Apache-2.0**, from v0.10.0 (the pilot's decision,
   2026-10-10). `LICENSE` is apache.org's LICENSE-2.0.txt verbatim, and `NOTICE`

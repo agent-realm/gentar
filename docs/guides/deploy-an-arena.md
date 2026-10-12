@@ -11,6 +11,32 @@ see [`AGENTS.md`](../../AGENTS.md).
 
 Any Linux machine reachable over SSH.
 
+**On Ubuntu 24.04, `bin/bench-host-provision` builds it.** Run it once as
+an admin with sudo (`ssh <admin>@<host> 'bash -s' < bin/bench-host-provision`).
+Running it again is safe. It sets up:
+
+- **The bench account** (`arena` by default): the only account the arena
+  and the CI runner use. Its password is locked, it has no sudo, and its
+  groups are its own plus `kvm`, never `docker`, `adm`, `lxd` or `sudo`.
+- **Rootless Docker** for that account, with the rootful daemon disabled.
+- **sbx**, pinned (`SBX_VERSION`) and held.
+- **The headless keyring** described below, all three pieces.
+- **The workspace root**, owned by that account with mode 0700.
+- **Docker's address pool**, kept off the host's own networks
+  (`GENTAR_DOCKER_POOL`).
+
+It refuses any other OS, and any bad parameter, before it changes
+anything. It ends by printing proofs: each escalation attempt is refused,
+Docker is rootless, and the sbx version.
+
+Four things are each a step of their own:
+- `sbx login` as the bench account (step 1 below, or `bin/sbx-file-login`);
+- the bench template;
+- the runner (section 2);
+- the bench key in that account's `~/.ssh/authorized_keys` (step 2).
+
+Without the script, or on another OS, do the steps by hand:
+
 1. Install the [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)
    CLI `sbx`, and log in once with `sbx login` (device flow; the token
    persists).
@@ -25,8 +51,8 @@ Any Linux machine reachable over SSH.
 Check: `ssh <user>@<host> sbx ls` works with that key.
 
 **A headless host with a session bus keeps the sbx login in gnome-keyring.**
-Nobody is there to unlock it, so the host needs three pieces (arf VM 142 has
-all three; a clone of it has them too). This auto-unlock pattern is for
+Nobody is there to unlock it, so the host needs three pieces
+(`bin/bench-host-provision` sets up all three). This auto-unlock pattern is for
 disposable test benches only, never a production host: the keyring password
 sits in a file next to the keyring it unlocks.
 
@@ -110,6 +136,17 @@ GitHub-hosted runner cannot reach an internal bench-host.
 
 Several repositories can share one runner machine: register one runner
 per repository.
+
+On a host built by `bin/bench-host-provision`, register the runner as the
+bench account. Put `DOCKER_HOST=unix:///run/user/<uid>/docker.sock` and
+`XDG_RUNTIME_DIR=/run/user/<uid>` in the runner's `.env`: the account's
+rootless Docker is a user service, and the runner's system service does not
+read the account's `environment.d`.
+
+**Register the runner at REPOSITORY level, never at organisation level.**
+Give it a label no workflow in a public repository uses. An
+organisation-level runner can be picked up by every repository in the
+organisation.
 
 The `arena` runner only drives benches. The bench-free `plan` and `checks`
 jobs run on GitHub-hosted runners unless `GENTAR_CI_RUNNER` names a

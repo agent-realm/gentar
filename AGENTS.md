@@ -236,6 +236,9 @@ optionally somewhere to send telemetry and a judge. The full how-to is
 agent:
 
 1. **Bench host:** any Linux box with `sbx` installed and logged in once.
+   On Ubuntu 24.04, `bin/bench-host-provision` builds one with an isolated
+   bench account and rootless Docker (the guide, section 1). Running it on
+   a machine is a stop-and-ask, like registering a runner.
    Check its sandbox network policy and its stored secrets before the first
    run: the engine refuses an sbx host with stored secrets (exit 2). When the
    runner runs ON the bench host, prefer local bench mode
