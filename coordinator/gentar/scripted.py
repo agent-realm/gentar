@@ -18,6 +18,24 @@ class TurnFailure(AssertionError):
     pass
 
 
+# sbx's one-time first-run wizard: on a fresh bench account, the FIRST
+# interactive (TTY) sbx session shows this screen and waits for a key
+# before running the command, so the scenario's prompt never appears
+# (found on a new bench host, 2026-10-12). Recognised by its fixed text.
+SBX_SETUP_WIZARD = re.compile(r"sbx setup\s*.\s*detected configuration|continue without importing")
+SBX_SETUP_HINT = ("the bench host's sbx showed its one-time first-run setup wizard (a fresh "
+                  "bench account) instead of running the command; on the bench host, as the "
+                  "bench user, run `sbx setup` once and press q (continue without importing)")
+
+
+def _not_seen(driver, message: str) -> TurnFailure:
+    """A "never appeared" failure, with the cause named when the transcript
+    shows sbx's first-run wizard instead of the command."""
+    if SBX_SETUP_WIZARD.search(getattr(driver, "transcript", "") or ""):
+        return TurnFailure(f"{message} -- {SBX_SETUP_HINT}")
+    return TurnFailure(message)
+
+
 def make_judge(scenario, spans: Spans, subject: str, run_id: str):
     """The run's one judge (judged turns, a goal pilot, soft verify)."""
     # The coordinator already refused a non-synthetic scenario or a missing
@@ -50,7 +68,7 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
             if kind == "answer":
                 prompt = turn["prompt"]
                 if not _await(driver, re.compile(prompt, re.IGNORECASE), turn.get("timeout", 60)):
-                    raise TurnFailure(f"turn {i}: prompt {prompt!r} never appeared")
+                    raise _not_seen(driver, f"turn {i}: prompt {prompt!r} never appeared")
                 driver.send_line(turn.get("send", ""))
                 _ok(spans, subject, run_id, name, i, f"answer {prompt!r}")
             elif kind == "expect" and "judge" in turn:
@@ -59,7 +77,7 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
             elif kind == "expect":
                 pattern = turn["pattern"]
                 if not driver.drive_until(pattern, turn.get("timeout", 90)):
-                    raise TurnFailure(f"turn {i}: pattern {pattern!r} never appeared")
+                    raise _not_seen(driver, f"turn {i}: pattern {pattern!r} never appeared")
                 _ok(spans, subject, run_id, name, i, f"expect {pattern!r}")
             elif kind == "pick":
                 if not driver.pick_option(turn["label"], turn.get("tries", 8)):
@@ -97,7 +115,7 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                             _ok(spans, subject, run_id, name, i,
                                 f"key {'+'.join(keys)} skipped (optional)")
                             continue
-                        raise TurnFailure(f"turn {i}: after {after!r} never appeared")
+                        raise _not_seen(driver, f"turn {i}: after {after!r} never appeared")
                 try:
                     driver.send_keys(keys, float(turn.get("delay", 0.5)))
                 except KeyError as bad:
