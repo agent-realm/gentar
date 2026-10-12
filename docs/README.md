@@ -61,7 +61,8 @@ release.
 - [`scope-map.md`](scope-map.md) (rendered: [`scope-map.html`](scope-map.html)) —
   what contains what, with every relation counted.
 - [`subject-integration.md`](subject-integration.md) — the contract
-  between a subject and an arena: central dispatch and own arena.
+  between a subject and an arena: the own arena (the central dispatch is
+  retired since 2026-10-12, kept there as the record).
 - [`buildplan-2026-08-18-v1.md`](buildplan-2026-08-18-v1.md) — the
   original build plan. It is **historical** and kept for the record;
   where it disagrees with the rest of the docs, the rest of the docs win.

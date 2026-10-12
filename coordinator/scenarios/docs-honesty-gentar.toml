@@ -29,9 +29,10 @@ for s in claude-playbooks-install scripted-onboarding scripted-danger bench-temp
   test -f "coordinator/scenarios/$s.toml" || { echo "README names missing scenario: $s"; exit 1; }
 done
 echo named-scenarios-exist''',
-  # --- CI claim (since 2026-10-12): the public workflow is hosted-only, and
-  # the docs say the bench suites are a post-merge check in the private mirror ---
-  '! grep -qE "^[^#]*runs-on:.*(self-hosted|gentar-bench)" "$WORKSPACE_DIR/.github/workflows/gentar.yml" && grep -qF "POST-MERGE check, not a PR gate" "$WORKSPACE_DIR/docs/reference/ci-and-releases.md" && echo hosted-only-claim-true',
+  # --- CI claim (since 2026-10-12): every runs-on in the public workflow is
+  # exactly `ubuntu-latest` (an allowlist: a renamed self-hosted label fails),
+  # and the docs say the bench suites are a post-merge check in the mirror ---
+  'wf="$WORKSPACE_DIR/.github/workflows/gentar.yml"; grep -qE "^[[:space:]]*runs-on:" "$wf" && ! grep -E "^[[:space:]]*runs-on:" "$wf" | grep -qvxE "[[:space:]]*runs-on: ubuntu-latest" && grep -qF "POST-MERGE check, not a PR gate" "$WORKSPACE_DIR/docs/reference/ci-and-releases.md" && echo hosted-only-claim-true',
 ]
 
 [[verify.commands]]

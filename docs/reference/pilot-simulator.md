@@ -48,8 +48,10 @@ script that works and one that is subtly lying:
 The hard safety rule in the driver is the **danger gate**: if the agent
 provokes a prompt asking to run a command matching the destructive-command
 pattern, the driver aborts the run rather than approving it. That is not a
-documented intention — `scripted-danger` is a gate suite that fails unless
-the gate fires before any approval, and it runs on every PR.
+documented intention: `scripted-danger` is a gate suite that fails unless
+the gate fires before any approval. It is proven after merge, by the gate
+tier in the private mirror ([CI and releases](ci-and-releases.md)), not on
+pull requests. A pull request runs only the hosted unit suite.
 
 **Credentials are injected at run time and never baked.** A scenario
 declares the environment variable *names* it needs. Entries are

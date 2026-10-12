@@ -20,6 +20,9 @@ BENCH_NAMES = ("GENTAR_BENCH_KEY", "GENTAR_BENCH_HOST", "GENTAR_BENCH_USER",
                "ANTHROPIC_BASE_URL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "TYPESAFE_API_KEY")
 
 
+HOSTED_RUNS_ON = {"runs-on: ubuntu-latest"}
+
+
 def code_lines(path):
     """The file's lines, comments removed (a comment may name the history)."""
     return [l for l in path.read_text().splitlines() if not l.lstrip().startswith("#")]
@@ -38,8 +41,10 @@ class HostedOnlyTest(unittest.TestCase):
             runs_on = [l.strip() for l in code_lines(f) if l.strip().startswith("runs-on:")]
             self.assertTrue(runs_on, f.name)
             for line in runs_on:
+                # An explicit allowlist, not a pattern: `ubuntu-private` could be
+                # a renamed self-hosted label. Widening it is a deliberate edit.
                 with self.subTest(file=f.name, line=line):
-                    self.assertRegex(line, r"^runs-on: (ubuntu|macos|windows)-[a-z0-9.-]+$")
+                    self.assertIn(line, HOSTED_RUNS_ON)
             text = "\n".join(code_lines(f))
             self.assertNotRegex(text, r"self-hosted|gentar-bench|GENTAR_CI_RUNNER")
 
