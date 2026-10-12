@@ -27,8 +27,10 @@
 # Contains no secret values. The one secret it creates is the keyring
 # password: random bytes written straight to ~<account>/.keyring-pass (600),
 # never printed. NOT done here, each its own step: `sbx login` as the bench
-# account (bin/sbx-file-login), the bench template, the CI runner's
-# registration, and the bench SSH key in ~<account>/.ssh/authorized_keys.
+# account (bin/sbx-file-login); clearing sbx's one-time first-run wizard as
+# that account (`sbx setup`, then q: the first interactive sbx session
+# otherwise shows it and waits); the bench template; the CI runner's
+# registration; and the bench SSH key in ~<account>/.ssh/authorized_keys.
 #
 # Ubuntu 24.04 (noble) only: the package names, the Docker apt suite and the
 # AppArmor rule for rootlesskit are noble's. Anything else is refused before
@@ -114,7 +116,10 @@ DOCKER_KEY_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 key=$(mktemp)
 trap 'rm -f "$key"' EXIT
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o "$key"
-fpr=$(gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr:/ { print $10; exit }')
+# awk reads ALL of gpg's output (no early `exit`): closing the pipe early can
+# SIGPIPE gpg, and under pipefail the empty substitution would stop the
+# script with no message.
+fpr=$(gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr:/ && f == "" { f = $10 } END { print f }')
 [ "$fpr" = "$DOCKER_KEY_FPR" ] || refuse "the Docker apt key's fingerprint is '${fpr:-none}', not Docker's $DOCKER_KEY_FPR"
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo install -m 0644 "$key" /etc/apt/keyrings/docker.asc
@@ -274,4 +279,4 @@ if [ "$fails" -gt 0 ]; then
   echo "bench-host-provision: $fails proof(s) failed (see FAIL / INCONCLUSIVE above); the host is not ready" >&2
   exit 1
 fi
-echo "next, each its own step: sbx login as $ACCOUNT (bin/sbx-file-login), the bench template, the runner (as $ACCOUNT, with DOCKER_HOST=unix://$RUN/docker.sock and XDG_RUNTIME_DIR=$RUN in its .env), and the bench key in ~$ACCOUNT/.ssh/authorized_keys"
+echo "next, each its own step: sbx login as $ACCOUNT (bin/sbx-file-login), then clear sbx's one-time first-run wizard as $ACCOUNT (sbx setup, press q), the bench template, the runner (as $ACCOUNT, with DOCKER_HOST=unix://$RUN/docker.sock and XDG_RUNTIME_DIR=$RUN in its .env), and the bench key in ~$ACCOUNT/.ssh/authorized_keys"

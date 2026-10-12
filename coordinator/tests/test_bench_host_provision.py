@@ -36,8 +36,14 @@ class BenchHostProvisionTest(unittest.TestCase):
 
     def run_script(self, os_release=None, **env):
         e = {k: v for k, v in os.environ.items() if not k.startswith(("GENTAR_", "SBX_"))}
+        # The workspace root defaults to a fresh path under the test's tmp:
+        # the script's own default (/tmp/gentar-workspaces) may exist on the
+        # machine running the tests (a bench host does) and decide the case
+        # before the check under test.
         e.update(PATH=f"{self.bin}:{os.environ['PATH']}",
-                 GENTAR_OS_RELEASE=str(os_release or self.noble), **env)
+                 GENTAR_OS_RELEASE=str(os_release or self.noble),
+                 GENTAR_BENCH_WORKSPACE_ROOT=str(self.tmp / "ws-root" / "gentar-workspaces"))
+        e.update(env)
         return subprocess.run(["/bin/bash", str(SCRIPT)], env=e, capture_output=True, text=True,
                               timeout=60)
 
@@ -136,6 +142,15 @@ class BenchHostProvisionTest(unittest.TestCase):
         check = text.index('[ "$fpr" = "$DOCKER_KEY_FPR" ] || refuse')
         self.assertLess(check, text.index("/etc/apt/keyrings/docker.asc"))
         self.assertNotIn("| sudo tee /etc/apt/keyrings/docker.asc", text)
+
+    def test_the_gpg_pipe_is_never_closed_early(self):
+        text = SCRIPT.read_text()
+        line = [l for l in text.splitlines() if l.startswith("fpr=")][0]
+        self.assertNotRegex(line, r"\bexit\b|\bhead\b|\bq\b")
+        self.assertIn("END { print f }", line)
+
+    def test_the_next_steps_name_the_sbx_wizard(self):
+        self.assertIn("sbx setup, press q", SCRIPT.read_text())
 
     def test_the_rootful_daemon_is_masked(self):
         self.assertIn("sudo systemctl mask docker.service docker.socket", SCRIPT.read_text())

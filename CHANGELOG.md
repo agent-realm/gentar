@@ -31,13 +31,27 @@ Adopters pin a release tag, not a branch.
   root. The script refuses before any change on another OS, a bad
   parameter, a workspace root that is not a dedicated directory, or an
   existing account with another uid or in another group than its own and
-  kvm. It
-  verifies the Docker apt key's fingerprint and masks the rootful daemon.
-  It exits 1 unless every proof is refused for the expected reason, and it
-  contains no secret value. It is
-  adopted from the operator's build of the 2026-10-11 bench host. The guide
-  (section 1) now points to it, and section 2 adds the runner's rootless
-  `DOCKER_HOST` and repository-level registration.
+  kvm. It verifies the Docker apt key's fingerprint and masks the rootful
+  daemon. It exits 1 unless every proof is refused for the expected reason,
+  and it contains no secret value. It is adopted from the operator's build
+  of the 2026-10-11 bench host. The guide (section 1) now points to it, and
+  section 2 adds the runner's rootless `DOCKER_HOST` and repository-level
+  registration.
+
+### Fixed
+- **A fresh bench account's sbx setup wizard is named, not guessed at.** On
+  a new bench account, the first interactive sbx session shows sbx's
+  one-time first-run wizard ("sbx setup — detected configuration … continue
+  without importing") and waits for a key, so the first suite with a
+  terminal failed with a bare "prompt … never appeared" (found on a new
+  bench host, 2026-10-12). The driver now recognises the screen and says
+  what to do: run `sbx setup` once as the bench user and press `q`.
+  `bin/bench-host-provision` and the deploy guide list it among the steps
+  after `sbx login`.
+- **`bin/bench-host-provision` no longer closes gpg's pipe early.** The
+  fingerprint read used `awk … { print; exit }`, which can SIGPIPE gpg under
+  `pipefail` and stop the script with no message. awk now reads everything
+  and prints the first fingerprint at the end.
 
 ### Changed
 - **License: MIT to Apache-2.0**, from v0.10.0 (the pilot's decision,

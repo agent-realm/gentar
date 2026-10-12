@@ -40,8 +40,13 @@ It ends with proofs. Each escalation attempt must be refused for the
 expected reason. Docker must be rootless, and sbx must run. If any proof
 fails it exits 1, so a run that exits 0 has proven the layout.
 
-Four things are each a step of their own:
+Five things are each a step of their own:
 - `sbx login` as the bench account (step 1 below, or `bin/sbx-file-login`);
+- sbx's one-time first-run wizard, cleared as the bench account: run
+  `sbx setup` once and press `q` (continue without importing). On a fresh
+  account the FIRST interactive sbx session shows that screen and waits
+  for a key, so the first suite with a terminal fails with "prompt never
+  appeared". The driver names this cause when it sees the screen;
 - the bench template;
 - the runner (section 2);
 - the bench key in that account's `~/.ssh/authorized_keys` (step 2).
