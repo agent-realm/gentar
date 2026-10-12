@@ -32,10 +32,11 @@
 # Ubuntu 24.04 (noble) only: the package names, the Docker apt suite and the
 # AppArmor rule for rootlesskit are noble's. Anything else is refused before
 # a single change is made, as are a bad parameter, a workspace root that is
-# not a dedicated directory, and being run as the bench account or as root.
-# Two refusals can only come after the apt base packages are installed: a
-# Docker apt key whose fingerprint is not Docker's, and an existing bench
-# account with another uid.
+# not a dedicated directory, being run as the bench account or as root, and
+# a bench account (or uid) that already exists in a way this layout cannot
+# take over: another uid, the uid held by another account, or membership of a
+# privileged group. One refusal can only come after the apt base packages are
+# installed: a Docker apt key whose fingerprint is not Docker's.
 #
 # Exit: 0 provisioned, every proof passed · 1 a proof failed (printed as
 # FAIL or INCONCLUSIVE) · 2 refused.
@@ -82,6 +83,18 @@ ADMIN=$(id -un)
 [ "$ADMIN" != "$ACCOUNT" ] || refuse "run it as an admin with sudo, not as $ACCOUNT"
 [ "$(id -u)" != 0 ] || refuse "run it as an admin with sudo, not as root (the proofs compare against the admin's home)"
 RUN="/run/user/$ACCOUNT_UID"
+# An account that already exists is taken over only if it already has the
+# layout's shape. Refused here, before any change, rather than after apt.
+if id "$ACCOUNT" >/dev/null 2>&1; then
+  have_uid=$(id -u "$ACCOUNT")
+  [ "$have_uid" = "$ACCOUNT_UID" ] || refuse "$ACCOUNT exists with uid $have_uid, not $ACCOUNT_UID"
+  if id -nG "$ACCOUNT" | tr ' ' '\n' | grep -qxE 'docker|sudo|adm|lxd|wheel'; then
+    refuse "$ACCOUNT exists and is in a privileged group ($(id -nG "$ACCOUNT")); remove it from docker/sudo/adm/lxd/wheel first"
+  fi
+else
+  uid_owner=$(getent passwd "$ACCOUNT_UID" 2>/dev/null | cut -d: -f1 || true)
+  [ -z "$uid_owner" ] || refuse "uid $ACCOUNT_UID is taken by $uid_owner; set GENTAR_BENCH_UID"
+fi
 
 echo "== apt base"
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null
@@ -105,6 +118,8 @@ sudo install -m 0644 "$key" /etc/apt/keyrings/docker.asc
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" \
   | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null
+# A previous run held docker-sbx; release it so a new SBX_VERSION can install.
+sudo apt-mark unhold docker-sbx >/dev/null 2>&1 || true
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
   docker-ce docker-ce-cli containerd.io docker-ce-rootless-extras \
   docker-buildx-plugin docker-compose-plugin "docker-sbx=${SBX_VERSION}" >/dev/null
@@ -135,7 +150,6 @@ sudo apparmor_parser -r /etc/apparmor.d/usr.bin.rootlesskit
 echo "== bench account $ACCOUNT"
 id "$ACCOUNT" >/dev/null 2>&1 || sudo useradd -m -u "$ACCOUNT_UID" -U -s /bin/bash -G kvm \
   -c "gentar CI runner + bench account (bin/bench-host-provision)" "$ACCOUNT"
-[ "$(id -u "$ACCOUNT")" = "$ACCOUNT_UID" ] || refuse "$ACCOUNT exists with uid $(id -u "$ACCOUNT"), not $ACCOUNT_UID"
 sudo passwd -l "$ACCOUNT" >/dev/null
 sudo chmod 750 "/home/$ACCOUNT"
 grep -q "^$ACCOUNT:" /etc/subuid || echo "$ACCOUNT:165536:65536" | sudo tee -a /etc/subuid >/dev/null

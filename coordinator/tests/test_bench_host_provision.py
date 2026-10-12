@@ -87,8 +87,8 @@ class BenchHostProvisionTest(unittest.TestCase):
         mine = self.tmp / "taken" / "ws"
         mine.mkdir(parents=True)
         self.assert_refused_untouched(
-            self.run_script(GENTAR_BENCH_WORKSPACE_ROOT=str(mine), GENTAR_BENCH_ACCOUNT="arena"),
-            "not arena")
+            self.run_script(GENTAR_BENCH_WORKSPACE_ROOT=str(mine), GENTAR_BENCH_ACCOUNT="gentarbenchx"),
+            "not gentarbenchx")
         link = self.tmp / "taken" / "link"
         link.symlink_to(mine)
         self.assert_refused_untouched(
@@ -139,6 +139,49 @@ class BenchHostProvisionTest(unittest.TestCase):
 
     def test_the_rootful_daemon_is_masked(self):
         self.assertIn("sudo systemctl mask docker.service docker.socket", SCRIPT.read_text())
+
+    def fake_account(self, uid=None, groups="", uid_owner=""):
+        """`id` and `getent` stubs: account gentarbenchx exists with uid/groups."""
+        (self.bin / "id").write_text(f"""#!/bin/sh
+case "$*" in
+  "-un"|"-u") exec /usr/bin/id "$@" ;;
+  "gentarbenchx") [ -n "{uid or ''}" ] || exit 1; echo "uid={uid}" ;;
+  "-u gentarbenchx") [ -n "{uid or ''}" ] || exit 1; echo "{uid}" ;;
+  "-nG gentarbenchx") echo "{groups}" ;;
+  *) exec /usr/bin/id "$@" ;;
+esac
+""")
+        (self.bin / "getent").write_text(f"""#!/bin/sh
+[ -n "{uid_owner}" ] && [ "$1" = passwd ] && [ "$2" = 1001 ] && echo "{uid_owner}:x:1001:1001::/home/{uid_owner}:/bin/sh" && exit 0
+exit 2
+""")
+        for f in ("id", "getent"):
+            (self.bin / f).chmod(0o755)
+
+    def test_an_existing_account_with_another_uid_is_refused_first(self):
+        self.fake_account(uid="1002", groups="gentarbenchx kvm")
+        self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx"),
+                                      "gentarbenchx exists with uid 1002, not 1001")
+
+    def test_an_existing_privileged_account_is_refused_first(self):
+        for g in ("docker", "sudo", "adm", "lxd", "wheel"):
+            with self.subTest(group=g):
+                self.fake_account(uid="1001", groups=f"gentarbenchx kvm {g}")
+                self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx"),
+                                              "is in a privileged group")
+
+    def test_a_uid_held_by_another_account_is_refused_first(self):
+        self.fake_account(uid=None, uid_owner="someoneelse")
+        self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx"),
+                                      "uid 1001 is taken by someoneelse")
+
+    def test_a_held_sbx_is_released_before_the_versioned_install(self):
+        text = SCRIPT.read_text()
+        unhold = text.index("sudo apt-mark unhold docker-sbx")
+        install = text.index('"docker-sbx=${SBX_VERSION}"')
+        hold = text.index("sudo apt-mark hold docker-sbx")
+        self.assertLess(unhold, install)
+        self.assertLess(install, hold)
 
     def test_it_is_never_run_as_the_bench_account(self):
         me = subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()

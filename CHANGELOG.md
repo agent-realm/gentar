@@ -29,7 +29,8 @@ Adopters pin a release tag, not a branch.
   with the rootful daemon disabled, sbx pinned and held, the headless
   unlocked keyring with its restart and D-Bus pieces, and a 0700 workspace
   root. The script refuses before any change on another OS, a bad
-  parameter, or a workspace root that is not a dedicated directory. It
+  parameter, a workspace root that is not a dedicated directory, or an
+  existing account with another uid or a privileged group. It
   verifies the Docker apt key's fingerprint and masks the rootful daemon.
   It exits 1 unless every proof is refused for the expected reason, and it
   contains no secret value. It is

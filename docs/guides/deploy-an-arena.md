@@ -29,7 +29,9 @@ It refuses before it changes anything when:
 - the OS is not Ubuntu 24.04;
 - a parameter is bad;
 - the workspace root is not a dedicated directory (at least two levels
-  deep, no `..`, and if it exists, already the bench account's).
+  deep, no `..`, and if it exists, already the bench account's);
+- the bench account already exists with another uid or in a privileged
+  group, or its uid belongs to another account.
 
 It also checks the Docker apt key's fingerprint before trusting it, and
 masks the rootful daemon.
