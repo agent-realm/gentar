@@ -1,7 +1,7 @@
 """gentar's public CI runs on GitHub-hosted runners only.
 
-D5 (2026-10-08) and the move to the pilot's ryzen (2026-10-12; AK47's G6
-acceptance criteria): gentar is public, so no job in any of its workflows
+D5 (2026-10-08) and the move to a new bench host (2026-10-12; the
+operator's acceptance criteria): gentar is public, so no job in any of its workflows
 may reach a self-hosted runner -- not by label and not through a variable
 that could resolve to one -- and no workflow may reference the bench's
 secrets or variables. The bench suites run in the private mirror

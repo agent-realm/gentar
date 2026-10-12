@@ -2,7 +2,7 @@
 #
 # gentar is public, so no self-hosted runner serves it: a fork's pull request
 # can bring its own workflow to any runner registered here (D5, 2026-10-08;
-# the move to the pilot's ryzen, 2026-10-12). Nothing in this file names a
+# the move to a new bench host, 2026-10-12). Nothing in this file names a
 # self-hosted label, a bench secret or a bench variable.
 #
 #   unit tests   every PR and every push to main: the whole unit suite on the
