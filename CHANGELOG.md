@@ -22,6 +22,20 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Changed
+- **gentar's public CI is GitHub-hosted only; the bench suites moved to a
+  private mirror.** gentar is public, and a self-hosted runner registered
+  to a public repository can be reached by a fork's own workflow (D5,
+  2026-10-08). `.github/workflows/gentar.yml` now runs only two hosted jobs:
+  the unit suite on every PR and every push to `main`, and the release-tag
+  check on `v*` tags. The gate, nightly and dispatch jobs and every bench
+  secret and variable reference are gone from it. The bench suites run in
+  the private mirror `agent-realm/gentar-arena`, on commits reachable from
+  `main` or a `v*` tag. That makes them a **post-merge check, not a PR
+  gate**. A release is proven by dispatching the mirror's gate on the
+  release commit before tagging. The central dispatch to `agent-realm/gentar`
+  is retired, and `docs-honesty-gentar` checks the new claims.
+
 ### Added
 - **`bin/bench-host-provision`** builds an Ubuntu 24.04 bench host. The
   isolated bench account (`arena` by default) has its password locked, no
