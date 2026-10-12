@@ -22,8 +22,8 @@ halves:
 |---|---|---|
 | public `gentar.yml` | every PR, every push to `main` | the unit suite on the checkout (ubuntu-latest) |
 | public `gentar.yml` | a `v*` tag | a check that the tag equals `v$(cat VERSION)` |
-| mirror, `gate` tier | a dispatch with `scenario=gate` | six deterministic bench suites: `smoke`, `bench-template-verify`, `otlp-selfreport`, `budget-sim`, `scripted-onboarding`, `scripted-danger` |
-| mirror, `nightly` tier | the mirror's schedule, or a dispatch with `scenario=nightly` | the nightly suites; agent suites need a provider key, subject suites a subject token |
+| mirror, `gate` tier | a dispatch with `scenario=gate`, or daily at 00:17 UTC | six deterministic bench suites: `smoke`, `bench-template-verify`, `otlp-selfreport`, `budget-sim`, `scripted-onboarding`, `scripted-danger` |
+| mirror, `nightly` tier | daily at 01:17 UTC, or a dispatch with `scenario=nightly` | the nightly suites; the agent suite skips without a provider key, the subject suites without a subject token |
 | mirror, one scenario | a dispatch with `scenario=<name>` | that scenario |
 
 **The bench suites are a POST-MERGE check, not a PR gate.** The mirror
@@ -32,7 +32,18 @@ admits a commit only when it is reachable from gentar's `main` or from a
 
 1. review the pull request, which runs the hosted unit tests;
 2. merge it;
-3. dispatch the mirror on the merge commit, or wait for its schedule.
+3. dispatch the mirror on the merge commit, or wait for its daily gate.
+
+**The mirror's schedule** runs on the head of gentar's `main`:
+
+- the gate, daily at 00:17 UTC;
+- the nightly, daily at 01:17 UTC. Its agent suite skips without a provider
+  key, and its subject suites skip without a subject token, each with a
+  notice.
+
+These times are nominal: GitHub can start a scheduled run hours late. A
+merge is therefore swept by the next scheduled gate at the latest, unless
+someone dispatches the gate sooner.
 
 A fork's pull request runs the hosted unit tests and nothing else. The
 mirror is private, so its runs and reports are visible to its maintainers

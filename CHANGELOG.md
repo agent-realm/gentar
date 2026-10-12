@@ -23,6 +23,12 @@ Adopters pin a release tag, not a branch.
 ## Unreleased
 
 ### Changed
+- **The mirror's schedule is documented.** `docs/reference/ci-and-releases.md`
+  says what the private mirror runs on its own: the gate daily at 00:17 UTC
+  and the nightly at 01:17 UTC, on the head of `main`. The times are
+  nominal, since GitHub can start a scheduled run late. The nightly's agent
+  suite skips without a provider key, and its subject suites without a
+  subject token.
 - **gentar's public CI is GitHub-hosted only; the bench suites moved to a
   private mirror.** gentar is public, and a self-hosted runner registered
   to a public repository can be reached by a fork's own workflow (D5,
