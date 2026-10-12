@@ -31,10 +31,14 @@
 #
 # Ubuntu 24.04 (noble) only: the package names, the Docker apt suite and the
 # AppArmor rule for rootlesskit are noble's. Anything else is refused before
-# a single change is made.
+# a single change is made, as are a bad parameter, a workspace root that is
+# not a dedicated directory, and being run as the bench account or as root.
+# Two refusals can only come after the apt base packages are installed: a
+# Docker apt key whose fingerprint is not Docker's, and an existing bench
+# account with another uid.
 #
-# Exit: 0 provisioned, proofs printed · 2 refused (wrong OS, run as the bench
-# account, a bad parameter).
+# Exit: 0 provisioned, every proof passed · 1 a proof failed (printed as
+# FAIL or INCONCLUSIVE) · 2 refused.
 
 set -euo pipefail
 
@@ -50,6 +54,25 @@ case "$ACCOUNT" in ''|*[!a-z0-9_-]*|[!a-z]*) refuse "bad GENTAR_BENCH_ACCOUNT: $
 case "$ACCOUNT_UID" in ''|*[!0-9]*) refuse "bad GENTAR_BENCH_UID: $ACCOUNT_UID" ;; esac
 case "$WSROOT" in /*) ;; *) refuse "GENTAR_BENCH_WORKSPACE_ROOT must be an absolute path" ;; esac
 case "$WSROOT" in *[!A-Za-z0-9._/-]*) refuse "bad GENTAR_BENCH_WORKSPACE_ROOT: $WSROOT" ;; esac
+# A DEDICATED directory: systemd-tmpfiles' `d` line changes the owner and mode
+# of a directory that already exists, so /tmp or /etc here would hand it to
+# the bench account. Two components at least, no `.` or `..` segment, not a
+# symlink, and if it exists it is already the bench account's (a re-run).
+ws_parts=0
+IFS=/ read -ra ws_split <<< "${WSROOT#/}"
+for part in ${ws_split[@]+"${ws_split[@]}"}; do
+  case "$part" in
+    '') ;;
+    .|..) refuse "GENTAR_BENCH_WORKSPACE_ROOT must not contain . or .. ($WSROOT)" ;;
+    *) ws_parts=$((ws_parts + 1)) ;;
+  esac
+done
+[ "$ws_parts" -ge 2 ] || refuse "GENTAR_BENCH_WORKSPACE_ROOT must be a dedicated directory, two levels deep at least, e.g. /tmp/gentar-workspaces (got $WSROOT)"
+[ ! -L "$WSROOT" ] || refuse "GENTAR_BENCH_WORKSPACE_ROOT is a symlink: $WSROOT"
+if [ -e "$WSROOT" ]; then
+  ws_owner=$(stat -c %U "$WSROOT" 2>/dev/null || stat -f %Su "$WSROOT" 2>/dev/null || echo '?')
+  [ "$ws_owner" = "$ACCOUNT" ] || refuse "$WSROOT exists and belongs to $ws_owner, not $ACCOUNT; choose another workspace root"
+fi
 case "$POOL" in *[!0-9./]*|'') refuse "bad GENTAR_DOCKER_POOL: $POOL" ;; esac
 case "$SBX_VERSION" in *[!A-Za-z0-9.~:+-]*|'') refuse "bad SBX_VERSION: $SBX_VERSION" ;; esac
 # Read, not sourced: os-release is data here.
@@ -69,9 +92,16 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommend
   libicu74 libkrb5-3 zlib1g >/dev/null && echo ok
 
 echo "== docker apt repo"
+# Docker's published release key fingerprint; a key that does not match is
+# never installed.
+DOCKER_KEY_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+key=$(mktemp)
+trap 'rm -f "$key"' EXIT
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o "$key"
+fpr=$(gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr:/ { print $10; exit }')
+[ "$fpr" = "$DOCKER_KEY_FPR" ] || refuse "the Docker apt key's fingerprint is '${fpr:-none}', not Docker's $DOCKER_KEY_FPR"
 sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc >/dev/null
-sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo install -m 0644 "$key" /etc/apt/keyrings/docker.asc
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" \
   | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null
@@ -81,8 +111,12 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommend
 sudo apt-mark hold docker-sbx >/dev/null
 sbx version
 
-echo "== rootful dockerd off (the bench account uses rootless Docker)"
+echo "== rootful dockerd off and masked (the bench account uses rootless Docker)"
+# Masked, not only disabled: no package upgrade or socket activation can
+# start the rootful daemon again. The bench account's rootless docker.service
+# is a USER unit, which this does not touch.
 sudo systemctl disable --now docker.service docker.socket >/dev/null 2>&1 || true
+sudo systemctl mask docker.service docker.socket >/dev/null
 systemctl is-active docker.service || true
 
 echo "== apparmor: allow rootlesskit user namespaces (Ubuntu 24.04 restricts them)"
@@ -187,19 +221,39 @@ systemctl --user enable docker.service >/dev/null 2>&1 || true
 systemctl --user is-active gnome-keyring.service sandboxd.service docker.service
 IN
 
-echo "== proofs (each must say REFUSED; then rootless, a route in the pool, the sbx version)"
-p() { local err
-  if err=$(sudo -u "$ACCOUNT" -H "${@:2}" 2>&1 >/dev/null); then echo "FAIL (allowed): $1"
-  else echo "REFUSED: $1 -- ${err%%$'\n'*}"; fi; }
-p "ls /home/$ADMIN"                 ls "/home/$ADMIN"
-p "read $ADMIN's authorized_keys"   head -c1 "/home/$ADMIN/.ssh/authorized_keys"
-p "sudo -n"                         sudo -n true
-p "rootful docker socket (info)"    docker -H unix:///var/run/docker.sock info
-if id -nG "$ACCOUNT" | tr " " "\n" | grep -qxE "docker|sudo|adm|lxd"; then echo "FAIL (privileged group): $(id -nG "$ACCOUNT")"
+echo "== proofs (each must say REFUSED for the expected reason; then rootless Docker and sbx)"
+# --- proofs: a refusal counts only with the EXPECTED reason; a missing file
+# or an unroutable address also fails, and would prove nothing.
+fails=0
+p() {  # $1 label, $2 expected-reason regex, rest = command run as the bench account
+  local label=$1 want=$2 err; shift 2
+  if err=$(sudo -u "$ACCOUNT" -H "$@" 2>&1 >/dev/null); then
+    echo "FAIL (allowed): $label"; fails=$((fails + 1))
+  elif printf '%s' "$err" | grep -qiE "$want"; then
+    echo "REFUSED: $label -- ${err%%$'\n'*}"
+  else
+    echo "INCONCLUSIVE: $label failed for another reason: ${err%%$'\n'*}"; fails=$((fails + 1))
+  fi
+}
+# --- end proofs
+ADMIN_HOME=$(getent passwd "$ADMIN" | cut -d: -f6)
+p "ls $ADMIN_HOME"                  "permission denied"  ls "$ADMIN_HOME"
+p "read $ADMIN's authorized_keys"   "permission denied"  head -c1 "$ADMIN_HOME/.ssh/authorized_keys"
+p "sudo -n"                         "password is required|not in the sudoers|may not run sudo"  sudo -n true
+p "rootful docker socket (info)"    "permission denied|no such file|cannot connect|is the docker daemon running" \
+  docker -H unix:///var/run/docker.sock info
+if id -nG "$ACCOUNT" | tr " " "\n" | grep -qxE "docker|sudo|adm|lxd"; then
+  echo "FAIL (privileged group): $(id -nG "$ACCOUNT")"; fails=$((fails + 1))
 else echo "REFUSED: no docker/sudo/adm/lxd group ($(id -nG "$ACCOUNT"))"; fi
-A="sudo -u $ACCOUNT -H env XDG_RUNTIME_DIR=$RUN DOCKER_HOST=unix://$RUN/docker.sock"
-$A docker info --format '{{.SecurityOptions}}' | grep -o 'name=rootless'
-$A docker run --rm alpine:3 sh -c 'ip -4 route | head -1'
-$A sbx version
+A=(sudo -u "$ACCOUNT" -H env XDG_RUNTIME_DIR="$RUN" DOCKER_HOST="unix://$RUN/docker.sock")
+if "${A[@]}" docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q '"name=rootless'; then
+  echo "ok: rootless docker"
+else echo "FAIL: $ACCOUNT's docker is not rootless"; fails=$((fails + 1)); fi
+"${A[@]}" docker run --rm alpine:3 sh -c 'ip -4 route | head -1' || { echo "FAIL: rootless docker cannot run a container"; fails=$((fails + 1)); }
+"${A[@]}" sbx version || { echo "FAIL: sbx does not run as $ACCOUNT"; fails=$((fails + 1)); }
 id "$ACCOUNT"
+if [ "$fails" -gt 0 ]; then
+  echo "bench-host-provision: $fails proof(s) failed (see FAIL / INCONCLUSIVE above); the host is not ready" >&2
+  exit 1
+fi
 echo "next, each its own step: sbx login as $ACCOUNT (bin/sbx-file-login), the bench template, the runner (as $ACCOUNT, with DOCKER_HOST=unix://$RUN/docker.sock and XDG_RUNTIME_DIR=$RUN in its .env), and the bench key in ~$ACCOUNT/.ssh/authorized_keys"

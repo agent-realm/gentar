@@ -54,10 +54,12 @@ class BenchHostProvisionTest(unittest.TestCase):
                 self.assert_refused_untouched(self.run_script(f), "Ubuntu 24.04 only")
 
     def test_os_release_is_read_not_sourced(self):
+        # Every parameter valid, so the script reaches the file, reads it, and
+        # refuses on the OS -- without ever executing the line in it.
         f = self.tmp / "os-release-evil"
         marker = self.tmp / "sourced"
-        f.write_text(f'ID=ubuntu\nVERSION_ID="24.04"\ntouch {marker}\n')
-        self.run_script(f, GENTAR_BENCH_UID="x")          # refused on the uid, after reading
+        f.write_text(f'ID=ubuntu\nVERSION_ID="22.04"\ntouch {marker}\n')
+        self.assert_refused_untouched(self.run_script(f), "Ubuntu 24.04 only")
         self.assertFalse(marker.exists())
 
     def test_bad_parameters_are_refused_first(self):
@@ -70,6 +72,73 @@ class BenchHostProvisionTest(unittest.TestCase):
                            ({"SBX_VERSION": "0.39$(id)"}, "bad SBX_VERSION")):
             with self.subTest(**env):
                 self.assert_refused_untouched(self.run_script(**env), words)
+
+    def test_the_workspace_root_must_be_a_dedicated_directory(self):
+        # systemd-tmpfiles' `d` line re-owns an existing directory: /tmp or
+        # /etc here would be handed to the bench account.
+        for root, words in (("/tmp", "two levels deep at least"), ("/etc", "two levels deep at least"),
+                            ("/", "two levels deep at least"), ("/tmp/", "two levels deep at least"),
+                            ("/tmp/../etc", "must not contain . or .."),
+                            ("/tmp/./gentar", "must not contain . or ..")):
+            with self.subTest(root=root):
+                self.assert_refused_untouched(self.run_script(GENTAR_BENCH_WORKSPACE_ROOT=root), words)
+
+    def test_an_existing_root_must_already_be_the_accounts(self):
+        mine = self.tmp / "taken" / "ws"
+        mine.mkdir(parents=True)
+        self.assert_refused_untouched(
+            self.run_script(GENTAR_BENCH_WORKSPACE_ROOT=str(mine), GENTAR_BENCH_ACCOUNT="arena"),
+            "not arena")
+        link = self.tmp / "taken" / "link"
+        link.symlink_to(mine)
+        self.assert_refused_untouched(
+            self.run_script(GENTAR_BENCH_WORKSPACE_ROOT=str(link)), "is a symlink")
+        # owned by the account (a re-run): the root check passes, and the
+        # next refusal is the one about the account itself
+        me = subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()
+        if re.fullmatch(r"[a-z][a-z0-9_-]*", me):
+            r = self.run_script(GENTAR_BENCH_WORKSPACE_ROOT=str(mine), GENTAR_BENCH_ACCOUNT=me)
+            self.assert_refused_untouched(r, "not as " + me)
+
+    def proof(self, *cmd_and_want):
+        """Run the script's own p() with a sudo that just runs the command."""
+        text = SCRIPT.read_text()
+        func = text[text.index("# --- proofs"):text.index("# --- end proofs")]
+        (self.bin / "sudo").write_text('#!/bin/sh\nshift 3\nexec "$@"\n')     # drop `-u ACCOUNT -H`
+        label, want, *cmd = cmd_and_want
+        script = func + '\nACCOUNT=arena\np "$@"\necho "fails=$fails"\n'
+        e = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}"}
+        r = subprocess.run(["/bin/bash", "-c", script, "proof", label, want, *cmd], env=e,
+                           capture_output=True, text=True)
+        return r.stdout
+
+    def test_a_proof_counts_only_the_expected_refusal(self):
+        out = self.proof("allowed", "permission denied", "true")
+        self.assertIn("FAIL (allowed): allowed", out)
+        self.assertIn("fails=1", out)
+        out = self.proof("refused", "permission denied", "sh", "-c", "echo 'x: Permission denied' >&2; exit 1")
+        self.assertIn("REFUSED: refused", out)
+        self.assertIn("fails=0", out)
+        out = self.proof("absent", "permission denied", "ls", str(self.tmp / "no-such-dir"))
+        self.assertIn("INCONCLUSIVE: absent failed for another reason", out)
+        self.assertIn("fails=1", out)
+
+    def test_a_failed_proof_fails_the_run(self):
+        text = SCRIPT.read_text()
+        tail = text[text.index("# --- end proofs"):]
+        self.assertIn('if [ "$fails" -gt 0 ]; then', tail)
+        self.assertIn("exit 1", tail[tail.index('if [ "$fails" -gt 0 ]; then'):])
+        self.assertIn("1 a proof failed", text)
+
+    def test_the_docker_key_is_checked_before_it_is_trusted(self):
+        text = SCRIPT.read_text()
+        self.assertIn("DOCKER_KEY_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88", text)
+        check = text.index('[ "$fpr" = "$DOCKER_KEY_FPR" ] || refuse')
+        self.assertLess(check, text.index("/etc/apt/keyrings/docker.asc"))
+        self.assertNotIn("| sudo tee /etc/apt/keyrings/docker.asc", text)
+
+    def test_the_rootful_daemon_is_masked(self):
+        self.assertIn("sudo systemctl mask docker.service docker.socket", SCRIPT.read_text())
 
     def test_it_is_never_run_as_the_bench_account(self):
         me = subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()

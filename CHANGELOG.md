@@ -28,8 +28,11 @@ Adopters pin a release tag, not a branch.
   sudo, and the groups its own plus `kvm`. The host gets rootless Docker
   with the rootful daemon disabled, sbx pinned and held, the headless
   unlocked keyring with its restart and D-Bus pieces, and a 0700 workspace
-  root. The script refuses another OS or a bad parameter before any change,
-  prints refusal proofs at the end, and contains no secret value. It is
+  root. The script refuses before any change on another OS, a bad
+  parameter, or a workspace root that is not a dedicated directory. It
+  verifies the Docker apt key's fingerprint and masks the rootful daemon.
+  It exits 1 unless every proof is refused for the expected reason, and it
+  contains no secret value. It is
   adopted from the operator's build of the 2026-10-11 bench host. The guide
   (section 1) now points to it, and section 2 adds the runner's rootless
   `DOCKER_HOST` and repository-level registration.

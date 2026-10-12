@@ -25,9 +25,18 @@ Running it again is safe. It sets up:
 - **Docker's address pool**, kept off the host's own networks
   (`GENTAR_DOCKER_POOL`).
 
-It refuses any other OS, and any bad parameter, before it changes
-anything. It ends by printing proofs: each escalation attempt is refused,
-Docker is rootless, and the sbx version.
+It refuses before it changes anything when:
+- the OS is not Ubuntu 24.04;
+- a parameter is bad;
+- the workspace root is not a dedicated directory (at least two levels
+  deep, no `..`, and if it exists, already the bench account's).
+
+It also checks the Docker apt key's fingerprint before trusting it, and
+masks the rootful daemon.
+
+It ends with proofs. Each escalation attempt must be refused for the
+expected reason. Docker must be rootless, and sbx must run. If any proof
+fails it exits 1, so a run that exits 0 has proven the layout.
 
 Four things are each a step of their own:
 - `sbx login` as the bench account (step 1 below, or `bin/sbx-file-login`);
