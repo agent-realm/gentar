@@ -67,6 +67,9 @@ class RunReport:
     agent_stats: dict = field(default_factory=dict)
     # Soft [[verify.judge]] results — reported, never the verdict.
     soft: list = field(default_factory=list)
+    # When a driver turn failed: the last screen, the raw byte tail, the
+    # bench's process tree, [on_failure] output (scripted.failure_snapshot).
+    failure: dict = field(default_factory=dict)
     # The run's scrubber (Spans.redactor.scrub), applied to the whole text
     # at write time: an error, a step's output or the transcript can carry
     # a declared credential's value (a timeout's text once carried argv).
@@ -167,6 +170,18 @@ class RunReport:
                     lines.append(_tail(s.output, _STEP_TAIL))
                     lines.append("```")
                 lines.append("")
+
+        if self.failure:
+            f = self.failure
+            lines.append("## Failure snapshot (the pilot's session when the turn failed)")
+            lines.append("")
+            for title, key in (("Last screen", "screen"), ("Raw tail of the pty stream "
+                               "(escapes shown as \\xNN)", "raw_tail"),
+                               ("Processes in the bench", "processes")):
+                lines += [f"### {title}", "", "```", (f.get(key) or "(empty)").rstrip(), "```", ""]
+            for h in f.get("on_failure") or []:
+                lines += [f"### on_failure: `{h['command']}`", "", "```",
+                          (h.get("output") or "").rstrip(), "```", ""]
 
         if self.soft:
             lines.append("## Soft judgments (reported only — not the verdict)")
