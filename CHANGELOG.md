@@ -44,6 +44,48 @@ Adopters pin a release tag, not a branch.
   is retired, and `docs-honesty-gentar` checks the new claims.
 
 ### Added
+- **The arena mirror: phase 2 for a PUBLIC repository, with no self-hosted
+  runner on it.** `[arena] bench = "mirror"` (with `mirror = "owner/name"`)
+  puts the repository on the kit's public variant workflow
+  (`subject-template/mirror/public/`: plan and checks, GitHub-hosted, no
+  self-hosted job), which `--check` holds it to; `plan.py` then plans no
+  bench here, and refuses a floor, `bench = "declared"` or a
+  `GENTAR_CI_RUNNER`. A private mirror (`subject-template/mirror/arena/`)
+  pulls the public repository and runs the kit's own bench job on a commit
+  `verify-ref.sh` admitted: reachable from the default branch or a `v*` tag,
+  or any branch head when the MIRROR's variable `GENTAR_ALLOW_BRANCH_HEADS`
+  is `true` (default off). Since GitHub serves a fork's commit by sha
+  through the parent's URL, it fetches only those refs (never
+  `refs/pull/*`, no partial clone) and checks ancestry. `verify-ref.sh` is
+  self-contained, so a mirror can vendor one file. The mirror's daily
+  schedule is a no-op on an already-green default-branch head.
+  Routed secrets have an upper bound in the MIRROR: its variable
+  `GENTAR_ROUTE_ALLOW` names what it will route, and a commit's
+  `[secrets] route` can only narrow it (`route.py`; a dropped name keeps its
+  slot empty and is logged by name). The mirror's plan job runs none of the
+  public repository's code, so a branch editing its own policy or `plan.py`
+  reaches no secret the mirror did not offer.
+- **`gentar/mirror.sh dispatch <sha> [suites]`** runs the mirror, waits (by
+  polling the run's own status, so a fine-grained token works; at most
+  `GENTAR_MIRROR_WAIT` seconds, after which it posts nothing), and
+  for a full phase 2 posts the commit status `arena/phase2` (success,
+  failure, or error) linking the mirror run. It finds its own run by a
+  request id, never "the newest". `mirror.sh status <sha>` reads it back. A
+  mirror holding `GENTAR_STATUS_TOKEN` posts the status itself, and
+  `mirror.sh` then leaves that status as it is.
+- **`[phase2] evidence = "status"`**: `release-gate.sh` then requires the
+  latest `arena/phase2` commit status on exactly the release sha to be
+  `success` and to link a run of `[arena] mirror` by its run number (it
+  needs that mirror set; `max_age_days` applies). Mirror mode requires it
+  whenever the gate is on.
+- **A mirror's phase 2 that skipped a suite is not green.** `run.sh --sweep`
+  writes the suites it skipped, with each reason, to
+  `gentar/reports/sweep-skipped.txt` (empty when none). The mirror's bench job
+  fails on a non-empty or missing list ("phase 2 ran every suite") before it
+  marks the commit green, so `arena/phase2` is a `failure` naming the skipped
+  suites and the release gate refuses it. Without this, a sweep that skipped
+  every keyed suite posted success and its `phase2-green-<sha>` marker kept
+  the schedule from ever sweeping that commit again (ground-up review, A1).
 - **`[secrets] route` — a subject's own secrets reach its suites by name.**
   Declare up to 8 repository secrets in `gentar/policy.toml`; the kit's bench
   job looks each one up in a fixed slot (`secrets[<declared name>]`, never the
