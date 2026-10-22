@@ -21,6 +21,7 @@ read this file before moving an adopter's `GENTAR_REF` across one.
 Adopters pin a release tag, not a branch.
 
 ## Unreleased
+
 ### Docs
 - `GENTAR_CI_RUNNER`: on GitHub Free, an organisation variable reaches
   public repositories only; a private subject sets it as a repository
