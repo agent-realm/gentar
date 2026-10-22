@@ -403,7 +403,9 @@ Secrets/vars the workflow reads:
 The three bench values are required; the workflow refuses with a named error
 before staging anything if one is missing or still the placeholder. Everything
 else is optional. Phase 2 is `gentar/run.sh --sweep`: suites whose credentials
-are absent are skipped and named, not run into a red refusal. It tears down
+are absent are skipped and named, not run into a red refusal, and listed in
+`gentar/reports/sweep-skipped.txt` (empty when none was skipped; an arena
+mirror refuses to call such a sweep green). It tears down
 with `gentar/run.sh --down`, which also removes the bench sandboxes a cancelled
 job left behind — and never touches an arena another live run holds.
 

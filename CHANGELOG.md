@@ -75,6 +75,14 @@ Adopters pin a release tag, not a branch.
   `success` and, with `[arena] mirror` set, to link a run of that mirror
   (`max_age_days` applies). Mirror mode requires it whenever the
   gate is on.
+- **A mirror's phase 2 that skipped a suite is not green.** `run.sh --sweep`
+  writes the suites it skipped, with each reason, to
+  `gentar/reports/sweep-skipped.txt` (empty when none). The mirror's bench job
+  fails on a non-empty or missing list ("phase 2 ran every suite") before it
+  marks the commit green, so `arena/phase2` is a `failure` naming the skipped
+  suites and the release gate refuses it. Without this, a sweep that skipped
+  every keyed suite posted success and its `phase2-green-<sha>` marker kept
+  the schedule from ever sweeping that commit again (ground-up review, A1).
 - **`[secrets] route` — a subject's own secrets reach its suites by name.**
   Declare up to 8 repository secrets in `gentar/policy.toml`; the kit's bench
   job looks each one up in a fixed slot (`secrets[<declared name>]`, never the

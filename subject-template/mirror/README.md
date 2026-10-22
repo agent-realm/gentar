@@ -117,6 +117,15 @@ its `plan.py`, still reaches no secret the mirror did not offer.
 | the default branch covered | the mirror's daily schedule; a no-op when that head is already green there |
 | a release | `gentar/release-gate.sh <sha>` passes on a success `arena/phase2` on exactly that sha, linking a run of the mirror `[arena] mirror` names |
 
+**A phase 2 that skipped a suite is not green.** The sweep skips a suite
+whose key is not set, and its exit code covers only the suites it ran. So
+the sweep writes the suites it skipped to `gentar/reports/sweep-skipped.txt`,
+and the mirror's bench job fails on any of them ("phase 2 ran every suite"),
+after teardown, the upload and the key removal. The commit then gets a
+`failure` status naming the skipped suites, no `phase2-green-<sha>` marker,
+and the release gate refuses it. Set the missing secret (or route it) and
+dispatch again.
+
 `mirror.sh` needs `gh`, authenticated as someone who can run the mirror's
 workflows and write commit statuses on the public repository. The status
 links the mirror run, which is private: only people who can read the

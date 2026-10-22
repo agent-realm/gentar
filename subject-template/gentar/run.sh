@@ -466,20 +466,31 @@ fi
 if [ "$SWEEP" = 1 ]; then
   runnable=""
   judged_skipped=""
+  skipped=""
   for f in "$HERE"/scenarios/*.toml; do
     [ -f "$f" ] || continue
     s=$(basename "$f" .toml)
     if ! credentials_present "$f"; then
-      echo "skipping $s — no credential group of it is fully set" >&2
+      why="no credential group of it is fully set"
     elif is_pr_event && judged "$f"; then
-      echo "skipping $s — judged suites never run on a pull request (phase 2 only)" >&2
+      why="judged suites never run on a pull request (phase 2 only)"
     elif ! judge_ready "$f"; then
-      echo "skipping $s — it has judged turns and TYPESAFE_API_KEY is not set" >&2
+      why="it has judged turns and TYPESAFE_API_KEY is not set"
       judged_skipped="$judged_skipped $s"
     else
       runnable="$runnable $s"
+      continue
     fi
+    echo "skipping $s — $why" >&2
+    skipped="$skipped$s"$'\t'"$why"$'\n'
   done
+  # Every suite this sweep skipped, one per line (name TAB reason), and an
+  # empty file when it skipped none. The sweep's exit code covers only the
+  # suites it ran; an arena mirror reads this before it calls the sweep a
+  # proof of the commit (subject-template/mirror/arena, "phase 2 ran every
+  # suite").
+  mkdir -p "$HERE/reports"
+  printf '%s' "$skipped" > "$HERE/reports/sweep-skipped.txt"
   # Said once more, loudly, at the end: a phase 2 that skipped its judged
   # suites can finish green without having run them (claude-playbooks-ac,
   # from Codex on cockpit's re-pin). In Actions it is a warning annotation.

@@ -284,7 +284,9 @@ class MirrorWorkflowTest(unittest.TestCase):
         kit_rest = [s for s in kit_steps if not s.startswith("- uses: actions/checkout@v4")]
         self.assertEqual(rest[:len(kit_rest)], kit_rest)
         extra = rest[len(kit_rest):]
-        self.assertEqual(len(extra), 2)
+        # The sweep guard (test_sweep_guard), then the green marker's two.
+        self.assertEqual(len(extra), 3)
+        self.assertTrue(extra[0].startswith("- name: phase 2 ran every suite"))
         self.assertTrue(all("needs.plan.outputs.bench == 'phase2'" in s for s in extra))
 
     def test_the_status_posts_only_for_phase_2_with_the_token(self):
