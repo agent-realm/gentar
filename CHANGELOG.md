@@ -44,6 +44,19 @@ Adopters pin a release tag, not a branch.
   version (0.11.0). Every scenario in gentar, its examples, and the known adopters'
   repositories loads unchanged.
 
+### Docs
+- `GENTAR_CI_RUNNER`: on GitHub Free, an organisation variable reaches
+  public repositories only; a private subject sets it as a repository
+  variable, or the workflow never sees it: `plan` silently falls back to
+  `ubuntu-latest` and `checks` to `[phase1] os` (every OS listed there)
+  (cockpit's v0.9.0 re-pin, 2026-09-30). Check the plan's `runner=` line.
+- Kit README: with `GENTAR_CI_RUNNER` set, only same-repository PRs get
+  phase 1 checks; a fork's all-skipped run is not a pass. The "Secrets/vars
+  the workflow reads" list now holds every name the workflow reads,
+  including `TYPESAFE_API_KEY` (unset: `--sweep` skips judged suites by
+  name, so phase 2 can be green without them), the OTLP pair,
+  `GENTAR_CI_RUNNER` and `GENTAR_FLOOR`; a test keeps it complete.
+
 ### Fixed
 - **The driver command's exit status counts; EOF alone is no longer a
   pass.** The driver waited for the command to end and never asked how it
