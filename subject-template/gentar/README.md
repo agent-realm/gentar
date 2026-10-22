@@ -395,7 +395,8 @@ Secrets/vars the workflow reads:
 - `secrets.BENCH_SSH_KEY` — key the coordinator uses to reach the bench-host
 - `secrets.GENTAR_BENCH_HOST`, `secrets.GENTAR_BENCH_USER` — the bench-host itself; the
   engine ships none, so without these no suite can run (secrets, because a public
-  repo's logs are public)
+  repo's logs are public). `vars.GENTAR_BENCH_HOST` is read when the secret is
+  unset: `local` (local bench mode) is a mode word, not a host to hide
 - `secrets.GENTAR_CLONE_KEY` — read-only deploy key, only if the ENGINE repo is private
 - `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
 - `vars.GENTAR_REF` — only to run an engine ref other than `run.sh`'s pin (a branch or release candidate being proven); delete it afterwards
