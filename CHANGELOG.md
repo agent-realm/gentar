@@ -22,6 +22,22 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Fixed
+- **The report directory is no longer opened to everyone** (D4). Every report
+  write ran `chmod 0777` on the report dir, a host bind, so any account on the
+  host could plant or delete reports. It existed so the host user could clean
+  what root wrote. Reports already go to the dir's owner on the open
+  descriptor. A dir root has to create itself (nothing made the bind source
+  first) now goes to the owner of the dir it sits in, on a descriptor opened
+  without following a symlink.
+- **A report's subject no longer reads `«redacted:GENTAR_BENCH_USER»`.**
+  v0.10.0 scrubs the whole report and every exported span with the bench
+  identity. The default bench account `arena` (bin/bench-host-provision's
+  documented default) is also the default subject, so every subject was
+  blanked, in reports and in exported traces, for a name the docs publish.
+  That pairing is now exempt, like `GENTAR_BENCH_HOST=local`. Any other
+  account name is still scrubbed.
+
 ## 0.10.0 — 2026-10-22
 
 Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what changed and why, upgrade for adopters, what is not live-proven, known limits, verification).
