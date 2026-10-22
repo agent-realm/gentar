@@ -374,6 +374,11 @@ class Spans:
             # are nanoseconds; harness measures milliseconds, so the last
             # six digits are honest zeros (gauntlet note, ported).
             return base.replace(microsecond=(ms % 1000) * 1000)
+        # The run's declared credential values never reach a span, local
+        # rows included (C1); the export scrubs again on its own door.
+        detail = self.redactor.scrub(detail or "")
+        attrs = {k: self.redactor.scrub(v) if isinstance(v, str) else v
+                 for k, v in (attrs or {}).items()}
         row = [
             subject, run_id, trace_id(subject, run_id), span_id, parent,
             scenario, step, status, ts(t0_ms),
