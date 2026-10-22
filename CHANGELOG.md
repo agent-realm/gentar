@@ -22,6 +22,21 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Changed
+- **The scenario schema is closed: an unknown table or key is refused.**
+  A scenario that misspelled a key used to load and run a weaker test that
+  still passed: `contain = "x"` in `[[verify.files]]` became a bare
+  existence check, and a `[[verify.command]]` table (singular) was dropped
+  without a word. The engine now refuses any table or key it does not read,
+  per turn type too (`send` on an `expect` turn), and names the closest
+  allowed key: `unknown key(s) 'contain' (did you mean 'contains'?)`. An
+  array of tables written with single brackets (`[verify.files]`) is
+  refused the same way. The dry-run uses the engine's parser, so it fails
+  such a suite as well. **Schema change:** a suite with a stray key that
+  loaded on 0.10.x or earlier is refused from this release, so it ships in a minor
+  version (0.11.0). Every scenario in gentar, its examples, and the known adopters'
+  repositories loads unchanged.
+
 ### Docs
 - `GENTAR_CI_RUNNER`: on GitHub Free, an organisation variable reaches
   public repositories only; a private subject sets it as a repository
