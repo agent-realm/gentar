@@ -172,9 +172,11 @@ per repository.
 
 On a host built by `bin/bench-host-provision`, register the runner as the
 bench account. Put `DOCKER_HOST=unix:///run/user/<uid>/docker.sock` and
-`XDG_RUNTIME_DIR=/run/user/<uid>` in the runner's `.env`: the account's
-rootless Docker is a user service, and the runner's system service does not
-read the account's `environment.d`.
+`XDG_RUNTIME_DIR=/run/user/<uid>` in the Actions runner's own `.env` (in the
+runner's install directory, which the runner service exports to every job;
+not the arena's compose `.env`): the account's rootless Docker is a user
+service, and the runner's system service does not read the account's
+`environment.d`.
 
 **Register the runner at REPOSITORY level, never at organisation level.**
 Give it a label no workflow in a public repository uses. An

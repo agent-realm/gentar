@@ -212,8 +212,8 @@ class ArenaWrapperTest(unittest.TestCase):
         for d in (".local/state/sandboxes", ".config/sandboxes", ".config/com.docker.sandboxes"):
             (self.home / d).mkdir(parents=True)
 
-    def arena_down(self, **env):
-        e = self.f.env(HOME=str(self.home), GENTAR_BENCH_HOST="local", GENTAR_SBX_AUTH_CHECK="off",
+    def arena_down(self, host="local", **env):
+        e = self.f.env(HOME=str(self.home), GENTAR_BENCH_HOST=host, GENTAR_SBX_AUTH_CHECK="off",
                        GENTAR_BENCH_WORKSPACE_ROOT=str(self.tmp / "ws"), **env)
         r = subprocess.run(["/bin/bash", str(ARENA), "down"], env=e, capture_output=True, text=True,
                            timeout=60)
@@ -234,6 +234,17 @@ class ArenaWrapperTest(unittest.TestCase):
         for line in envs:
             self.assertEqual(line, "compose uid=1000 gid=1000 sock=/var/run/docker.sock "
                                    "host=unix:///var/run/docker.sock")
+
+    def test_a_spaced_or_quoted_local_is_local_mode_here_too(self):
+        # as run.sh and the coordinator read it (agy on #83)
+        for host in ("local ", " local", "'local'", '"local"'):
+            with self.subTest(host=host):
+                (self.f.fix / "compose.env").unlink(missing_ok=True)
+                r, envs = self.arena_down(host, DOCKER_HOST=f"unix://{USER_SOCK}", FAKE_INFO=ROOTLESS)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertTrue(envs)
+                for line in envs:
+                    self.assertEqual(line, f"compose uid=0 gid=0 sock={USER_SOCK} host=unix://{USER_SOCK}")
 
     def test_cannot_tell_refuses_before_any_compose(self):
         r, envs = self.arena_down(DOCKER_HOST=f"unix://{USER_SOCK}", FAKE_INFO_MODE="fail")
