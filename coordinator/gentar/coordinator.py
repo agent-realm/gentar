@@ -447,6 +447,33 @@ def _run(name: str, cfg: Config | None = None) -> int:
         _write_report(report, cfg)
         return 2
 
+    # -- osb guard: a credential is never typed -------------------------
+    # The osb tier starts a pty session by TYPING its command into a shell,
+    # which echoes it into the transcript and puts it on the bridge's argv;
+    # it has no way to stage env in a file first. A driver scenario that
+    # forwards any env from the runner (credentials, or pass_env, which can
+    # carry a routed secret too: agy on #80) is refused there (C1), before
+    # any bench. osb is not a 1.0 tier.
+    if (bench_kind == "osb" and scenario and scenario.driver_command
+            and (scenario.credentials or scenario.pass_env)):
+        msg = (f"osb guard: scenario {name!r} drives a pty and forwards env "
+               f"(credentials or pass_env); the osb tier would type the values into "
+               f"the session (refusing before any bench exists). Run it on the sbx tier.")
+        print(f"Error: {msg}")
+        Spans(cfg).emit(ARENA_SUBJECT, "", name, "osb.credential.refuse", "error",
+                        attrs={"credentials": ",".join(scenario.credential_names())},
+                        detail="run refused: credentials on the osb pty")
+        report = RunReport(
+            scenario=name,
+            run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+            subject=(scenario.subject or ARENA_SUBJECT),
+            credentials=scenario.credential_names(),
+            reproduce=f"docker compose run --rm coordinator run {name}",
+            error=msg)
+        report.mark("refuse", 2)
+        _write_report(report, cfg)
+        return 2
+
     subject = (scenario.subject or ARENA_SUBJECT) if scenario else ARENA_SUBJECT
     run_kind = "scripted" if (scenario and scenario.driver_command) else "oracle"
     # Bench tier: the scenario's `bench` key overrides the install default
@@ -510,6 +537,7 @@ def _run(name: str, cfg: Config | None = None) -> int:
         started=time.strftime("%Y-%m-%d %H:%M:%S %z"),
         reproduce=f"docker compose run --rm coordinator run {name}",
         warnings=list(cred_warnings))
+    report.scrub = spans.redactor.scrub
 
     # Provenance is computed once, stamped on both scenario rows. The
     # template digest needs the bench-host; absent template = empty.
@@ -538,10 +566,12 @@ def _run(name: str, cfg: Config | None = None) -> int:
         spans.emit(subject, run_id, name, "run.end", attrs={"verdict": "pass"})
     except Exception as exc:
         verdict = 1
-        report.error = str(exc)
-        print(f"FAIL [{name}]: {exc}")
+        # Scrubbed once, here: this text goes to the CI log too.
+        error = spans.redactor.scrub(str(exc))
+        report.error = error
+        print(f"FAIL [{name}]: {error}")
         spans.emit(subject, run_id, name, "run.end", "fail",
-                   attrs={"verdict": "fail"}, detail=str(exc)[:2000])
+                   attrs={"verdict": "fail"}, detail=error[:2000])
     finally:
         _relay_agent_spans(bench, run_id, spans, cfg, subject, name)
         _collect_agent_stats(bench, run_id, spans, subject, name, report)

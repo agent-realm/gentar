@@ -32,6 +32,7 @@ pty_spawn_args. ``make_bench(cfg, kind)`` is the factory.
 import json
 import os
 import re
+import secrets
 import shlex
 import subprocess
 import sys
@@ -131,12 +132,23 @@ class BenchHost:
         return cmd
 
     def _ssh_run(self, argv: list[str], remote: str, timeout: int = 300,
-                 strict: bool = True) -> subprocess.CompletedProcess:
+                 strict: bool = True,
+                 input: str | None = None) -> subprocess.CompletedProcess:
         """ssh argv + one remote shell line. Transport errors (rc=255 +
         ssh in stderr) raise even when strict=False — a dead bench is
-        never a test result."""
-        proc = subprocess.run(
-            argv + [remote], capture_output=True, text=True, timeout=timeout)
+        never a test result. `input` is the remote command's stdin."""
+        try:
+            proc = subprocess.run(
+                argv + [remote], capture_output=True, text=True,
+                timeout=timeout, input=input)
+        except subprocess.TimeoutExpired:
+            proc = None
+        if proc is None:
+            # Its text is the whole argv, and an error text reaches the
+            # report, the spans and the CI log: name the operation only.
+            # Raised OUTSIDE the except block, so the original is not even
+            # its __context__ (agy on #80: `from None` only hides it).
+            raise subprocess.TimeoutExpired(_op_label(remote), timeout)
         transport_error = (proc.returncode == 255
                            and "ssh" in proc.stderr.lower())
         if transport_error:
@@ -191,10 +203,55 @@ class BenchHost:
         how to reach a tty."""
         raise NotImplementedError
 
+    def _write_stdin(self, name: str, remote_sh: str, content: str) -> str:
+        """Run `remote_sh` in bench `name` with `content` on its stdin and
+        return its stdout; raise on failure. The tier's transport, for
+        _stage_env."""
+        raise NotImplementedError
 
-def _env_exports(env: dict[str, str] | None) -> str:
-    return "".join(
-        f"export {k}={shlex.quote(v)}; " for k, v in (env or {}).items())
+    def _stage_env(self, name: str, env: dict[str, str] | None) -> str:
+        """Env values never ride a command line (C1): argv is readable by
+        every account on the bench-host through /proc, and a timeout's
+        error text is the whole argv. They go into an owner-only file in
+        the bench, over stdin, in an exec of their own; the returned prefix
+        reads the file into a shell variable, deletes it, and only then
+        applies it, so an assignment it carries (HOME, say) cannot move the
+        path the delete expands (Codex on #80). The variable is never
+        exported. '' when there is nothing to pass."""
+        if not env:
+            return ""
+        # The write resolves the path once and says where it wrote, and the
+        # command uses that absolute path: the two execs need not agree on
+        # $HOME (a login shell may set it, agy on #80).
+        base = f".gentar-env-{secrets.token_hex(8)}"
+        out = self._write_stdin(
+            name, f'umask 077 && f="${{HOME:-/tmp}}/{base}" && cat > "$f" && printf "%s\\n" "$f"',
+            _env_file(env))
+        lines = (out or "").strip().splitlines()
+        path = lines[-1] if lines else ""
+        if not (path.startswith("/") and path.endswith("/" + base)):
+            raise BenchHostError("the bench did not say where it staged the env file")
+        q = shlex.quote(path)
+        return (f'__gentar_env=$(cat {q}) && rm -f {q} || exit 97; '
+                f'eval "$__gentar_env"; unset __gentar_env; ')
+
+
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def _env_file(env: dict[str, str]) -> str:
+    """`export NAME=value` lines for a POSIX shell to source. A name that is
+    not a shell identifier is refused: it would be shell text, not a name."""
+    for k in env:
+        if not _ENV_NAME.match(k):
+            raise BenchHostError(f"env name {k!r} is not a shell identifier")
+    return "".join(f"export {k}={shlex.quote(v)}\n" for k, v in env.items())
+
+
+def _op_label(remote: str) -> str:
+    """A command's first two words, for an error that must not carry the
+    rest of it."""
+    return mask_token_shapes(" ".join(remote.split()[:2]))[:60]
 
 
 def _sq(s: str) -> str:
@@ -226,12 +283,19 @@ class SbxBenchHost(BenchHost):
                               jump=self.cfg.bench_jump)
 
     def _run(self, remote_cmd: list[str], timeout: int = 300,
-             strict: bool = True) -> subprocess.CompletedProcess:
+             strict: bool = True,
+             input: str | None = None) -> subprocess.CompletedProcess:
         # ssh flattens argv with shell word-splitting on the remote side,
         # so quote every word; sbx flags with values stay one word each.
         remote = " ".join(shlex.quote(w) for w in remote_cmd)
         return self._ssh_run(self._ssh_base(), remote,
-                             timeout=timeout, strict=strict)
+                             timeout=timeout, strict=strict, input=input)
+
+    def _write_stdin(self, name: str, remote_sh: str, content: str) -> str:
+        # -i: docker-exec semantics, stdin reaches the command only with it
+        # (`sbx exec --help`, sbx on gentar-bench, 2026-10-22).
+        return self._run([self.cfg.sbx_bin, "exec", "-i", name, "sh", "-c", remote_sh],
+                         timeout=60, input=content).stdout
 
     def workspace(self, name: str) -> str:
         return f"{self.cfg.bench_workspace_root}/{name}"
@@ -298,11 +362,12 @@ class SbxBenchHost(BenchHost):
         """Run a command in the sandbox via `sh -lc`. Returns (exit_code,
         stdout) — a nonzero command exit is a RESULT, not an error; only
         ssh transport failures raise. `env` is exported ahead of the
-        command (run id / OTLP endpoint injection for agent self-report).
+        command (run id / OTLP endpoint injection for agent self-report),
+        through a file, never the command line (_stage_env).
         """
+        prefix = self._stage_env(name, env)
         proc = self._run(
-            [self.cfg.sbx_bin, "exec", name, "sh", "-lc",
-             _env_exports(env) + command],
+            [self.cfg.sbx_bin, "exec", name, "sh", "-lc", prefix + command],
             timeout=timeout,
             strict=False,
         )
@@ -350,13 +415,13 @@ class SbxBenchHost(BenchHost):
                        env: dict[str, str], command: str) -> list[str]:
         # Local: the pty is the coordinator's own (pexpect), so no -tt.
         ssh = ["sh", "-c"] if self.local else self._ssh_base() + ["-tt", "--"]
-        # Extra env (credential transport, tier 1) is quoted per
-        # assignment — a value with spaces/metachars stays one word.
+        # Extra env (credential transport, tier 1) is staged in a file in
+        # the bench first (_stage_env): only the terminal size is argv.
+        prefix = self._stage_env(sandbox, env)
         remote = " ".join([
             self.cfg.sbx_bin, "exec", "-t", sandbox,
             "env", f"COLUMNS={columns}", f"LINES={lines}",
-            *([shlex.quote(f"{k}={v}") for k, v in (env or {}).items()]),
-            "bash", "-c", _sq(command)])
+            "bash", "-c", _sq(prefix + command)])
         return ssh + [remote]
 
 
@@ -439,10 +504,13 @@ class TartBenchHost(BenchHost):
         merged = {"WORKSPACE_DIR": self.workspace(name), **(env or {})}
         proc = self._ssh_run(
             self._vm_ssh(name),
-            _env_exports(merged) + command,
+            self._stage_env(name, merged) + command,
             timeout=timeout, strict=False)
         self.last_stderr = proc.stderr or ""
         return proc.returncode, proc.stdout
+
+    def _write_stdin(self, name: str, remote_sh: str, content: str) -> str:
+        return self._ssh_run(self._vm_ssh(name), remote_sh, timeout=60, input=content).stdout
 
     def push_dir(self, local_dir: str, remote_dir: str) -> None:
         """Ship a local directory into the guest via tar over ssh. The
@@ -494,8 +562,7 @@ class TartBenchHost(BenchHost):
         merged = {"WORKSPACE_DIR": self.workspace(sandbox), **env}
         remote = " ".join([
             "env", f"COLUMNS={columns}", f"LINES={lines}",
-            *([shlex.quote(f"{k}={v}") for k, v in merged.items()]),
-            "sh", "-c", _sq(command)])
+            "sh", "-c", _sq(self._stage_env(sandbox, merged) + command)])
         return self._vm_ssh(sandbox) + ["-tt", remote]
 
 
@@ -618,7 +685,10 @@ class OpenSandboxBenchHost(BenchHost):
         base = f"http://{endpoint.endpoint}"
         merged = {"WORKSPACE_DIR": self.workspace(sandbox), **env}
         # Same shape as the other tiers' remote command — the bridge sends
-        # it as the pty session's first line, then relays.
+        # it as the pty session's first line, then relays. It is TYPED, so
+        # it is echoed into the transcript: the coordinator refuses a
+        # credentialed driver scenario on this tier before any bench (C1),
+        # and what is left here is non-secret (workspace, pass_env knobs).
         remote = " ".join([
             "cd", self.workspace(sandbox), "&&", "env",
             f"COLUMNS={columns}", f"LINES={lines}",
@@ -700,10 +770,13 @@ class DaytonaBenchHost(BenchHost):
         merged = {"WORKSPACE_DIR": self.workspace(name), **(env or {})}
         proc = self._ssh_run(
             self._sb_ssh(name),
-            _env_exports(merged) + command,
+            self._stage_env(name, merged) + command,
             timeout=timeout, strict=False)
         self.last_stderr = proc.stderr or ""
         return proc.returncode, proc.stdout
+
+    def _write_stdin(self, name: str, remote_sh: str, content: str) -> str:
+        return self._ssh_run(self._sb_ssh(name), remote_sh, timeout=60, input=content).stdout
 
     def push_dir(self, local_dir: str, remote_dir: str) -> None:
         """Tar over ssh stdin — the tart pattern. remote_dir's last
@@ -753,8 +826,7 @@ class DaytonaBenchHost(BenchHost):
         remote = " ".join([
             "cd", self.workspace(sandbox), "&&", "env",
             f"COLUMNS={columns}", f"LINES={lines}",
-            *([shlex.quote(f"{k}={v}") for k, v in merged.items()]),
-            "sh", "-c", _sq(command)])
+            "sh", "-c", _sq(self._stage_env(sandbox, merged) + command)])
         return self._sb_ssh(sandbox) + ["-tt", remote]
 
 
