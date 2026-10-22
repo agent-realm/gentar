@@ -11,7 +11,9 @@ incident 2026-07-13):
   blind-typing an option number.
 """
 
+import os
 import re
+import signal
 import time
 
 import pexpect
@@ -20,7 +22,55 @@ from gentar.benchhost import BenchHost
 
 from gentar.gates import APPROVAL_RE, DANGER_RE  # noqa: E402,F401  (re-exported)
 PICKER_CURSOR_RE = re.compile(r"^\s*❯\s*[0-9]+\.", re.MULTILINE)
+# An UNNUMBERED picker's cursor line: `❯ <text>`. Claude Code 2.1.283's
+# API-key and trust dialogs ("❯ No, exit" / "Yes, I trust this folder") have
+# no numbers (cockpit). Text after the glyph is required: an empty `❯` is the
+# input prompt, not a picker.
+CURSOR_TEXT_RE = re.compile(r"^\s*❯\s*\S.*$", re.MULTILINE)
 SPINNER_RE = re.compile(r"^[✻✽✢·✳✶]", re.MULTILINE)
+
+
+def _option_block(rows: list[str]) -> list[str]:
+    """The unnumbered option block around the LAST `❯ <text>` row: that row
+    plus the contiguous rows above and below indented to the column where
+    its text starts (`❯ No, exit` / `  Yes, I trust this folder`). A prompt
+    line with typed text (`❯ git status`) has no such siblings."""
+    at = next((i for i in range(len(rows) - 1, -1, -1) if CURSOR_TEXT_RE.match(rows[i])), None)
+    if at is None:
+        return []
+    cur = rows[at]
+    glyph = cur.index("❯")
+    col = glyph + 1 + (len(cur) - glyph - 1 - len(cur[glyph + 1:].lstrip()))
+
+    def sibling(r: str) -> bool:
+        body = r.lstrip(" ")
+        return bool(body) and not body.startswith("❯") and len(r) - len(body) == col
+
+    block = [cur]
+    i = at - 1
+    while i >= 0 and sibling(rows[i]):
+        block.insert(0, rows[i])
+        i -= 1
+    i = at + 1
+    while i < len(rows) and sibling(rows[i]):
+        block.append(rows[i])
+        i += 1
+    return block
+
+
+def picker_visible(screen: str, label: "re.Pattern") -> bool:
+    """A picker is on screen: a numbered `❯ N.` cursor line, or an
+    unnumbered `❯ <text>` cursor line in a block of at least two aligned
+    options, one of which is the wanted label. Requiring the aligned
+    siblings keeps a prompt with typed text (`❯ git status`) from passing as
+    a picker even when the label's word is elsewhere on screen (agy on #62);
+    requiring the label means an unnumbered picker without it is not this
+    turn's picker, so the pick fails after `settle` rather than pressing
+    keys into it."""
+    if PICKER_CURSOR_RE.search(screen):
+        return True
+    block = _option_block(screen.splitlines()[-20:])
+    return len(block) >= 2 and any(label.search(r) for r in block)
 
 
 class DriverAbort(RuntimeError):
@@ -36,6 +86,8 @@ class PtyDriver:
         self.child = None
         self.transcript = ""   # full evidence; spans carry the tail
         self.aborted = False   # the danger gate fired: never type again
+        self.transport = ""    # argv[0] of the pty transport ("ssh" on remote tiers)
+        self.sent_ctrl_c = False  # a ctrl-c was actually typed (not just declared)
 
     # -- lifecycle -------------------------------------------------------
 
@@ -44,6 +96,7 @@ class PtyDriver:
         # ssh jump→guest); the driver only drives the pty it gets back.
         argv = self.bench.pty_spawn_args(
             self.sandbox, self.columns, self.lines, env or {}, command)
+        self.transport = os.path.basename(argv[0])
         self.child = pexpect.spawn(argv[0], argv[1:],
                                    encoding="utf-8", codec_errors="replace",
                                    dimensions=(self.lines, self.columns),
@@ -104,6 +157,8 @@ class PtyDriver:
 
     def send_key(self, key: str) -> None:  # "enter", "escape", "down", "ctrl-c"
         self.child.send(_KEYS[key])
+        if key == "ctrl-c":
+            self.sent_ctrl_c = True
 
     def send_keys(self, keys: list[str], delay: float = 0.5) -> None:
         """A key sequence with pacing — interactive TUIs read single keys,
@@ -157,6 +212,26 @@ class PtyDriver:
         except pexpect.TIMEOUT:
             return False
 
+    def ended(self, settle: float = 10.0) -> tuple[int | None, int | None] | None:
+        """How the driver command ended: (exit status, signal) as pexpect
+        reaps them, or None while it still runs. EOF only means the pty
+        closed; the exit lands a moment later, so poll for up to `settle`
+        seconds rather than block in wait()."""
+        if self.child is None:
+            return None
+        waited = 0.0
+        while True:
+            try:
+                alive = self.child.isalive()
+            except Exception:           # already reaped elsewhere: no status
+                return (None, None)
+            if not alive:
+                return self.child.exitstatus, self.child.signalstatus
+            if waited >= settle:
+                return None
+            time.sleep(0.1)
+            waited += 0.1
+
     def wait_idle(self, max_seconds: int = 60) -> bool:
         prev, waited = None, 0.0
         while waited < max_seconds:
@@ -177,12 +252,13 @@ class PtyDriver:
         label = re.compile(label_pattern, re.IGNORECASE)
         waited = 0.0
         while waited < settle:
-            if PICKER_CURSOR_RE.search(self.screen()):
+            if picker_visible(self.screen(), label):
                 break
             time.sleep(0.5)
             waited += 0.5
         else:
             return False
+        seen = []
         for _ in range(max_tries):
             # The transcript is a raw stream, not a rendered pane (gauntlet
             # had tmux capture-pane); in-place redraws stack blocks, so the
@@ -192,8 +268,23 @@ class PtyDriver:
             if label.search(cursor):
                 self.send_key("enter")
                 return True
+            # Back at an option already passed: the list wrapped (or the
+            # cursor does not move), and the label is not in it.
+            text = cursor.strip()
+            if text in seen:
+                return False
+            seen.append(text)
             self.send_key("down")
-            time.sleep(1)
+            # Wait for the redraw: on a loaded bench it can land after a
+            # second, and a cursor read before it would look like a wrap
+            # (agy on #62). Unchanged after 3s: the cursor does not move,
+            # and the next pass sees a repeat.
+            for _ in range(6):
+                time.sleep(0.5)
+                now = next((ln for ln in reversed(self.screen().splitlines())
+                            if ln.lstrip().startswith("❯")), "")
+                if now.strip() != text:
+                    break
         return False
 
 
@@ -341,6 +432,42 @@ def _render(raw: str, height: int = 0) -> str:
     if height:
         return "\n".join(out)
     return "\n".join(out).rstrip("\n")
+
+
+def exit_problem(status: tuple[int | None, int | None] | None,
+                 transport: str = "", interrupted: bool = False) -> str:
+    """Why the driver command's own ending fails the run; "" when it does
+    not. EOF used to count as success, so an agent that crashed, was
+    killed by its `timeout`, or lost its ssh after writing half the work
+    could still pass on the files it left (ground-up review A3).
+    `interrupted`: the scenario itself pressed ctrl-c to end the program,
+    so a death by SIGINT (or the shell's 130) is the ending it asked for."""
+    if status is None:
+        return "closed its terminal but had not exited 10s later"
+    code, sig = status
+    if code is None and sig is None:
+        return "ended with no exit status the driver could read"
+    if interrupted and (sig == signal.SIGINT or code == 128 + signal.SIGINT):
+        return ""
+    if sig is not None:
+        return f"was killed by signal {sig}{_signame(sig)}"
+    if code == 0:
+        return ""
+    if code == 255 and transport == "ssh":
+        return ("exited 255: ssh's own failure code (the transport dropped or "
+                "was refused, or the remote command died by a signal)")
+    if code == 124:
+        return "exited 124: timeout(1) killed it at its deadline"
+    if code > 128 and _signame(code - 128):
+        return f"exited {code}: killed by signal {code - 128}{_signame(code - 128)}"
+    return f"exited {code}"
+
+
+def _signame(sig: int) -> str:
+    try:
+        return f" ({signal.Signals(sig).name})"
+    except ValueError:
+        return ""
 
 
 def _tail(s: str, n: int) -> str:

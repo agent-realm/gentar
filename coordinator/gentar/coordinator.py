@@ -4,10 +4,12 @@ The run itself is a TWO-ROW scenario span (gauntlet policy, ported):
 a `running` row opens it, the terminal row carries status/duration and
 the full provenance attrs — stamped on BOTH rows, because the terminal
 row is the one a duration-comparison query selects. Exit code is the
-verdict: 0 pass · 1 fail · 2 usage/config refusal. Dispatches Python
+verdict: 0 pass · 1 fail · 2 usage/config refusal; a quarantined suite
+exits 0 and its report and span say skip. Dispatches Python
 builtins (smoke) and TOML scenarios (oracle runner)."""
 
 import os
+import re
 import shlex
 import time
 
@@ -30,6 +32,54 @@ class RunError(RuntimeError):
     pass
 
 
+# A credential in a subject's git metadata: a user:password (or token) in a
+# remote URL, an http.extraheader (actions/checkout's auth header), or a
+# credential store file. The engine copies the subject, `.git` included,
+# into the bench, where agents may run with skipped permissions.
+# Any user info in an http(s) URL: `user:pass@`, `token@` (GitHub accepts a
+# bare token as the user), `:token@`, `token:@`, in a remote or in a
+# `[url "..."]` insteadOf header. For other schemes only a password counts:
+# `ssh://git@host` is a user name, not a secret.
+_CRED_IN_URL = re.compile(r"https?://[^/\s\"']*@|[a-z][a-z0-9+.-]*://[^/\s@:\"']*:[^/\s@\"']+@",
+                          re.IGNORECASE)
+_CRED_KEYS = re.compile(r"^\s*(extraheader|cookiefile)\s*=|x-access-token|authorization:",
+                        re.IGNORECASE | re.MULTILINE)
+# An env var name, as the kit passes them in GENTAR_REDACT_NAMES.
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def subject_credential_problems(subject_dir: str) -> list[str]:
+    """Why this subject must not be copied into a bench: a credential in
+    its .git/config or a .git-credentials file. Names the file and the kind,
+    never the value. A worktree's `.git` pointer file is not a directory
+    and holds no config."""
+    out = []
+    gitdir = os.path.join(subject_dir, ".git")
+    configs = []
+    if os.path.isdir(gitdir):
+        # Every git config the copy carries: the repo's, each submodule's
+        # (.git/modules/**/config) and each worktree's config.worktree.
+        for root, dirs, files in os.walk(gitdir):
+            dirs[:] = [d for d in dirs if d not in ("objects", "lfs", "logs")]
+            configs += [os.path.join(root, f) for f in files if f in ("config", "config.worktree")]
+    for config in sorted(configs):
+        try:
+            with open(config, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError as exc:
+            out.append(f"cannot read {config} to check it for credentials: {exc.strerror}")
+            continue
+        if _CRED_IN_URL.search(text):
+            out.append(f"{config} has a credential in a URL (a remote or an insteadOf)")
+        if _CRED_KEYS.search(text):
+            out.append(f"{config} has an auth header, token or cookie file "
+                       f"(http.extraheader / http.cookieFile)")
+    for name in (".git-credentials", os.path.join(".git", "credentials")):
+        if os.path.exists(os.path.join(subject_dir, name)):
+            out.append(f"{os.path.join(subject_dir, name)} exists (a git credential store)")
+    return out
+
+
 def _write_report(report: RunReport, cfg: Config) -> None:
     """Best-effort, like all artifacts: a report failure must never
     change the verdict. Empty report_dir disables writing."""
@@ -42,18 +92,27 @@ def _write_report(report: RunReport, cfg: Config) -> None:
         print(f"warn: report write failed (non-fatal): {exc}")
 
 
+# (name, winning dir, hidden dir) notes already printed: _resolve runs more
+# than once per suite, and one note per pair is enough.
+_SHADOW_NOTED: set[tuple[str, str, str]] = set()
+
+
 def _resolve(name: str, cfg: Config) -> tuple:
     """-> (callable(bench, run_id, spans) -> summary, TomlScenario | None)"""
     if name in REGISTRY:
         return REGISTRY[name], None
-    for d in cfg.scenarios_dirs:
-        tomls = load_dir(d)
-        if name in tomls:
-            scenario = tomls[name]
-            return (lambda bench, run_id, spans, subject="arena",
-                    report=None: run_oracle(
-                scenario, bench, run_id, spans, cfg, subject=subject,
-                report=report)), scenario
+    found = [(d, load_dir(d)) for d in cfg.scenarios_dirs]
+    hits = [d for d, tomls in found if name in tomls]
+    if hits:
+        scenario = dict(found)[hits[0]][name]
+        for other in hits[1:]:
+            if (name, hits[0], other) not in _SHADOW_NOTED:
+                _SHADOW_NOTED.add((name, hits[0], other))
+                print(f"note: scenario {name!r} from {hits[0]} hides the one in {other}")
+        return (lambda bench, run_id, spans, subject="arena",
+                report=None: run_oracle(
+            scenario, bench, run_id, spans, cfg, subject=subject,
+            report=report)), scenario
     raise RunError(f"unknown scenario {name!r}; known: {', '.join(known_names(cfg))}")
 
 
@@ -224,14 +283,28 @@ def _run_rate(name: str, cfg: Config, runs: int, rate_min: float) -> int:
 def _run(name: str, cfg: Config | None = None) -> int:
     cfg = cfg or Config()
 
-    # -- quarantine: skip, never fail -----------------------------------
+    # -- quarantine: not run — neither a pass nor a failure -------------
+    # Exit 0, so a known flake cannot turn a sweep red while its owner
+    # investigates. But nothing was checked, so the line below, the span
+    # and the report all say SKIP, never PASS. The report also keeps the
+    # rule that every terminal outcome writes one: without it the kit read
+    # a quarantined suite as broken reporting and failed it (rc 1), while
+    # a direct caller saw a silent 0.
     if name in cfg.quarantine:
-        print(f"SKIP [{name}]: quarantined (known flake — not a failure)")
+        print(f"QUARANTINED [{name}]: not run (GENTAR_QUARANTINE) — neither a pass nor a failure")
         spans = Spans(cfg)
         skip_id = new_run_id(cfg.name_prefix)
         spans.emit(ARENA_SUBJECT, skip_id, name, "run", "skip",
                    attrs={"quarantined": "true"},
                    detail="quarantined scenario skipped")
+        report = RunReport(
+            scenario=name, run_id=skip_id, subject=ARENA_SUBJECT,
+            reproduce=f"docker compose run --rm coordinator run {name}",
+            summary=("Quarantined (GENTAR_QUARANTINE): not run. Nothing was "
+                     "checked, so this is not a pass. Remove the name from "
+                     "GENTAR_QUARANTINE to run it."))
+        report.mark("skip", 0)
+        _write_report(report, cfg)
         return 0
 
     try:
@@ -338,7 +411,9 @@ def _run(name: str, cfg: Config | None = None) -> int:
     # A declared credential that is SET but sits outside the winning group
     # is dropped — correctly — but never silently: see dropped_credentials.
     # Names only; a value never reaches a log line.
-    cred_warnings: list[str] = []
+    cred_warnings: list[str] = list(getattr(scenario, "warnings", []) or [])
+    for w in cred_warnings:
+        print(f"warning: {w}")
     if scenario and scenario.credentials:
         dropped = dropped_credentials(scenario.credential_groups(), os.environ.get)
         if dropped:
@@ -391,10 +466,60 @@ def _run(name: str, cfg: Config | None = None) -> int:
         _write_report(report, cfg)
         return 2
 
+    # -- osb guard: a credential is never typed -------------------------
+    # The osb tier starts a pty session by TYPING its command into a shell,
+    # which echoes it into the transcript and puts it on the bridge's argv;
+    # it has no way to stage env in a file first. A driver scenario that
+    # forwards any env from the runner (credentials, or pass_env, which can
+    # carry a routed secret too: agy on #80) is refused there (C1), before
+    # any bench. osb is not a 1.0 tier.
+    if (bench_kind == "osb" and scenario and scenario.driver_command
+            and (scenario.credentials or scenario.pass_env)):
+        msg = (f"osb guard: scenario {name!r} drives a pty and forwards env "
+               f"(credentials or pass_env); the osb tier would type the values into "
+               f"the session (refusing before any bench exists). Run it on the sbx tier.")
+        print(f"Error: {msg}")
+        Spans(cfg).emit(ARENA_SUBJECT, "", name, "osb.credential.refuse", "error",
+                        attrs={"credentials": ",".join(scenario.credential_names())},
+                        detail="run refused: credentials on the osb pty")
+        report = RunReport(
+            scenario=name,
+            run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+            subject=(scenario.subject or ARENA_SUBJECT),
+            credentials=scenario.credential_names(),
+            reproduce=f"docker compose run --rm coordinator run {name}",
+            error=msg)
+        report.mark("refuse", 2)
+        _write_report(report, cfg)
+        return 2
+
     subject = (scenario.subject or ARENA_SUBJECT) if scenario else ARENA_SUBJECT
     run_kind = "scripted" if (scenario and scenario.driver_command) else "oracle"
     # Bench tier: the scenario's `bench` key overrides the install default
     # (config bench_kind, "sbx"); builtins always use the default tier.
+    # -- subject guard: no credential rides into a bench -----------------
+    # The subject is copied whole, `.git` included. A token in its
+    # .git/config (a clone URL, actions/checkout's auth header) would reach
+    # a bench where agents run with skipped permissions (2026-10-02).
+    if scenario and scenario.subject:
+        why = subject_credential_problems(os.path.join(cfg.subjects_root, scenario.subject))
+        if why:
+            msg = ("subject guard: " + "; ".join(why) + " — strip it (git remote set-url "
+                   "origin <url without credentials>; unset http.extraheader) before staging. "
+                   "Refusing before any bench exists.")
+            print(f"Error: {msg}")
+            Spans(cfg).emit(ARENA_SUBJECT, "", name, "subject.refuse", "error",
+                            attrs={"subject": scenario.subject},
+                            detail="run refused: credential in subject git metadata")
+            report = RunReport(
+                scenario=name,
+                run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
+                subject=scenario.subject,
+                reproduce=f"docker compose run --rm coordinator run {name}",
+                error=msg)
+            report.mark("refuse", 2)
+            _write_report(report, cfg)
+            return 2
     bench = make_bench(cfg, kind=(scenario.bench if scenario else ""))
     # -- host guard: refuse before any bench exists ----------------------
     # What the config cannot know: the state of the bench-host itself
@@ -417,10 +542,15 @@ def _run(name: str, cfg: Config | None = None) -> int:
         _write_report(report, cfg)
         return 2
     spans = Spans(cfg)
-    # Scrub the values of what this run declared from everything it exports.
+    # Scrub the values of what this run declared from everything it exports:
+    # its credentials, and every name the kit says carries a secret
+    # (GENTAR_REDACT_NAMES, names only: the routed secrets it exported for
+    # this suite, which may be declared in pass_env, not only as credentials).
     if scenario:
-        spans.redactor.redact_values(
-            [(n, os.environ.get(n, "")) for n in scenario.credential_names()])
+        names = list(scenario.credential_names())
+        names += [n for n in os.environ.get("GENTAR_REDACT_NAMES", "").split()
+                  if _ENV_NAME.fullmatch(n) and n not in names]
+        spans.redactor.redact_values([(n, os.environ.get(n, "")) for n in names])
     run_id = new_run_id(cfg.name_prefix)
     report = RunReport(
         scenario=name, run_id=run_id, subject=subject,
@@ -431,6 +561,7 @@ def _run(name: str, cfg: Config | None = None) -> int:
         started=time.strftime("%Y-%m-%d %H:%M:%S %z"),
         reproduce=f"docker compose run --rm coordinator run {name}",
         warnings=list(cred_warnings))
+    report.scrub = spans.redactor.scrub
 
     # Provenance is computed once, stamped on both scenario rows. The
     # template digest needs the bench-host; absent template = empty.
@@ -459,10 +590,12 @@ def _run(name: str, cfg: Config | None = None) -> int:
         spans.emit(subject, run_id, name, "run.end", attrs={"verdict": "pass"})
     except Exception as exc:
         verdict = 1
-        report.error = str(exc)
-        print(f"FAIL [{name}]: {exc}")
+        # Scrubbed once, here: this text goes to the CI log too.
+        error = spans.redactor.scrub(str(exc))
+        report.error = error
+        print(f"FAIL [{name}]: {error}")
         spans.emit(subject, run_id, name, "run.end", "fail",
-                   attrs={"verdict": "fail"}, detail=str(exc)[:2000])
+                   attrs={"verdict": "fail"}, detail=error[:2000])
     finally:
         _relay_agent_spans(bench, run_id, spans, cfg, subject, name)
         _collect_agent_stats(bench, run_id, spans, subject, name, report)

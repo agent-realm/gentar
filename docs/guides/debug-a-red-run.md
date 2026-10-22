@@ -32,6 +32,12 @@ It contains:
   cause is;
 - **every assertion**, with what it checked and what it actually saw;
 - the **driver transcript**, when a driver ran;
+- a **failure snapshot**, when a driver turn failed: the rendered last
+  screen, the raw tail of the pty byte stream with escapes shown as `\xNN`
+  (a TUI waiting on a terminal query shows its `\x1b[6n`), the process
+  tree inside the bench, and the output of the scenario's
+  `[on_failure] commands`. Verify does not run after a failed turn, so
+  this is the session's state at the moment it stopped;
 - **Soft judgments**, when the scenario has `[[verify.judge]]` checks.
 
 Hand the report to an agent with "fix the repo, rerun the suite, iterate
@@ -64,6 +70,7 @@ after every run.
 | `judge guard: … does not declare [scenario] data = "synthetic"` | declare it, but only if nothing real is on screen |
 | `judge guard: … TYPESAFE_API_KEY is not set` | lend the key with `with-secret` |
 | `bench-host: … — refusing before any bench exists.` | the bench-host's own state, for example stored sbx secrets; see [Deploy an arena](deploy-an-arena.md) |
+| `subject guard: … — Refusing before any bench exists.` | a git config in the subject (`.git/config`, a submodule's, a worktree's) holds a credential: user info in an http(s) URL (a remote or an `insteadOf`), `http.extraheader` or `http.cookieFile`; or a `.git-credentials` file exists. The subject is copied into the bench with `.git`, so remove it: `git remote set-url origin <url without credentials>` and `git config --unset-all http.<url>.extraheader` |
 | `refusing <suite> — judged suites never run on a pull request` | expected: judged suites run in phase 2 |
 | `telemetry destination needs BOTH GENTAR_OTLP_EXPORT and GENTAR_OTLP_KEY` | set both or neither |
 | `arena: bench ssh key not found at …` | set `GENTAR_BENCH_KEY_FILE` to the key's path |

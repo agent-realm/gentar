@@ -128,8 +128,12 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
         from gentar.scripted import make_judge, run_turns
         if getattr(scenario, "uses_judge", False):
             judge = make_judge(scenario, spans, subject, run_id)
+        # The run id rides along like an oracle step's: the driven program
+        # can self-report, and every driver session then passes env the way
+        # a credential would (through the bench's env file, never argv).
         summary = run_turns(scenario, bench, run_id, spans, subject=subject,
-                            env=run_env(scenario), report=report,
+                            env={"GENTAR_RUN_ID": run_id, **run_env(scenario)},
+                            report=report,
                             judge=judge, state=final)
         if not scenario.files and not scenario.commands and not scenario.judge_checks:
             return summary

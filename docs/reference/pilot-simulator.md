@@ -14,7 +14,7 @@ A scenario's `[driver]` block names the command and a list of **turns**
 |---|---|
 | `answer` | wait for a prompt pattern, then type text |
 | `expect` | wait for a pattern to appear on screen |
-| `pick` | walk a `❯`-cursor picker to a labeled option and select it |
+| `pick` | walk a `❯`-cursor picker to a labeled option and select it. Numbered (`❯ 1. Dark`) or not (`❯ No, exit`); an unnumbered one counts once the label is in the option block, so the input prompt never does. A label not in the list fails as soon as the cursor wraps. An `optional` pick that never sees its picker is skipped and named in the report's warnings |
 | `key` | send raw key events (`enter`, `escape`, `ctrl-c`), optionally anchored to a screen and paced |
 | `abort` | prove the danger gate fires |
 
@@ -45,11 +45,25 @@ script that works and one that is subtly lying:
   pre-accept the *next* dialog's default. A dialog that appears only
   sometimes is an `optional` turn.
 
+**How the command ends counts, not only that it ended.** After the last
+turn the driver waits for the command to exit and reads its status; a
+headless scenario with no turns is the same, the agent's own exit status
+counts. A non-zero exit or a death by signal fails the run even when the
+files look right: an agent that crashed, was stopped by its own `timeout`
+(124), or lost its ssh (255 on the ssh tiers) after writing half the work
+must not pass on what it left behind. The one ending a scenario asks for
+itself is ctrl-c: when the last turn presses it, a death by SIGINT (or a
+shell's 130) is the expected end. A goal pilot's `done` does not wait for
+the program to exit, but if it already ended on its own, the same rule
+applies.
+
 The hard safety rule in the driver is the **danger gate**: if the agent
 provokes a prompt asking to run a command matching the destructive-command
 pattern, the driver aborts the run rather than approving it. That is not a
-documented intention — `scripted-danger` is a gate suite that fails unless
-the gate fires before any approval, and it runs on every PR.
+documented intention: `scripted-danger` is a gate suite that fails unless
+the gate fires before any approval. It is proven after merge, by the gate
+tier in the private mirror ([CI and releases](ci-and-releases.md)), not on
+pull requests. A pull request runs only the hosted unit suite.
 
 **Credentials are injected at run time and never baked.** A scenario
 declares the environment variable *names* it needs. Entries are
@@ -73,6 +87,37 @@ nothing from your shell: `bin/arena` reads the names each scenario
 declares and passes them through with `-e NAME`, so exporting them is
 enough. Bare `docker compose run` does not — add the same `-e` flags, as
 the [CI contract](ci-and-releases.md) does.
+
+## Bounding an interactive command: `timeout --foreground`
+
+Wrap a TUI in `timeout --foreground N <cmd>`, never plain `timeout`. GNU
+`timeout` runs its child in a new **background** process group, so an
+interactive program under it is stopped by SIGTTIN (state `T`) on its first
+tty read and never draws; a headless `-p` run never notices. The engine
+warns when a scenario with driver turns starts its command under plain
+`timeout` (the warning is printed and lands in the report), and the failure
+snapshot's process tree shows the `T` state when it happens.
+
+## When a turn fails — the failure snapshot
+
+A failed turn, the final wait for EOF timing out, the danger gate or a
+failed goal pilot all end the driver before `[verify]` runs. Before the
+session is closed, the engine captures into the report:
+
+- the **last screen**, rendered from the cell model the turns read;
+- the **raw tail** of the pty byte stream, control bytes shown as `\xNN`;
+- the **process tree** inside the bench (`ps … --forest`);
+- the output of each `[on_failure]` command, run on the bench.
+
+```toml
+[on_failure]
+commands = ["devbox info", { command = "ls -la ~/.claude", timeout = 20 }]
+```
+
+A command is a string or `{ command, timeout }` (1..600 s, default 60,
+as for verify). `[on_failure]` needs a `[driver]`. Every part is scrubbed
+like the rest of the report, and a part that cannot be read says why
+instead of hiding the failure. It is never a verdict.
 
 ## Semantic turns — a judged `expect`
 

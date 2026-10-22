@@ -94,6 +94,7 @@ Agents adapting a repo: read [`AGENTS.md`](AGENTS.md) first. Humans:
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The repository is private today; the
-license is the terms under which it is shared, not a statement about
-who can reach it.
+Apache-2.0: see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Relicensed from MIT to Apache-2.0 from v0.10.0; releases v0.1.1 through v0.9.3
+remain MIT (v0.1.0 shipped without a license).

@@ -49,6 +49,12 @@ oracle mode is phase 2's runner.
     [[verify.commands]]
     command = "claude-playbook info kommander"
     contains = "Version:"     # optional substring check
+
+The schema is CLOSED: an unknown table or key is refused, never ignored.
+Ignoring one turned a typo into a weaker test that still passed —
+`contain = "x"` in [[verify.files]] became an existence check, and a
+[[verify.command]] table (singular) checked nothing at all (review
+2026-10-19, A2).
 """
 
 # Annotations as strings: this module is imported by dryrun.py on the
@@ -68,6 +74,7 @@ except ModuleNotFoundError:             # 3.9/3.10: stock macOS, old distros
     # image is python:3.12-slim and always takes the import above.
     import tomli as tomllib             # type: ignore[no-redef]
 from pathlib import Path
+import difflib
 import re
 
 # A credential or pass_env entry is an ENVIRONMENT VARIABLE NAME. Anything
@@ -82,6 +89,57 @@ _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 class ScenarioError(ValueError):
     pass
+
+
+# Every key a scenario may carry, per table. No table here is a map whose
+# keys are user data, so every one is closed. Adding a field to the schema
+# means adding it here, or every scenario using it is refused.
+_TABLES = {
+    "scenario": {"name", "subject", "agent", "template", "bench", "bench_only",
+                 "data", "credentials", "pass_env"},
+    "oracle": {"steps"},
+    "driver": {"command", "turns", "goal", "actions", "max_steps", "p_act",
+               "every", "timeout"},
+    "verify": {"files", "commands", "judge"},
+    "judge": {"max_calls", "max_input_tokens", "lines"},
+    "semantic": {"runs", "pass_rate_min"},
+    "budget": {"tokens", "simulate_spend"},
+    "on_failure": {"commands"},
+}
+_FILE_KEYS = {"path", "contains"}
+_COMMAND_KEYS = {"command", "contains"}
+# A turn's keys depend on its type: `send` on an expect turn, or `label` on
+# an answer turn, would be read by nothing.
+_TURN_KEYS = {
+    "answer": {"prompt", "send", "timeout"},
+    "expect": {"pattern", "judge", "timeout"},
+    "pick": {"label", "tries", "optional"},
+    "key": {"key", "keys", "after", "delay", "timeout", "optional"},
+    "abort": {"timeout"},
+}
+
+
+def _refuse_unknown(where: str, table: dict, allowed, what: str = "key") -> None:
+    """Refuse keys outside `allowed`, naming the closest allowed one."""
+    unknown = sorted(set(table) - set(allowed))
+    if not unknown:
+        return
+    named = []
+    for k in unknown:
+        close = difflib.get_close_matches(k, sorted(allowed), n=1)
+        named.append(f"{k!r}" + (f" (did you mean {close[0]!r}?)" if close else ""))
+    raise ScenarioError(f"{where}: unknown {what}(s) {', '.join(named)}; "
+                        f"allowed: {', '.join(sorted(allowed))}")
+
+
+def _array_of_tables(path, parent: dict, dotted: str) -> list:
+    """`dotted` (e.g. "verify.files") read from its parent table, every
+    entry checked to BE a table: written `[verify.files]` (single
+    brackets) it would otherwise read as a list of its own key names."""
+    v = parent.get(dotted.rsplit(".", 1)[-1], [])
+    if not isinstance(v, list) or not all(isinstance(e, dict) for e in v):
+        raise ScenarioError(f"{path}: {dotted} must be an array of tables — write [[{dotted}]]")
+    return list(v)
 
 
 def satisfied_group(groups: list[list[str]], get) -> list[str] | None:
@@ -135,9 +193,7 @@ def _check_soft_judge(path, i, j) -> None:
     where = f"{path}: verify.judge[{i}]"
     if not isinstance(j, dict):
         raise ScenarioError(f"{where} must be a table")
-    unknown = set(j) - {"question", "true", "false", "p_min", "p_max_no"}
-    if unknown:
-        raise ScenarioError(f"{where}: unknown key(s) {sorted(unknown)}")
+    _refuse_unknown(where, j, {"question", "true", "false", "p_min", "p_max_no"})
     if not isinstance(j.get("question"), str) or not j["question"].strip():
         raise ScenarioError(f"{where}.question must be a non-empty string")
     p_min, p_no = j.get("p_min", 0.9), j.get("p_max_no", 0.2)
@@ -152,9 +208,7 @@ def _check_judge(path, i, j) -> None:
     where = f"{path}: driver.turns[{i}].judge"
     if not isinstance(j, dict):
         raise ScenarioError(f"{where} must be a table: {{ question = \"…\", p_min = 0.9 }}")
-    unknown = set(j) - {"question", "true", "false", "p_min", "p_max_no", "hold", "every"}
-    if unknown:
-        raise ScenarioError(f"{where}: unknown key(s) {sorted(unknown)}")
+    _refuse_unknown(where, j, {"question", "true", "false", "p_min", "p_max_no", "hold", "every"})
     if not isinstance(j.get("question"), str) or not j["question"].strip():
         raise ScenarioError(f"{where}.question must be a non-empty string")
     for k in ("true", "false"):
@@ -201,9 +255,7 @@ def _check_goal(path, sc) -> None:
         w = f"{where}.actions[{i}]"
         if not isinstance(a, dict):
             raise ScenarioError(f"{w} must be a table")
-        unknown = set(a) - {"id", "when", "send", "key", "then", "approve", "on"}
-        if unknown:
-            raise ScenarioError(f"{w}: unknown key(s) {sorted(unknown)}")
+        _refuse_unknown(w, a, {"id", "when", "send", "key", "then", "approve", "on"})
         aid = a.get("id")
         if not isinstance(aid, str) or not _ACTION_ID.match(aid) or aid in GOAL_RESERVED:
             raise ScenarioError(f"{w}.id must be [a-z][a-z0-9_]* and not one of {GOAL_RESERVED}")
@@ -236,11 +288,64 @@ def _check_goal(path, sc) -> None:
             raise ScenarioError(f"{w}.on is only for approving actions (approve = true)")
 
 
+_SEPARATORS = {";", "&&", "||", "|", "&", "(", ")", "{", "}", "!"}
+_PREFIXES = {"exec", "nohup", "env", "sudo", "command", "time"}
+
+
+def plain_timeout(command: str, depth: int = 0) -> bool:
+    """True when `command` starts something under GNU `timeout` without
+    `--foreground`. timeout puts its child in a NEW background process group,
+    so an interactive program under it is stopped by SIGTTIN (state T) the
+    moment it reads the tty, before it draws anything; headless `-p` runs
+    never notice (cockpit's first-run scenario, 2026-10-01).
+
+    Only `timeout` in command position counts (`echo timeout` does not), and
+    a quoted script (`bash -lc "timeout 60 claude"`) is looked into."""
+    import re
+    import shlex
+    try:
+        # a newline separates commands as `;` does (agy on #61)
+        lex = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=";&|(){}!")
+        lex.whitespace_split = True
+        words = list(lex)
+    except ValueError:
+        return False
+    prev = None
+    for i, w in enumerate(words):
+        command_pos = (prev is None or prev in _SEPARATORS
+                       or (prev or "").rsplit("/", 1)[-1] in _PREFIXES
+                       or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", prev or "") is not None)
+        if command_pos and w.rsplit("/", 1)[-1] == "timeout" and i + 1 < len(words):
+            # options before the duration; -k/-s (and the long forms without
+            # `=`) take the next word as their argument
+            opts, rest = [], iter(words[i + 1:])
+            for o in rest:
+                if not o.startswith("-"):
+                    break
+                opts.append(o)
+                if o in ("-k", "-s", "--kill-after", "--signal"):
+                    next(rest, None)
+            if "--foreground" not in opts:
+                return True
+        if depth < 3 and any(c.isspace() for c in w) and plain_timeout(w, depth + 1):
+            return True
+        prev = w
+    return False
+
+
 class TomlScenario:
     def __init__(self, path: Path) -> None:
         self.path = path
         with open(path, "rb") as fh:
             doc = tomllib.load(fh)
+
+        # Closed schema, checked before any field is read (module docstring).
+        _refuse_unknown(str(path), doc, _TABLES, what="table")
+        for table, allowed in _TABLES.items():
+            if table in doc:
+                if not isinstance(doc[table], dict):
+                    raise ScenarioError(f"{path}: {table} must be a table — write [{table}]")
+                _refuse_unknown(f"{path}: [{table}]", doc[table], allowed)
 
         sc = doc.get("scenario") or {}
         self.name = sc.get("name", path.stem)
@@ -251,6 +356,16 @@ class TomlScenario:
         # container bench (template = image ref; default per config
         # otherwise, i.e. the sbx tier).
         self.bench = sc.get("bench")
+        # A suite that only a bench can prove (it deploys a database through
+        # the bench's Docker, say) names WHY here. The bench-free dry-run then
+        # reports it UNVERIFIED with that reason instead of failing on the
+        # tools it lacks; the arena runs it as any other suite. A reason is
+        # required: an unexplained skip is how checks rot.
+        self.bench_only = sc.get("bench_only", "")
+        if "bench_only" in sc and (not isinstance(self.bench_only, str)
+                                   or not self.bench_only.strip()):
+            raise ScenarioError(f"{path}: scenario.bench_only must be a non-empty string: "
+                                f"why only a bench can prove this suite")
         # What kind of data the scenario touches. "synthetic" is the only
         # value that lets a semantic turn send a screen to a judge (pilot,
         # 2026-09-26); anything else, or nothing, keeps every screen inside
@@ -301,25 +416,55 @@ class TomlScenario:
                     f"([A-Za-z_][A-Za-z0-9_]*), got {c!r}")
 
         self.steps = list((doc.get("oracle") or {}).get("steps", []))
+        # Diagnostics run on the bench when a driver turn fails, before the
+        # session is closed: their output lands in the report's failure
+        # snapshot (cockpit). Never a verdict; same timeout rule as verify.
+        on_failure = doc.get("on_failure") or {}
+        if not isinstance(on_failure, dict) or set(on_failure) - {"commands"}:
+            raise ScenarioError(f"{path}: [on_failure] takes only `commands`")
+        self.on_failure = []
+        if not isinstance(on_failure.get("commands", []), list):
+            # a bare string would be iterated letter by letter (agy on #61)
+            raise ScenarioError(f"{path}: [on_failure] commands must be a list")
+        for i, c in enumerate(on_failure.get("commands", [])):
+            c = {"command": c} if isinstance(c, str) else c
+            if (not isinstance(c, dict) or not isinstance(c.get("command"), str)
+                    or not c["command"].strip() or set(c) - {"command", "timeout"}
+                    or isinstance(c.get("timeout", 60), bool)
+                    or not isinstance(c.get("timeout", 60), int)
+                    or not 1 <= c.get("timeout", 60) <= 600):
+                raise ScenarioError(
+                    f"{path}: on_failure.commands[{i}] must be a command string or "
+                    f"{{ command = \"...\", timeout = 1..600 }}")
+            self.on_failure.append(c)
         verify = doc.get("verify") or {}
-        self.files = list(verify.get("files", []))
-        self.commands = list(verify.get("commands", []))
+        self.files = _array_of_tables(path, verify, "verify.files")
+        self.commands = _array_of_tables(path, verify, "verify.commands")
         # Soft judgments of the final screen: reported, never the verdict.
-        self.judge_checks = list(verify.get("judge", []))
+        self.judge_checks = _array_of_tables(path, verify, "verify.judge")
 
         driver = doc.get("driver") or {}
         self.driver_command = driver.get("command")
-        self.turns = list(driver.get("turns", []))
+        self.turns = _array_of_tables(path, driver, "driver.turns")
         # A goal-driven pilot: a goal and a CLOSED set of actions; the judge
         # picks one action per step from the screen (README, Goal pilots).
         self.goal = driver.get("goal", "")
-        self.actions = list(driver.get("actions", []))
+        self.actions = _array_of_tables(path, driver, "driver.actions")
         self.max_steps = driver.get("max_steps", 25)
         self.p_act = driver.get("p_act", 0.8)
         self.goal_every = driver.get("every", 2)
         self.goal_timeout = driver.get("timeout", 300)
         if self.goal or self.actions:
             _check_goal(path, self)
+        # Not refusals: things that load fine and are probably wrong. The
+        # coordinator prints them and puts them in the report.
+        self.warnings: list[str] = []
+        if self.driver_command and (self.turns or self.goal) and plain_timeout(self.driver_command):
+            self.warnings.append(
+                "driver.command runs under plain `timeout`: GNU timeout puts its child "
+                "in a background process group, so an interactive program is stopped "
+                "by SIGTTIN (state T) on its first tty read and never draws. Use "
+                "`timeout --foreground`")
         # Rates over N runs — for judged suites only: a deterministic suite
         # must pass every time, so a rate would only hide its flakes.
         semantic = doc.get("semantic") or {}
@@ -333,6 +478,8 @@ class TomlScenario:
         # after a passing run this many units are recorded as burned.
         self.simulated_spend = int(budget.get("simulate_spend", 0) or 0)
 
+        if self.on_failure and not self.driver_command:
+            raise ScenarioError(f"{path}: [on_failure] needs a [driver]: it runs when a turn fails")
         if not self.steps and not self.driver_command:
             raise ScenarioError(f"{path}: needs [oracle].steps or a [driver] command")
         for i, t in enumerate(self.turns):
@@ -341,6 +488,8 @@ class TomlScenario:
                 raise ScenarioError(
                     f"{path}: driver.turns[{i}].type must be "
                     f"answer|expect|pick|abort|key")
+            _refuse_unknown(f"{path}: driver.turns[{i}] ({kind})", t,
+                            _TURN_KEYS[kind] | {"type"})
             if kind == "expect" and ("pattern" in t) == ("judge" in t):
                 raise ScenarioError(
                     f"{path}: driver.turns[{i}] (expect) needs exactly one of "
@@ -385,9 +534,11 @@ class TomlScenario:
                 f"{path}: [semantic] runs / pass_rate_min are for judged suites only — a "
                 f"deterministic suite must pass every time")
         for i, f in enumerate(self.files):
+            _refuse_unknown(f"{path}: verify.files[{i}]", f, _FILE_KEYS)
             if "path" not in f:
                 raise ScenarioError(f"{path}: verify.files[{i}] missing path")
         for i, c in enumerate(self.commands):
+            _refuse_unknown(f"{path}: verify.commands[{i}]", c, _COMMAND_KEYS)
             if "command" not in c:
                 raise ScenarioError(f"{path}: verify.commands[{i}] missing command")
 

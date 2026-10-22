@@ -51,6 +51,10 @@ class Config:
         # in once. NO default — gentar ships no bench-host of its own,
         # and a plausible-but-wrong address is worse than a refusal.
         self.bench_host = _opt("GENTAR_BENCH_HOST")
+        # "local" (local bench mode) is a mode word: tolerate stray spaces,
+        # so "local " can never fall back to ssh as a host named "local ".
+        if self.bench_host.strip() == "local":
+            self.bench_host = "local"
         self.bench_user = _opt("GENTAR_BENCH_USER")
         # Optional SSH jump host, e.g. "user@gateway". Empty = direct.
         self.bench_jump = _opt("GENTAR_BENCH_JUMP")
@@ -129,15 +133,19 @@ class Config:
         # Subjects root: mounted read-only into the coordinator container
         # (compose volume). A scenario's `subject` names a dir under it.
         self.subjects_root = _opt("GENTAR_SUBJECTS_ROOT", "/subjects")
-        # TOML scenario dirs (baked /app/scenarios first, extras appended).
+        # TOML scenario dirs, first match wins: the subject's own
+        # (GENTAR_SCENARIOS_DIR) before the engine's baked /app/scenarios.
+        # Baked-first silently ran the engine's stale copy of every subject
+        # suite that shared a name with one (kommander-playbook, 2026-10-03).
         self.scenarios_dirs = ["/app/scenarios"]
         extra = _opt("GENTAR_SCENARIOS_DIR")
-        if extra:
-            self.scenarios_dirs.append(extra)
+        if extra and extra != "/app/scenarios":
+            self.scenarios_dirs.insert(0, extra)
 
         # Flake quarantine: comma-separated scenario names. A quarantined
-        # scenario is SKIPPED (exit 0, span skip), never failed — a known
-        # flake must not paint the suite red while its owner investigates.
+        # scenario is SKIPPED (exit 0, span and report skip), never failed —
+        # a known flake must not paint the suite red while its owner
+        # investigates — and never shown as a pass: it ran nothing.
         self.quarantine = {
             s.strip() for s in _opt("GENTAR_QUARANTINE").split(",") if s.strip()
         }
@@ -212,5 +220,9 @@ class Config:
             return [f"a GENTAR_NAME_PREFIX of at most {PREFIX_MAX} characters "
                     f"(got {len(self.name_prefix)}: {self.name_prefix!r}; in "
                     f"CI it embeds the job id — shorten it)"]
+        # GENTAR_BENCH_HOST=local (sbx): the arena runs on the bench host
+        # itself, so there is no account to ssh in as.
+        if kind == "sbx" and self.bench_host == "local":
+            return []
         return [var for var, attr in BENCH_REQUIREMENTS[kind]
                 if not getattr(self, attr, "").strip()]

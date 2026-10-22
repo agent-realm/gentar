@@ -220,11 +220,23 @@ class _Pieces:
         return "".join(out)
 
 
+# Settings whose value is a MODE or a published default, not a locator or a
+# secret: scrubbing them would blank an ordinary word everywhere.
+# GENTAR_BENCH_HOST=local is local bench mode, and "local" would vanish from
+# every report and span. GENTAR_BENCH_USER=arena is bin/bench-host-provision's
+# documented default account, and "arena" is also the default subject: since
+# v0.10.0 scrubs the whole report and every exported span, every subject read
+# «redacted:GENTAR_BENCH_USER» and hid nothing anyone could not read in the docs.
+MODE_VALUES = {("GENTAR_BENCH_HOST", "local"), ("GENTAR_BENCH_USER", "arena")}
+
+
 def scrubber(named_values):
     """named_values: iterable of (name, value). Returns scrub(text) -> text."""
     full, pieces = [], []            # (length, str | locator token, mark); piece finders
     for name, value in named_values:
         if not isinstance(value, str) or len(value) < MIN_VALUE:
+            continue
+        if (name, value) in MODE_VALUES:
             continue
         mark = f"«redacted:{name}»"
         parts = _locator_parts(name, value)

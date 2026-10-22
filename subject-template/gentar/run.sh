@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 # Kick this repo's arena: stage the working tree as the subject, run a
 # scenario, land the report in gentar/reports/.
 #
@@ -25,6 +27,23 @@
 # is not the subject name your scenarios declare.
 set -euo pipefail
 
+# Subject secrets routed by name ([secrets] route in policy.toml) arrive in
+# numbered slots, GENTAR_ROUTE_1..8, set by the kit's workflow. Their values
+# are taken into this shell and the slots are removed from the environment
+# FIRST, before any mode runs or execs anything, so no process this script
+# starts ever inherits a slot. Each value gets its own name further down
+# (after the policy is read), and leaves this shell only for a suite that
+# declares that name. Never printed, never written to disk.
+ROUTE_SLOTS=8
+ROUTE_VALS=()
+_i=1
+while [ "$_i" -le "$ROUTE_SLOTS" ]; do
+  _v="GENTAR_ROUTE_$_i"
+  ROUTE_VALS[$_i]=${!_v:-}
+  unset "$_v"
+  _i=$((_i + 1))
+done
+
 # --stage-engine clones/fetches/checks out the engine and stops there.
 # dryrun.py needs the engine's scenario parser but no bench, so without
 # this the only way to get one was a full bench run — the cheap check
@@ -34,6 +53,9 @@ set -euo pipefail
 # `credentials` is included only when one of its groups is fully present.
 # --down tears this subject's arena down — the one teardown CI needs,
 # with the project name derived in exactly one place (here).
+#
+# --route says which secrets [secrets] route names, whether each arrived and
+# which suites ask for it -- names only, never a value.
 #
 # --plan prints what this CI event should run under gentar/policy.toml (the
 # kit's plan job; see plan.py). --check is phase 1's bench-free half:
@@ -45,6 +67,7 @@ REVIEW_SINCE=""
 DOWN_ONLY=0
 SWEEP=0
 CHECK_ONLY=0
+ROUTE_ONLY=0
 case "${1:-}" in
   --stage-engine) STAGE_ONLY=1; shift ;;
   --review)       REVIEW_ONLY=1; shift
@@ -57,13 +80,14 @@ case "${1:-}" in
   --down)         DOWN_ONLY=1; shift ;;
   --sweep)        SWEEP=1; shift ;;
   --check)        CHECK_ONLY=1; shift ;;
+  --route)        ROUTE_ONLY=1; shift ;;
   --plan)         exec python3 "$(cd "$(dirname "$0")" && pwd)/plan.py" plan ;;
 esac
 
-if [ "$STAGE_ONLY$REVIEW_ONLY$DOWN_ONLY$SWEEP$CHECK_ONLY" = 00000 ]; then
+if [ "$STAGE_ONLY$REVIEW_ONLY$DOWN_ONLY$SWEEP$CHECK_ONLY$ROUTE_ONLY" = 000000 ]; then
   # A usage error is a refusal: exit 2. (`${1:?…}` exits 1 or 127.)
   if [ $# -lt 1 ]; then
-    echo "usage: gentar/run.sh [--stage-engine|--review [--since <ref>]|--sweep|--down|--check|--plan] <scenario> [more scenarios...]" >&2
+    echo "usage: gentar/run.sh [--stage-engine|--review [--since <ref>]|--sweep|--down|--check|--route|--plan] <scenario> [more scenarios...]" >&2
     exit 2
   fi
   SCENARIO=$1
@@ -347,6 +371,30 @@ EOF
   return 1
 }
 
+# Every env var name the given suites declare in `credentials` or `pass_env`
+# (what reaches the coordinator; see FORWARD below for why it is read from
+# the scenarios, and how).
+extract_env_names() {         # files... -> one env var name per line
+  for _f in "$@"; do scenario_table "$_f"; done | awk '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
+    inarr {
+      # an inline comment declares nothing: `credentials = ["A"]  # was "B"`
+      # must not route B to this suite (agy on #79), as credential_groups
+      # already reads it
+      code = $0; sub(/#.*/, "", code); line = code
+      # either TOML quote style — a 'literal' name used to forward nothing,
+      # and the coordinator then refused credentials the caller had set
+      while (match(line, /["\047][A-Za-z_][A-Za-z0-9_]*["\047]/)) {
+        print substr(line, RSTART + 1, RLENGTH - 2)
+        line = substr(line, RSTART + RLENGTH)
+      }
+      depth += gsub(/\[/, "[", code) - gsub(/\]/, "]", code)
+      if (depth <= 0) inarr = 0
+    }
+  '
+}
+
 # 0 when the suite has a judged turn (a semantic expect).
 # A pull request, whichever event carries it (pull_request_target too —
 # claude-playbooks: a repo on that trigger bypassed the guard).
@@ -369,6 +417,58 @@ judge_ready() {
   [ -n "${TYPESAFE_API_KEY:-}" ]
 }
 
+# [secrets] route: each slot captured at the top gets the name the policy
+# gives it, as a variable of THIS shell -- not exported, so nothing started
+# from here inherits it. It is exported just before the coordinator starts,
+# and only when a suite about to run declares that name. Done before the
+# sweep, which must see a routed credential to pick the suites needing it.
+# Read on every run, slots or not: a routed name the caller set by hand (a
+# developer's shell, a runner's own environment) goes the same one way, to
+# the suites declaring it, and never in FORWARD to all (agy on #79).
+ROUTE_NAMES=()
+routes=$(python3 "$HERE/plan.py" route) || exit 2
+_i=0
+for _n in $routes; do
+  _i=$((_i + 1))
+  ROUTE_NAMES+=("$_n")
+  if [ -n "${ROUTE_VALS[$_i]:-}" ]; then
+    printf -v "$_n" '%s' "${ROUTE_VALS[$_i]}"
+  fi
+  # Already exported by the caller? Then printf -v kept the export, and
+  # every child up to the first suite would inherit it: take it back.
+  # shellcheck disable=SC2163  # the variable NAMED by $_n
+  export -n "$_n"
+done
+# A value in a slot the policy names no secret for: the workflow and the
+# policy disagree, or a slot was set by hand. Dropped, and said by number.
+while [ "$_i" -lt "$ROUTE_SLOTS" ]; do
+  _i=$((_i + 1))
+  [ -z "${ROUTE_VALS[$_i]:-}" ] \
+    || echo "secret route: slot $_i holds a value but [secrets] route names no secret for it; dropped" >&2
+done
+ROUTE_VALS=()
+
+if [ "$ROUTE_ONLY" = 1 ]; then
+  if [ ${#ROUTE_NAMES[@]} -eq 0 ]; then
+    echo "secret route: none ([secrets] route is empty or absent)"
+  fi
+  for _n in ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"}; do
+    users=""
+    for f in "$HERE"/scenarios/*.toml; do
+      [ -f "$f" ] || continue
+      if extract_env_names "$f" | grep -qx "$_n"; then users="$users $(basename "$f" .toml)"; fi
+    done
+    state="missing"; [ -z "${!_n:-}" ] || state="set"
+    exported=""; if compgen -e | grep -qx "$_n"; then exported=" (in the environment)"; fi
+    echo "secret route: $_n $state$exported, declared by:${users:- no suite}"
+  done
+  if compgen -e | grep -q '^GENTAR_ROUTE_[0-9]'; then
+    echo "secret route: a GENTAR_ROUTE_ slot is still in the environment" >&2
+    exit 1
+  fi
+  exit 0
+fi
+
 # --sweep: every suite this environment can run. A suite whose
 # credentials are absent is SKIPPED with its reason, not run into an
 # exit-2 refusal that would turn the whole sweep red for a key nobody
@@ -378,19 +478,43 @@ judge_ready() {
 # the coordinator's forwarding warning then says the URL was dropped.
 if [ "$SWEEP" = 1 ]; then
   runnable=""
+  judged_skipped=""
+  skipped=""
   for f in "$HERE"/scenarios/*.toml; do
     [ -f "$f" ] || continue
     s=$(basename "$f" .toml)
     if ! credentials_present "$f"; then
-      echo "skipping $s — no credential group of it is fully set" >&2
+      why="no credential group of it is fully set"
     elif is_pr_event && judged "$f"; then
-      echo "skipping $s — judged suites never run on a pull request (phase 2 only)" >&2
+      why="judged suites never run on a pull request (phase 2 only)"
     elif ! judge_ready "$f"; then
-      echo "skipping $s — it has judged turns and TYPESAFE_API_KEY is not set" >&2
+      why="it has judged turns and TYPESAFE_API_KEY is not set"
+      judged_skipped="$judged_skipped $s"
     else
       runnable="$runnable $s"
+      continue
     fi
+    echo "skipping $s — $why" >&2
+    skipped="$skipped$s"$'\t'"$why"$'\n'
   done
+  # Every suite this sweep skipped, one per line (name TAB reason), and an
+  # empty file when it skipped none. The sweep's exit code covers only the
+  # suites it ran; an arena mirror reads this before it calls the sweep a
+  # proof of the commit (subject-template/mirror/arena, "phase 2 ran every
+  # suite").
+  mkdir -p "$HERE/reports"
+  printf '%s' "$skipped" > "$HERE/reports/sweep-skipped.txt"
+  # Said once more, loudly, at the end: a phase 2 that skipped its judged
+  # suites can finish green without having run them (claude-playbooks-ac,
+  # from Codex on cockpit's re-pin). In Actions it is a warning annotation.
+  if [ -n "$judged_skipped" ]; then
+    n=$(echo $judged_skipped | wc -w | tr -d ' ')
+    msg="$n judged suite(s) skipped, TYPESAFE_API_KEY is not set:$judged_skipped (a green sweep did not run them)"
+    echo "sweep summary: $msg" >&2
+    if [ "${GITHUB_ACTIONS:-}" = true ]; then
+      echo "::warning title=judged suites skipped::$msg"
+    fi
+  fi
   [ -n "$runnable" ] || { echo "no runnable suites in gentar/scenarios" >&2; exit 2; }
   echo "sweep:$runnable" >&2
   set -- $runnable
@@ -416,7 +540,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # error they had not caused. Bump this deliberately: change the default,
 # run your suites, commit the bump as its own change. `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.8.1}
+REF=${GENTAR_REF:-v0.10.0}
 
 # --review: has this repo outgrown its suites?
 #
@@ -603,13 +727,16 @@ mkdir "subjects/$SUBJECT"
 (cd "$REPO" && tar \
   --exclude=./.git --exclude=./gentar/.arena --exclude=./gentar/reports \
   -cf - .) | tar -xf - -C "subjects/$SUBJECT"
+# History, when the policy asks for it ([stage] git = true): a fresh .git
+# built by a local clone, so no credential and no remote path come along.
+python3 "$HERE/plan.py" stage-git "$REPO" "subjects/$SUBJECT"
 # A worktree's .git is a pointer file with a host-absolute path — dead
 # on the bench — so `git describe` there finds nothing. Freeze the
 # version HERE, where git works; scenarios read it instead of trusting
 # the bench's git.
 # --match 'v*': the workflow's keyword tags (`arena`, `arena-*`) are
-# floating triggers, and a bare `git describe --tags` returns whichever
-# tag is NEAREST — so moving `arena` onto a commit made the frozen version
+# floating triggers, and a describe without a --match pattern returns
+# whichever tag is NEAREST — so moving `arena` onto a commit made the frozen version
 # read "arena-3-g…" instead of the release it came from (claude-playbooks,
 # where the `arena` tag once shadowed a real v3.13.0).
 (cd "$REPO" && git describe --tags --always --dirty --match 'v*' 2>/dev/null || echo dev) \
@@ -652,6 +779,84 @@ mkdir "subjects/$SUBJECT"
 # until the trap's `down -v`.
 ARENA_FILES=(-f docker-compose.yml)
 [ -f "$ARENA/compose.rm.yml" ] && ARENA_FILES+=(-f compose.rm.yml)
+# Local bench mode (GENTAR_BENCH_HOST=local): the arena runs on the bench
+# host itself (a runner on that VM) and calls sbx directly, so there is no
+# ssh and no bench key. The engine's overlay mounts the host's sbx into the
+# coordinator and runs it as this user; an engine without it refuses.
+# The setting: the environment first (CI), else the arena's .env (a local
+# run edits gentar/.arena/.env), the way compose resolves it. Spaces and
+# quotes are tolerated; anything else is a host name.
+bench_host_setting() {
+  if [ -n "${GENTAR_BENCH_HOST:-}" ]; then printf '%s' "$GENTAR_BENCH_HOST"
+  elif [ -f "$ARENA/.env" ]; then sed -n 's/^GENTAR_BENCH_HOST=//p' "$ARENA/.env" | tail -1
+  fi | tr -d "\"' [:space:]"
+}
+LOCAL_BENCH=0
+[ "$(bench_host_setting)" = local ] && LOCAL_BENCH=1
+if [ "$LOCAL_BENCH" = 1 ]; then
+  export GENTAR_BENCH_HOST=local
+  # What compose mounts must exist and belong to this user already: a
+  # missing bind source is created by Docker as root, and sbx inside the
+  # coordinator could then not write its state. They exist once this user
+  # has run `sbx login`; refuse rather than create them.
+  SBX_PATH=$(command -v sbx 2>/dev/null || true)
+  if [ -z "$SBX_PATH" ]; then
+    echo "GENTAR_BENCH_HOST=local: no sbx on this host's PATH (install it and run sbx login as $(id -un))" >&2
+    exit 2
+  fi
+  for d in "$HOME/.local/state/sandboxes" "$HOME/.config/sandboxes" "$HOME/.config/com.docker.sandboxes"; do
+    if [ ! -d "$d" ] || [ ! -O "$d" ]; then
+      echo "GENTAR_BENCH_HOST=local: $d is missing or not owned by $(id -un) — run sbx login as this user first" >&2
+      exit 2
+    fi
+  done
+  # sbx in the coordinator has no session bus: it reads the Docker login
+  # from files only. A login held in a desktop keyring (gnome-keyring) is
+  # invisible there, and every bench would fail at PREPARE IMAGE with "no
+  # default account profile set". sbx 0.39 and 0.45 keep each secret as a
+  # folder named by its base64 id; this one is docker/auth/metadata/hub/default.
+  SBX_AUTH="$HOME/.config/com.docker.sandboxes/com.docker.sandboxes-auth/sandboxes-auth"
+  SBX_PROFILE="$SBX_AUTH/ZG9ja2VyL2F1dGgvbWV0YWRhdGEvaHViL2RlZmF1bHQ="
+  if [ "${GENTAR_SBX_AUTH_CHECK:-on}" != off ] && ! ls "$SBX_PROFILE" 2>/dev/null | grep -q .; then
+    echo "GENTAR_BENCH_HOST=local: sbx has no login in files (no default account profile in $SBX_AUTH); a keyring login is invisible to the coordinator. Sign in once as $(id -un) with $ARENA/bin/sbx-file-login (GENTAR_SBX_AUTH_CHECK=off skips this check)" >&2
+    exit 2
+  fi
+  export GENTAR_LOCAL_SBX_BIN
+  GENTAR_LOCAL_SBX_BIN=$(readlink -f "$SBX_PATH" 2>/dev/null || echo "$SBX_PATH")
+  if [ ! -f "$ARENA/compose.local-bench.yml" ]; then
+    echo "GENTAR_BENCH_HOST=local needs an engine with compose.local-bench.yml (GENTAR_REF $REF has none)" >&2
+    exit 2
+  fi
+  ARENA_FILES+=(-f compose.local-bench.yml)
+  export GENTAR_LOCAL_HOME GENTAR_BENCH_KEY_FILE
+  GENTAR_LOCAL_HOME=$HOME
+  GENTAR_BENCH_KEY_FILE=/dev/null     # the compose secret needs a file; there is no key
+  # Create the workspace root as this user before compose binds it: a
+  # missing bind source is created by Docker as root, and the coordinator
+  # (this user) could then not make a bench's workspace in it.
+  export GENTAR_BENCH_WORKSPACE_ROOT="${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}"
+  mkdir -p "$GENTAR_BENCH_WORKSPACE_ROOT"
+fi
+# One Docker daemon for the whole run (the engine's bin/docker-identity):
+# every docker call below, the socket a container mounts (GENTAR_DOCKER_SOCK),
+# and in local mode the uid the coordinator runs as -- rootless: 0:0, which
+# is this user; rootful: this user; cannot tell: refused. Read as values,
+# never eval'd; GENTAR_LOCAL_UID/GID set by a caller are overwritten, not
+# used. Local mode refuses an engine without the script (it would guess).
+if [ -x "$ARENA/bin/docker-identity" ]; then
+  if [ "$LOCAL_BENCH" = 1 ]; then ident=$("$ARENA/bin/docker-identity" --local) || exit 2
+  else ident=$("$ARENA/bin/docker-identity") || exit 2; fi
+  ident_get() { printf '%s\n' "$ident" | sed -n "s/^$1=//p"; }
+  export GENTAR_DOCKER_SOCK; GENTAR_DOCKER_SOCK=$(ident_get sock)
+  if [ -n "$(ident_get host)" ]; then export DOCKER_HOST; DOCKER_HOST=$(ident_get host); fi
+  if [ "$LOCAL_BENCH" = 1 ]; then
+    export GENTAR_LOCAL_UID GENTAR_LOCAL_GID
+    GENTAR_LOCAL_UID=$(ident_get uid); GENTAR_LOCAL_GID=$(ident_get gid)
+  fi
+elif [ "$LOCAL_BENCH" = 1 ]; then
+  echo "GENTAR_BENCH_HOST=local needs an engine with bin/docker-identity (GENTAR_REF $REF has none): it decides the coordinator's uid on rootless Docker" >&2
+  exit 2
+fi
 # Telemetry destination (optional; AGENTS.md decision 6): the arena's
 # collector forwards what the coordinator scrubbed to GENTAR_OTLP_EXPORT
 # with GENTAR_OTLP_KEY. Both or neither — half a destination is a refusal, not a
@@ -681,6 +886,7 @@ arena() { docker compose "${ARENA_FILES[@]}" -p "arena-$SUBJECT" "$@"; }
 # different, missing file. Same shape as the engine's own bin/arena, so
 # the two say the same thing. The path is printed, never the contents.
 require_bench_key() {
+  [ "${LOCAL_BENCH:-0}" = 1 ] && return 0    # local bench mode: no key
   local key
   # `compose config --format json` PRETTY-PRINTS, so "bench_ssh_key" and
   # its "file" land on different lines and a single-line sed match finds
@@ -844,23 +1050,6 @@ arena_start otelcol
 #
 # GENTAR_BUDGET_CAP is the one fixed addition: it configures the budget
 # guard itself, so no scenario declares it.
-extract_env_names() {         # files... -> one env var name per line
-  for _f in "$@"; do scenario_table "$_f"; done | awk '
-    /^[[:space:]]*#/ { next }
-    /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
-    inarr {
-      line = $0
-      # either TOML quote style — a 'literal' name used to forward nothing,
-      # and the coordinator then refused credentials the caller had set
-      while (match(line, /["\047][A-Za-z_][A-Za-z0-9_]*["\047]/)) {
-        print substr(line, RSTART + 1, RLENGTH - 2)
-        line = substr(line, RSTART + RLENGTH)
-      }
-      depth += gsub(/\[/, "[") - gsub(/\]/, "]")
-      if (depth <= 0) inarr = 0
-    }
-  '
-}
 # ${FORWARD[@]+"..."} rather than "${FORWARD[@]}": under `set -u`, bash 3.2
 # (still the system bash on macOS) treats an EMPTY array expansion as an
 # unbound variable and aborts. Credential-less is the normal case on a dev
@@ -874,8 +1063,12 @@ declared=$(
       || extract_env_names ${SCENARIO_FILES[@]+"${SCENARIO_FILES[@]}"}
     echo GENTAR_BUDGET_CAP
   } | sort -u)
+# Routed secrets ([secrets] route) are not in FORWARD: each goes, in the
+# run loop below, to the coordinator of the one suite that declares it.
+is_routed() { printf '%s\n' ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"} | grep -qx "$1"; }
 FORWARD=()
 for var in $declared; do
+  if is_routed "$var"; then continue; fi
   [ -n "${!var:-}" ] && FORWARD+=(-e "$var")
 done
 
@@ -888,7 +1081,18 @@ REDACT_NAMES="GENTAR_BENCH_HOST GENTAR_BENCH_USER GENTAR_BENCH_JUMP GENTAR_TART_
 for f in ${SCENARIO_FILES[@]+"${SCENARIO_FILES[@]}"}; do
   REDACT_NAMES="$REDACT_NAMES $(credential_groups "$f" | tr '\n' ' ')"
 done
-redact() { GENTAR_REDACT_NAMES="$REDACT_NAMES" "$ARENA/bin/redact" "$@"; }
+# Every routed secret too, declared as a credential or only as pass_env.
+for _n in ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"}; do REDACT_NAMES="$REDACT_NAMES $_n"; done
+# bin/redact finds a value by its name in ITS environment, and a routed
+# secret is exported only while its suite's coordinator runs: so redact
+# runs in a subshell that exports them for it alone.
+redact() (
+  for _n in ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"}; do
+    # shellcheck disable=SC2163  # the variable NAMED by $_n
+    [ -z "${!_n:-}" ] || export "$_n"
+  done
+  GENTAR_REDACT_NAMES="$REDACT_NAMES" exec "$ARENA/bin/redact" "$@"
+)
 # Files are prepared and redacted HERE, outside gentar/reports/, and only
 # then moved in: a CI cancel between writing and redacting must not leave
 # an unredacted file where the always-run upload step would publish it.
@@ -923,30 +1127,62 @@ render_dashboard() {
   fi
 }
 
+# The verdict a report states, from its own verdict row: pass, fail,
+# refuse, or skip (a quarantined suite, which did not run).
+report_verdict() {
+  sed -n 's/^| verdict | `\([a-z]*\) (exit [0-9]*)` |$/\1/p' "$1" | head -1
+}
+
 # Run every requested scenario; report all, fail if any failed.
 mkdir -p "$HERE/reports"
 status=0
+quarantined=""
 RUN_T0=$(( $(date +%s) - 5 ))   # the dashboard shows this invocation's runs only
 for s in "$SCENARIO" "$@"; do
   # Exit code is the verdict: 0 pass · 1 fail · 2 usage/config refusal.
   MARKER=$(mktemp)
+  # Routed secrets ([secrets] route) leave this shell only here: exported
+  # for the coordinator of a suite that declares them, and taken back out
+  # of the environment the moment it returns, so the next suite's
+  # coordinator never sees them.
+  ROUTED=()
+  scrub=""
+  for _n in ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"}; do
+    if [ -n "${!_n:-}" ] && [ -f "$HERE/scenarios/$s.toml" ] \
+       && extract_env_names "$HERE/scenarios/$s.toml" | grep -qx "$_n"; then
+      # shellcheck disable=SC2163  # the variable NAMED by $_n
+      export "$_n"
+      ROUTED+=(-e "$_n")
+      scrub="$scrub $_n"
+    fi
+  done
+  # Names only: the coordinator scrubs the values of what it declares as
+  # credentials, and a suite may declare a routed secret in pass_env, so it
+  # is told which names carry one (agy on #79).
+  [ -z "$scrub" ] || ROUTED+=(-e "GENTAR_REDACT_NAMES=${scrub# }")
   set +e
   GENTAR_SUBJECTS_DIR="$PWD/subjects" \
     arena run --rm --no-deps \
       -e GENTAR_SCENARIOS_DIR=/extra \
       ${FORWARD[@]+"${FORWARD[@]}"} \
+      ${ROUTED[@]+"${ROUTED[@]}"} \
       -v "$HERE/scenarios:/extra:ro" \
       coordinator run "$s"
   rc=$?
+  # shellcheck disable=SC2163  # the variable NAMED by $_n
+  for _n in ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"}; do export -n "$_n" 2>/dev/null; done
   set -e
   # Copy every report this run produced into the repo, with a
   # reproduce command that works for own-arena scenarios (the
   # engine's default assumes the central arena's invocation).
   found=0
+  skipped=0
   while IFS= read -r f; do
+    [ "$(report_verdict "$f")" = skip ] && skipped=1
     staged="$STAGE/$(basename "$f")"
-    sed "s|^Reproduce: \`.*\`|Reproduce: \`gentar/run.sh $s\`|" "$f" \
-      > "$staged" && found=1
+    # Owner-only, like the engine's original (umask, so no wider moment).
+    (umask 077; sed "s|^Reproduce: \`.*\`|Reproduce: \`gentar/run.sh $s\`|" "$f" \
+      > "$staged") && found=1
     # gentar/reports/ is what CI publishes. A report that cannot be
     # redacted does not go there — the original stays in the arena's out/
     # for the fix loop, and the run's verdict is unchanged (agy review).
@@ -956,13 +1192,26 @@ for s in "$SCENARIO" "$@"; do
   done < <(find out -name 'report-*.md' -newer "$MARKER" 2>/dev/null)
   rm -f "$MARKER"
   if [ "$found" -ne 1 ]; then
-    # Every terminal outcome (pass/fail/refuse) writes one; a missing
+    # Every terminal outcome (pass/fail/refuse/skip) writes one; a missing
     # report means reporting itself broke — fail loudly, don't pass
     # silently without the fix-loop artifact.
     echo "no report written for $s" >&2
     rc=1
+  elif [ "$skipped" = 1 ] && [ "$rc" -eq 0 ]; then
+    quarantined="$quarantined $s"
   fi
   [ "$rc" -eq 0 ] || status=$rc
 done
+# A quarantined suite exits 0, so a known flake cannot turn the run red,
+# but it ran nothing. Said once more at the end, like the sweep's skipped
+# judged suites, so a green run is never read as having checked it.
+if [ -n "$quarantined" ]; then
+  n=$(echo $quarantined | wc -w | tr -d ' ')
+  msg="$n suite(s) quarantined, not run:$quarantined (GENTAR_QUARANTINE; neither a pass nor a failure)"
+  echo "run summary: $msg" >&2
+  if [ "${GITHUB_ACTIONS:-}" = true ]; then
+    echo "::warning title=quarantined suites not run::$msg"
+  fi
+fi
 render_dashboard || true
 exit "$status"

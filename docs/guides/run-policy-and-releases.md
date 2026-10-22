@@ -49,6 +49,20 @@ pilots and soft checks: `plan.py` drops them from any phase-1 pick, and
 
 3. Check it: `gentar/run.sh --check` should exit 0.
 
+## Route your own secrets
+
+A suite that needs a secret of your own declares it (`credentials` or
+`pass_env`), and the policy routes it, by name, to the bench job:
+
+```toml
+[secrets]
+route = ["SUBJECT_READ_KEY"]   # repository secrets, up to 8
+```
+
+Add the repository secret of that name. `gentar/run.sh --route` lists the
+routed names, whether each arrived, and which suites declare it. Values are
+never shown. The kit's workflow is unchanged, so it stays byte-identical.
+
 ## Gate a release
 
 Make this the first job of your release workflow, and have every
@@ -56,7 +70,8 @@ publishing job depend on it (`needs: arena-gate`):
 
 ```yaml
   arena-gate:
-    runs-on: ubuntu-latest
+    # the same runner as the arena's plan/checks (GENTAR_CI_RUNNER, if set)
+    runs-on: ${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER) || 'ubuntu-latest' }}
     permissions: { actions: read, contents: read }
     steps:
       - uses: actions/checkout@v4

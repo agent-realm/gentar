@@ -107,6 +107,11 @@ the runner and the repository secrets as in
 `BENCH_SSH_KEY`, `GENTAR_BENCH_HOST` and `GENTAR_BENCH_USER`, all three
 as secrets.
 
+The bench-free `plan` and `checks` jobs use GitHub-hosted runners. If your
+organisation has no hosted minutes, set the variable `GENTAR_CI_RUNNER` to
+a self-hosted runner's labels, e.g. `["self-hosted", "linux-ci"]`, never
+`arena` (see [Deploy an arena](../guides/deploy-an-arena.md)).
+
 ## 8. Decide the run policy
 
 Edit `gentar/policy.toml`, which decides which suites run on a PR, on a
