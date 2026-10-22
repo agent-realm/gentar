@@ -33,7 +33,7 @@ Adopters pin a release tag, not a branch.
   array of tables written with single brackets (`[verify.files]`) is
   refused the same way. The dry-run uses the engine's parser, so it fails
   such a suite as well. **Schema change:** a suite with a stray key that
-  loaded on 0.9.x is refused from this release, so it ships in a minor
+  loaded on 0.10.x or earlier is refused from this release, so it ships in a minor
   version (0.11.0). Every scenario in gentar, its examples, and the known adopters'
   repositories loads unchanged.
 
