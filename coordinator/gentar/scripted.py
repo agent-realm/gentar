@@ -10,12 +10,31 @@ import time
 
 from gentar.benchhost import BenchHost
 from gentar.goal import _LOW, GOAL_RESERVED, goal_instructions, goal_offer, screen_key  # noqa: F401
-from gentar.pty_driver import _KEYS, APPROVAL_RE, DANGER_RE, DriverAbort, PtyDriver, _tail
+from gentar.pty_driver import (_KEYS, APPROVAL_RE, DANGER_RE, DriverAbort, PtyDriver,
+                               _tail, exit_problem)
 from gentar.spans import Spans
 
 
 class TurnFailure(AssertionError):
     pass
+
+
+# sbx's one-time first-run wizard: on a fresh bench account, the FIRST
+# interactive (TTY) sbx session shows this screen and waits for a key
+# before running the command, so the scenario's prompt never appears
+# (found on a new bench host, 2026-10-12). Recognised by its fixed text.
+SBX_SETUP_WIZARD = re.compile(r"sbx setup\s*.\s*detected configuration|continue without importing")
+SBX_SETUP_HINT = ("the bench host's sbx showed its one-time first-run setup wizard (a fresh "
+                  "bench account) instead of running the command; on the bench host, as the "
+                  "bench user, run `sbx setup` once and press q (continue without importing)")
+
+
+def _not_seen(driver, message: str) -> TurnFailure:
+    """A "never appeared" failure, with the cause named when the transcript
+    shows sbx's first-run wizard instead of the command."""
+    if SBX_SETUP_WIZARD.search(getattr(driver, "transcript", "") or ""):
+        return TurnFailure(f"{message} -- {SBX_SETUP_HINT}")
+    return TurnFailure(message)
 
 
 def make_judge(scenario, spans: Spans, subject: str, run_id: str):
@@ -44,13 +63,25 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                attrs={"command": scenario.driver_command[:120]})
     try:
         if getattr(scenario, "goal", ""):
-            return _goal_pilot(driver, judge, scenario, spans, subject, run_id)
+            summary = _goal_pilot(driver, judge, scenario, spans, subject, run_id)
+            # `done` stops driving and the program may well still run (close()
+            # ends it). If it already ended on its own, its status counts.
+            status = driver.ended(settle=0)
+            if status is not None:
+                # SIGINT is the expected end only if the pilot actually
+                # pressed ctrl-c, not merely because the scenario offers it
+                # (Codex on #87).
+                why = exit_problem(status, driver.transport,
+                                   interrupted=driver.sent_ctrl_c and not driver.aborted)
+                if why:
+                    raise TurnFailure(f"goal: the driver command {why}")
+            return summary
         for i, turn in enumerate(scenario.turns):
             kind = turn["type"]
             if kind == "answer":
                 prompt = turn["prompt"]
                 if not _await(driver, re.compile(prompt, re.IGNORECASE), turn.get("timeout", 60)):
-                    raise TurnFailure(f"turn {i}: prompt {prompt!r} never appeared")
+                    raise _not_seen(driver, f"turn {i}: prompt {prompt!r} never appeared")
                 driver.send_line(turn.get("send", ""))
                 _ok(spans, subject, run_id, name, i, f"answer {prompt!r}")
             elif kind == "expect" and "judge" in turn:
@@ -59,7 +90,7 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
             elif kind == "expect":
                 pattern = turn["pattern"]
                 if not driver.drive_until(pattern, turn.get("timeout", 90)):
-                    raise TurnFailure(f"turn {i}: pattern {pattern!r} never appeared")
+                    raise _not_seen(driver, f"turn {i}: pattern {pattern!r} never appeared")
                 _ok(spans, subject, run_id, name, i, f"expect {pattern!r}")
             elif kind == "pick":
                 if not driver.pick_option(turn["label"], turn.get("tries", 8)):
@@ -103,7 +134,7 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                             _ok(spans, subject, run_id, name, i,
                                 f"key {'+'.join(keys)} skipped (optional)")
                             continue
-                        raise TurnFailure(f"turn {i}: after {after!r} never appeared")
+                        raise _not_seen(driver, f"turn {i}: after {after!r} never appeared")
                 try:
                     driver.send_keys(keys, float(turn.get("delay", 0.5)))
                 except KeyError as bad:
@@ -133,6 +164,13 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                 "driver command never exited after the final turn "
                 "(wait_done 300s) — the scripted exit keys did not "
                 "produce EOF")
+        # EOF is not success: how the command ended counts. A crash, a
+        # `timeout` kill or a dropped ssh after partial work must not pass
+        # on the files it left behind (ground-up review A3).
+        why = exit_problem(driver.ended(), driver.transport,
+                           interrupted=_ends_with_ctrl_c(scenario.turns))
+        if why:
+            raise TurnFailure(f"driver command {why}")
         return f"driver ok: {len(scenario.turns)} turns"
     finally:
         if state is not None:
@@ -147,6 +185,15 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
         if report is not None:
             report.transcript = driver.transcript
         driver.close()
+
+
+def _ends_with_ctrl_c(turns: list[dict]) -> bool:
+    """The last turn pressed ctrl-c: the scenario ended the program itself."""
+    if not turns or turns[-1].get("type") != "key":
+        return False
+    last = turns[-1]
+    keys = last.get("keys") or ([last["key"]] if last.get("key") else [])
+    return bool(keys) and keys[-1] == "ctrl-c"
 
 
 def _goal_pilot(driver: PtyDriver, judge, sc, spans, subject, run_id,

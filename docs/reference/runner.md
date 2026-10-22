@@ -39,6 +39,14 @@ verbatim, then nine assertions read back out of the bench (five files, four
 commands). If the project's README and the project's reality diverge, this
 suite goes red and names the divergence.
 
+The schema is closed. A table or key the engine does not read is refused
+when the scenario loads, with the closest allowed name:
+`verify.files[0]: unknown key(s) 'contain' (did you mean 'contains'?)`.
+A misspelled assertion is never ignored, because ignoring it would run a
+weaker check that still passes. Turns are checked per type, so `send` on an
+`expect` turn is refused too, and `[verify.files]` with single brackets is
+refused in favour of `[[verify.files]]`.
+
 **Exit code is the verdict**, and it is the whole contract:
 
 | Code | Meaning |

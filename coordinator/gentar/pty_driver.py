@@ -11,7 +11,9 @@ incident 2026-07-13):
   blind-typing an option number.
 """
 
+import os
 import re
+import signal
 import time
 
 import pexpect
@@ -53,6 +55,8 @@ class PtyDriver:
         self.child = None
         self.transcript = ""   # full evidence; spans carry the tail
         self.aborted = False   # the danger gate fired: never type again
+        self.transport = ""    # argv[0] of the pty transport ("ssh" on remote tiers)
+        self.sent_ctrl_c = False  # a ctrl-c was actually typed (not just declared)
 
     # -- lifecycle -------------------------------------------------------
 
@@ -61,6 +65,7 @@ class PtyDriver:
         # ssh jump→guest); the driver only drives the pty it gets back.
         argv = self.bench.pty_spawn_args(
             self.sandbox, self.columns, self.lines, env or {}, command)
+        self.transport = os.path.basename(argv[0])
         self.child = pexpect.spawn(argv[0], argv[1:],
                                    encoding="utf-8", codec_errors="replace",
                                    dimensions=(self.lines, self.columns),
@@ -121,6 +126,8 @@ class PtyDriver:
 
     def send_key(self, key: str) -> None:  # "enter", "escape", "down", "ctrl-c"
         self.child.send(_KEYS[key])
+        if key == "ctrl-c":
+            self.sent_ctrl_c = True
 
     def send_keys(self, keys: list[str], delay: float = 0.5) -> None:
         """A key sequence with pacing — interactive TUIs read single keys,
@@ -173,6 +180,26 @@ class PtyDriver:
             return True
         except pexpect.TIMEOUT:
             return False
+
+    def ended(self, settle: float = 10.0) -> tuple[int | None, int | None] | None:
+        """How the driver command ended: (exit status, signal) as pexpect
+        reaps them, or None while it still runs. EOF only means the pty
+        closed; the exit lands a moment later, so poll for up to `settle`
+        seconds rather than block in wait()."""
+        if self.child is None:
+            return None
+        waited = 0.0
+        while True:
+            try:
+                alive = self.child.isalive()
+            except Exception:           # already reaped elsewhere: no status
+                return (None, None)
+            if not alive:
+                return self.child.exitstatus, self.child.signalstatus
+            if waited >= settle:
+                return None
+            time.sleep(0.1)
+            waited += 0.1
 
     def wait_idle(self, max_seconds: int = 60) -> bool:
         prev, waited = None, 0.0
@@ -365,6 +392,42 @@ def _render(raw: str, height: int = 0) -> str:
     if height:
         return "\n".join(out)
     return "\n".join(out).rstrip("\n")
+
+
+def exit_problem(status: tuple[int | None, int | None] | None,
+                 transport: str = "", interrupted: bool = False) -> str:
+    """Why the driver command's own ending fails the run; "" when it does
+    not. EOF used to count as success, so an agent that crashed, was
+    killed by its `timeout`, or lost its ssh after writing half the work
+    could still pass on the files it left (ground-up review A3).
+    `interrupted`: the scenario itself pressed ctrl-c to end the program,
+    so a death by SIGINT (or the shell's 130) is the ending it asked for."""
+    if status is None:
+        return "closed its terminal but had not exited 10s later"
+    code, sig = status
+    if code is None and sig is None:
+        return "ended with no exit status the driver could read"
+    if interrupted and (sig == signal.SIGINT or code == 128 + signal.SIGINT):
+        return ""
+    if sig is not None:
+        return f"was killed by signal {sig}{_signame(sig)}"
+    if code == 0:
+        return ""
+    if code == 255 and transport == "ssh":
+        return ("exited 255: ssh's own failure code (the transport dropped or "
+                "was refused, or the remote command died by a signal)")
+    if code == 124:
+        return "exited 124: timeout(1) killed it at its deadline"
+    if code > 128 and _signame(code - 128):
+        return f"exited {code}: killed by signal {code - 128}{_signame(code - 128)}"
+    return f"exited {code}"
+
+
+def _signame(sig: int) -> str:
+    try:
+        return f" ({signal.Signals(sig).name})"
+    except ValueError:
+        return ""
 
 
 def _tail(s: str, n: int) -> str:

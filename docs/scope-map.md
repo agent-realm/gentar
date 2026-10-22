@@ -1,5 +1,12 @@
 # Scope map
 
+> **Partly historical (2026-10-12).** gentar's public `gentar.yml` now runs
+> only GitHub-hosted jobs (unit tests, the release-tag check). The gate,
+> nightly and dispatch jobs and the `gentar-bench` runner label described
+> below moved to the private mirror `agent-realm/gentar-arena`, which runs
+> them after merge. The rest of the map stands. See
+> [CI and releases](reference/ci-and-releases.md).
+
 What contains what in a gentar arena, and how many of each.
 
 The system spans **three machines and two lifetimes**: things that persist between

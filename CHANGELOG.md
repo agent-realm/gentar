@@ -29,6 +29,356 @@ Adopters pin a release tag, not a branch.
   A label missing from the list now fails once the cursor wraps instead of
   cycling, and a skipped optional pick is named in the report's warnings.
 
+### Changed
+- **The scenario schema is closed: an unknown table or key is refused.**
+  A scenario that misspelled a key used to load and run a weaker test that
+  still passed: `contain = "x"` in `[[verify.files]]` became a bare
+  existence check, and a `[[verify.command]]` table (singular) was dropped
+  without a word. The engine now refuses any table or key it does not read,
+  per turn type too (`send` on an `expect` turn), and names the closest
+  allowed key: `unknown key(s) 'contain' (did you mean 'contains'?)`. An
+  array of tables written with single brackets (`[verify.files]`) is
+  refused the same way. The dry-run uses the engine's parser, so it fails
+  such a suite as well. **Schema change:** a suite with a stray key that
+  loaded on 0.10.x or earlier is refused from this release, so it ships in a minor
+  version (0.11.0). Every scenario in gentar, its examples, and the known adopters'
+  repositories loads unchanged.
+
+### Fixed
+- **The driver command's exit status counts; EOF alone is no longer a
+  pass.** The driver waited for the command to end and never asked how it
+  ended, so an agent that crashed, was stopped by its own `timeout`, or
+  lost its ssh after writing half the work could still pass on the files it
+  left. Now a non-zero exit or a death by signal fails the run, and the
+  message names the status: `timeout`'s 124, ssh's own 255 on the ssh
+  tiers, a signal by name. A scenario whose last turn presses ctrl-c to end
+  the program still passes on that SIGINT. A goal pilot's `done` does not
+  wait for the program, but if the program already ended on its own, its
+  status counts too (ground-up review A3).
+- **The report directory is no longer opened to everyone** (D4). Every report
+  write ran `chmod 0777` on the report dir, a host bind, so any account on the
+  host could plant or delete reports. It existed so the host user could clean
+  what root wrote. Reports already go to the dir's owner on the open
+  descriptor, and the dir itself is never chmodded or chowned. `bin/arena run`
+  now makes the bind source `./out` as the user before compose can, as the
+  kit's `run.sh` already did.
+- **A report's subject no longer reads `«redacted:GENTAR_BENCH_USER»`.**
+  v0.10.0 scrubs the whole report and every exported span with the bench
+  identity. The default bench account `arena` (bin/bench-host-provision's
+  documented default) is also the default subject, so every subject was
+  blanked, in reports and in exported traces, for a name the docs publish.
+  That pairing is now exempt, like `GENTAR_BENCH_HOST=local`. Any other
+  account name is still scrubbed.
+- **A quarantined suite gets the same outcome everywhere, and it is never a
+  pass.** Quarantine (`GENTAR_QUARANTINE`) wrote no report: a direct run
+  exited 0 with nothing to read, and the kit's `run.sh`, which expects a
+  report from every terminal outcome, failed the suite with "no report
+  written" (ground-up review A4). The coordinator now prints
+  `QUARANTINED [<suite>]: not run` and writes a report whose verdict is
+  `skip (exit 0)`; the span still says `skip`. The kit reads that verdict,
+  keeps the run's exit code, and ends with
+  `run summary: N suite(s) quarantined, not run: …`, which is also a warning
+  annotation in Actions. The exit code is still 0: a known flake must not
+  turn a run red.
+
+## 0.10.0 — 2026-10-22
+
+Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what changed and why, upgrade for adopters, what is not live-proven, known limits, verification).
+
+### Changed
+- **The mirror's schedule is documented.** `docs/reference/ci-and-releases.md`
+  says what the private mirror runs on its own: the gate daily at 00:17 UTC
+  and the nightly at 01:17 UTC, on the head of `main`. The times are
+  nominal and the schedule is best-effort: GitHub can delay a scheduled run,
+  or under heavy load drop it, so a dispatch is the certain path. The
+  nightly's agent suite skips without a provider key, and its subject
+  suites without a subject token.
+- **gentar's public CI is GitHub-hosted only; the bench suites moved to a
+  private mirror.** gentar is public, and a self-hosted runner registered
+  to a public repository can be reached by a fork's own workflow (D5,
+  2026-10-08). `.github/workflows/gentar.yml` now runs only two hosted jobs:
+  the unit suite on every PR and every push to `main`, and the release-tag
+  check on `v*` tags. The gate, nightly and dispatch jobs and every bench
+  secret and variable reference are gone from it. The bench suites run in
+  the private mirror `agent-realm/gentar-arena`, on commits reachable from
+  `main` or a `v*` tag. That makes them a **post-merge check, not a PR
+  gate**. A release is proven by dispatching the mirror's gate on the
+  release commit before tagging. The central dispatch to `agent-realm/gentar`
+  is retired, and `docs-honesty-gentar` checks the new claims.
+
+### Added
+- **The arena mirror: phase 2 for a PUBLIC repository, with no self-hosted
+  runner on it.** `[arena] bench = "mirror"` (with `mirror = "owner/name"`)
+  puts the repository on the kit's public variant workflow
+  (`subject-template/mirror/public/`: plan and checks, GitHub-hosted, no
+  self-hosted job), which `--check` holds it to; `plan.py` then plans no
+  bench here, and refuses a floor, `bench = "declared"` or a
+  `GENTAR_CI_RUNNER`. A private mirror (`subject-template/mirror/arena/`)
+  pulls the public repository and runs the kit's own bench job on a commit
+  `verify-ref.sh` admitted: reachable from the default branch or a `v*` tag,
+  or any branch head when the MIRROR's variable `GENTAR_ALLOW_BRANCH_HEADS`
+  is `true` (default off). Since GitHub serves a fork's commit by sha
+  through the parent's URL, it fetches only those refs (never
+  `refs/pull/*`, no partial clone) and checks ancestry. `verify-ref.sh` is
+  self-contained, so a mirror can vendor one file. The mirror's daily
+  schedule is a no-op on an already-green default-branch head.
+  Routed secrets have an upper bound in the MIRROR: its variable
+  `GENTAR_ROUTE_ALLOW` names what it will route, and a commit's
+  `[secrets] route` can only narrow it (`route.py`; a dropped name keeps its
+  slot empty and is logged by name). The mirror's plan job runs none of the
+  public repository's code, so a branch editing its own policy or `plan.py`
+  reaches no secret the mirror did not offer.
+- **`gentar/mirror.sh dispatch <sha> [suites]`** runs the mirror, waits (by
+  polling the run's own status, so a fine-grained token works; at most
+  `GENTAR_MIRROR_WAIT` seconds, after which it posts nothing), and
+  for a full phase 2 posts the commit status `arena/phase2` (success,
+  failure, or error) linking the mirror run. It finds its own run by a
+  request id, never "the newest". `mirror.sh status <sha>` reads it back. A
+  mirror holding `GENTAR_STATUS_TOKEN` posts the status itself, and
+  `mirror.sh` then leaves that status as it is.
+- **`[phase2] evidence = "status"`**: `release-gate.sh` then requires the
+  latest `arena/phase2` commit status on exactly the release sha to be
+  `success` and to link a run of `[arena] mirror` by its run number (it
+  needs that mirror set; `max_age_days` applies). Mirror mode requires it
+  whenever the gate is on.
+- **A mirror's phase 2 that skipped a suite is not green.** `run.sh --sweep`
+  writes the suites it skipped, with each reason, to
+  `gentar/reports/sweep-skipped.txt` (empty when none). The mirror's bench job
+  fails on a non-empty or missing list ("phase 2 ran every suite") before it
+  marks the commit green, so `arena/phase2` is a `failure` naming the skipped
+  suites and the release gate refuses it. Without this, a sweep that skipped
+  every keyed suite posted success and its `phase2-green-<sha>` marker kept
+  the schedule from ever sweeping that commit again (ground-up review, A1).
+- **`[secrets] route` — a subject's own secrets reach its suites by name.**
+  Declare up to 8 repository secrets in `gentar/policy.toml`; the kit's bench
+  job looks each one up in a fixed slot (`secrets[<declared name>]`, never the
+  whole set), and `run.sh` clears the slots at once, gives each value its
+  name inside the script, and exports a name only while the coordinator of
+  a suite that declares it (`credentials` or `pass_env`) runs, so another
+  suite's coordinator never sees it; a routed name set by hand, with no
+  slot, goes the same one way. Routed values are scrubbed from reports and
+  spans, a `pass_env` declaration included (the kit names them to the
+  coordinator in `GENTAR_REDACT_NAMES`). Reserved names (the kit's own,
+  GitHub's, the runner's, bash's read-only variables, and names that steer
+  a shell, the loader or libc, the locale, git, ssh, docker, python, node,
+  perl, ruby or java) are refused,
+  and `--check` flags a route no suite declares. `gentar/run.sh --route`
+  reports names and state, never values. The workflow stays byte-identical,
+  so a subject with its own secret no longer has to fork it.
+- **`bin/bench-host-provision`** builds an Ubuntu 24.04 bench host. The
+  isolated bench account (`arena` by default) has its password locked, no
+  sudo, and the groups its own plus `kvm`. The host gets rootless Docker
+  with the rootful daemon disabled, sbx pinned and held, the headless
+  unlocked keyring with its restart and D-Bus pieces, and a 0700 workspace
+  root. The script refuses before any change on another OS, a bad
+  parameter, a workspace root that is not a dedicated directory, or an
+  existing account with another uid or in another group than its own and
+  kvm. It verifies the Docker apt key's fingerprint and masks the rootful
+  daemon. It exits 1 unless every proof is refused for the expected reason,
+  and it contains no secret value. It is adopted from the operator's build
+  of the 2026-10-11 bench host. The guide (section 1) now points to it, and
+  section 2 adds the runner's rootless `DOCKER_HOST` and repository-level
+  registration.
+
+### Security
+- **Credential values never ride a command line, an error, a report or a
+  span (C1, the 2026-10-19 ground-up review).** Env values used to be put
+  on the command line: `export K='v'` in the `sbx exec … sh -lc` argv for
+  oracle steps, `env K=v` in the pty's `sbx exec -t` line, run through ssh
+  (the tart and daytona tiers did the same). Any account on the bench-host
+  could read them in `/proc`, and a timeout's error text was that argv, so
+  it reached the report and the spans. Now every tier with a shell
+  transport writes the env into an owner-only file inside the bench over
+  stdin, in an exec of its own (`sbx exec -i`), which reports the absolute
+  path it used; the command reads that file, deletes it and only then
+  applies it (so an env that moves `HOME` cannot strand it), all before it
+  runs; a name that is not a shell identifier is
+  refused. All env takes this path, not only credentials, so the run id
+  now also reaches driver sessions. A timeout names the operation (`sbx
+  exec`), never the argv. As defence in depth, the run's scrubber (bench
+  identity plus the declared credentials' values) now runs over the whole
+  report, the run's error text in the CI log, and every local span row,
+  not only the export. Reports are written owner-only (`0600`, given to the
+  report directory's owner when the coordinator runs as root) instead of
+  world-readable (handed to the owner through the open descriptor, never by
+  name), and the kit's staged copies are owner-only too. The osb tier types
+  its pty command into a shell, which echoes it, so it refuses a driver
+  scenario that forwards any env (`credentials` or `pass_env`) before any
+  bench (exit 2). Not live-proven:
+  a real provider key end to end through the new path. The gate suites
+  exercise it with non-secret env (the run id, the OTLP endpoint); the
+  provider-key suites run only where a key is configured.
+
+### Fixed
+- **`GENTAR_BENCH_WORKSPACE_ROOT` reaches the coordinator in SSH mode.**
+  `docker-compose.yml` forwarded it only in local bench mode, so over SSH the
+  coordinator always used `/tmp/gentar-workspaces` while `bin/bench-reap`
+  followed the caller's value. An arena whose bench user has its own
+  workspace root (D5: one 0700 root per bench user) made its workspaces in
+  the shared default instead. The compose default repeats config.py's,
+  behind `:-`, so an empty value also falls back (config.py treats empty as
+  set).
+- **Local bench mode on rootless Docker.** The local coordinator ran as the
+  user's own uid, which under rootless Docker maps to a subordinate uid
+  owning none of the user's files (workspace root, sbx state). The new
+  `bin/docker-identity` asks the daemon the run actually uses: rootless runs
+  the coordinator as `0:0` (there, the user); rootful keeps the user's uid
+  and refuses local mode run as root (never `0:0`); a daemon it cannot read
+  is refused, never guessed. No variable or flag chooses the uid. `bin/arena`
+  and the kit's `run.sh` export that daemon as `DOCKER_HOST` and its socket
+  as `GENTAR_DOCKER_SOCK`, which the `osb` tier's server now mounts instead
+  of a hard-coded `/var/run/docker.sock` (unchanged for rootful). The kit's
+  local mode refuses an engine without the script. `bin/arena` reads
+  `GENTAR_BENCH_HOST` as `run.sh` and the coordinator do, spaces and
+  quotes stripped.
+- **The kit's CI jobs do not leave SSH keys behind on a self-hosted runner.**
+  `checks` and `bench` write `bench_key` and `gentar_clone_key` under
+  `umask 077` (never readable by others, not even for a moment), remove stale
+  ones when they start, and remove their own however the job ends. In
+  `bench` the clone key goes right after the suites, and the teardown
+  removes the bench key itself through a shell trap (run with `wait`, so a
+  cancellation's signal is handled at once) under a 180 s timeout, before
+  the reports upload: GitHub gives a cancelled run's `always()` steps five
+  minutes in all, so a later step cannot be trusted to run. A last
+  `always()` step stays as a backstop. A self-hosted runner does not always
+  empty `RUNNER_TEMP` when a job is cancelled.
+- **A fresh bench account's sbx setup wizard is named, not guessed at.** On
+  a new bench account, the first interactive sbx session shows sbx's
+  one-time first-run wizard ("sbx setup — detected configuration … continue
+  without importing") and waits for a key, so the first suite with a
+  terminal failed with a bare "prompt … never appeared" (found on a new
+  bench host, 2026-10-12). The driver now recognises the screen and says
+  what to do: run `sbx setup` once as the bench user and press `q`.
+  `bin/bench-host-provision` and the deploy guide list it among the steps
+  after `sbx login`.
+- **`bin/bench-host-provision` no longer closes gpg's pipe early.** The
+  fingerprint read used `awk … { print; exit }`, which can SIGPIPE gpg under
+  `pipefail` and stop the script with no message. awk now reads everything
+  and prints the first fingerprint at the end.
+
+### Changed
+- **License: MIT to Apache-2.0**, from v0.10.0 (the pilot's decision,
+  2026-10-10). `LICENSE` is apache.org's LICENSE-2.0.txt verbatim, and `NOTICE`
+  holds the copyright line, which Apache-2.0 asks redistributors to keep.
+  Releases v0.1.1 through v0.9.3 remain MIT (v0.1.0 shipped without a
+  license).
+- **The kit's files carry their license.** Each file a subject copies byte
+  for byte (`gentar/run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh` and
+  the arena workflow) starts with `SPDX-License-Identifier: Apache-2.0` and
+  the copyright line, after a shebang where there is one, so the license
+  travels with the copy (AK47's ruling on #73). Subjects pick it up at
+  their next kit re-copy.
+
+## 0.9.3 — 2026-10-08
+
+Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed and why, upgrade, the lifted `--check` guard, the `/tmp/dryrun-home-*` cleanup, known limits).
+
+### Added
+- **`[scenario] bench_only = "<why>"`** for a suite only a bench can prove
+  (it deploys a service through the bench's Docker, say). The bench-free
+  dry-run reports it `UNVERIFIED (bench only: <why>)` without running or
+  preparing it; phase 1 accepts that, a plain dry-run does not, and the
+  arena runs it as before. `GENTAR_DRYRUN_BENCH_ONLY=run` runs it on a host
+  that has what it needs. Found by memhouse's adoption review: its house
+  suite's verify commands ran in the dry-run without the house and turned
+  every memhouse pull request red.
+
+### Fixed
+- **A dry-run suite that does not parse is a reported FAILURE**, and the sweep
+  goes on; it used to end the whole dry-run with a traceback. Such a suite
+  is never prepared.
+- **The kit's CI jobs keep temp files in the job's own temp dir.** `plan`,
+  `checks` and `bench` (the jobs that can run on a self-hosted runner) start
+  by pointing `TMPDIR` at `$RUNNER_TEMP`, which the runner empties after every
+  job. On a self-hosted runner `/tmp` is shared and never cleaned: a failing
+  dry-run keeps its scratch homes there, and a suite's own `mktemp` steps add
+  more (a runner LXC's tmpfs once filled with 7.4 GB of leaked test dirs).
+  The arena's lock and bench workspaces keep their fixed `/tmp` paths.
+
+### Engine CI
+- **`unit-checkout`**: the unit suite also runs on the checkout (GitHub-hosted,
+  read-only, no secrets), so the tests that read the kit run in CI too.
+
+## 0.9.2 — 2026-10-04
+
+### Fixed
+- **A subject's own suite now wins over the engine's copy of the same
+  name.** The coordinator searched the engine's baked scenarios before the
+  subject's (`GENTAR_SCENARIOS_DIR`), so a subject suite named like one of
+  the suites gentar used to run for other repos was silently replaced by
+  the engine's copy: kommander-playbook's first own-arena run executed
+  gentar's stale `docs-honesty-kommander`, not its own. The subject's dir is
+  now searched first, and the coordinator prints a note when a subject
+  suite hides an engine one.
+- **Local bench mode on a host whose sbx login is in a keyring.** sbx in
+  the coordinator has no session bus and reads the Docker login only from
+  files, so on a host with gnome-keyring (arf VM 142, sbx 0.39) every bench
+  failed at `PREPARE IMAGE`: "no default account profile set: secret not
+  found". New `bin/sbx-file-login` signs sbx in from a container, so the
+  login is also written as files; the host's keyring login stays. The kit's
+  `run.sh` and `bin/arena` now refuse with exit 2 while the file login is
+  missing, instead of failing every suite.
+- **Bench errors keep the reason.** A failing bench command's output was cut
+  to its first 400 characters, and sbx prints the reason last; errors now
+  keep the start and the last 400 characters, with credential shapes masked
+  first: token fields in JSON or Python reprs (either quote), Authorization /
+  X-Registry-Auth headers of any scheme, `key=value` and `user:pass@` in
+  URLs, Docker PAT/OAT and legacy UUID tokens, JWT/JWE, bearer/basic,
+  GitHub tokens. The run's redaction is value-based and knows nothing of the
+  host's sbx login, and an error text reaches the CI log, the report
+  artifact and the spans.
+- **`bin/sbx-file-login` keeps the token secret.** It passes `sbx login`
+  only `--username`, `--password-stdin` and `--help`, refuses anything else
+  without echoing it, refuses `--password-stdin` from a terminal, and makes
+  the login store owner-only after the login.
+
+## 0.9.1 — 2026-10-03
+### Added
+- **Local bench mode** (engine and kit): `GENTAR_BENCH_HOST=local` when the
+  arena runs on the bench host itself (a runner on that VM). sbx is called
+  directly instead of over SSH, so an adopter needs no SSH account, no
+  bench key and no bench secrets: the runner and one repository variable.
+  - `SbxBenchHost`: `sh -c` in place of the ssh transport (the same
+    quoting), and the coordinator's own pty.
+  - `compose.local-bench.yml`: the coordinator runs as the host user, with
+    the host's `sbx` binary, state and config, and the workspace root
+    mounted at the same paths.
+  - `bin/arena` and the kit's `run.sh` layer it and create the workspace
+    root first. The kit workflow takes `GENTAR_BENCH_HOST` from a secret or
+    a variable and skips the key checks in local mode.
+  - `local` is a mode, not a locator, so it is never redacted.
+
+  Proven on VM 151: `smoke` and `scripted-onboarding` pass end to end,
+  with no sandbox left.
+- Kit `[stage] git = true` (`gentar/policy.toml`): ship git history into the
+  bench for suites that clone their own release tags. `plan.py stage-git`
+  gives the staged copy a fresh `.git` from a local clone (history and tags,
+  a new config, no remote), so CI's auth header is never copied. A shallow
+  checkout is refused. Needed by the own-repo move: kommander-update and
+  agent-profile-smoke clone from `$WORKSPACE_DIR/.git`.
+### Fixed
+- Kit `plan.py`: a `workflow_dispatch` run **on a tag ref** is a dispatch.
+  The release rule caught it first, so a drift run of a release planned
+  nothing and read "success" with the arena skipped, and a dispatch naming
+  suites on a tag was swallowed the same way (claude-playbooks' drift
+  monitor). Tag rules now apply to tag pushes only; a dispatch on a tag
+  runs phase 2 when `dispatch` is in `[phase2] on`, or the suites it names.
+### Changed
+- Kit `run.sh --sweep`: judged suites skipped for want of
+  `TYPESAFE_API_KEY` are summarised once more at the end of the selection
+  (`sweep summary: N judged suite(s) skipped …`), and as a warning
+  annotation in GitHub Actions, since a green phase 2 did not run them.
+### Security
+- **No credential rides into a bench in a subject's git metadata.** gentar's
+  own nightly and dispatch cloned private subjects with the token in the
+  clone URL, so git saved it in `.git/config`, and the engine copied the
+  subject, `.git` included, into benches where agents run with skipped
+  permissions (found in the 2026-10-02 design review). The workflow now
+  passes the token through env only, as an HTTP header in git's env config,
+  which is not saved into the clone. The engine refuses (exit 2, before any
+  bench) a subject whose `.git/config` holds a credential or that carries a
+  git credential store. Rotate any token that went through the old path.
+
 ## 0.9.0 — 2026-09-28
 ### Added
 - **`GENTAR_CI_RUNNER`** (kit): an optional repository or organisation

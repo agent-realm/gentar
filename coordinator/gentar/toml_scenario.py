@@ -49,6 +49,12 @@ oracle mode is phase 2's runner.
     [[verify.commands]]
     command = "claude-playbook info kommander"
     contains = "Version:"     # optional substring check
+
+The schema is CLOSED: an unknown table or key is refused, never ignored.
+Ignoring one turned a typo into a weaker test that still passed —
+`contain = "x"` in [[verify.files]] became an existence check, and a
+[[verify.command]] table (singular) checked nothing at all (review
+2026-10-19, A2).
 """
 
 # Annotations as strings: this module is imported by dryrun.py on the
@@ -68,6 +74,7 @@ except ModuleNotFoundError:             # 3.9/3.10: stock macOS, old distros
     # image is python:3.12-slim and always takes the import above.
     import tomli as tomllib             # type: ignore[no-redef]
 from pathlib import Path
+import difflib
 import re
 
 # A credential or pass_env entry is an ENVIRONMENT VARIABLE NAME. Anything
@@ -82,6 +89,56 @@ _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 class ScenarioError(ValueError):
     pass
+
+
+# Every key a scenario may carry, per table. No table here is a map whose
+# keys are user data, so every one is closed. Adding a field to the schema
+# means adding it here, or every scenario using it is refused.
+_TABLES = {
+    "scenario": {"name", "subject", "agent", "template", "bench", "bench_only",
+                 "data", "credentials", "pass_env"},
+    "oracle": {"steps"},
+    "driver": {"command", "turns", "goal", "actions", "max_steps", "p_act",
+               "every", "timeout"},
+    "verify": {"files", "commands", "judge"},
+    "judge": {"max_calls", "max_input_tokens", "lines"},
+    "semantic": {"runs", "pass_rate_min"},
+    "budget": {"tokens", "simulate_spend"},
+}
+_FILE_KEYS = {"path", "contains"}
+_COMMAND_KEYS = {"command", "contains"}
+# A turn's keys depend on its type: `send` on an expect turn, or `label` on
+# an answer turn, would be read by nothing.
+_TURN_KEYS = {
+    "answer": {"prompt", "send", "timeout"},
+    "expect": {"pattern", "judge", "timeout"},
+    "pick": {"label", "tries", "optional"},
+    "key": {"key", "keys", "after", "delay", "timeout", "optional"},
+    "abort": {"timeout"},
+}
+
+
+def _refuse_unknown(where: str, table: dict, allowed, what: str = "key") -> None:
+    """Refuse keys outside `allowed`, naming the closest allowed one."""
+    unknown = sorted(set(table) - set(allowed))
+    if not unknown:
+        return
+    named = []
+    for k in unknown:
+        close = difflib.get_close_matches(k, sorted(allowed), n=1)
+        named.append(f"{k!r}" + (f" (did you mean {close[0]!r}?)" if close else ""))
+    raise ScenarioError(f"{where}: unknown {what}(s) {', '.join(named)}; "
+                        f"allowed: {', '.join(sorted(allowed))}")
+
+
+def _array_of_tables(path, parent: dict, dotted: str) -> list:
+    """`dotted` (e.g. "verify.files") read from its parent table, every
+    entry checked to BE a table: written `[verify.files]` (single
+    brackets) it would otherwise read as a list of its own key names."""
+    v = parent.get(dotted.rsplit(".", 1)[-1], [])
+    if not isinstance(v, list) or not all(isinstance(e, dict) for e in v):
+        raise ScenarioError(f"{path}: {dotted} must be an array of tables — write [[{dotted}]]")
+    return list(v)
 
 
 def satisfied_group(groups: list[list[str]], get) -> list[str] | None:
@@ -135,9 +192,7 @@ def _check_soft_judge(path, i, j) -> None:
     where = f"{path}: verify.judge[{i}]"
     if not isinstance(j, dict):
         raise ScenarioError(f"{where} must be a table")
-    unknown = set(j) - {"question", "true", "false", "p_min", "p_max_no"}
-    if unknown:
-        raise ScenarioError(f"{where}: unknown key(s) {sorted(unknown)}")
+    _refuse_unknown(where, j, {"question", "true", "false", "p_min", "p_max_no"})
     if not isinstance(j.get("question"), str) or not j["question"].strip():
         raise ScenarioError(f"{where}.question must be a non-empty string")
     p_min, p_no = j.get("p_min", 0.9), j.get("p_max_no", 0.2)
@@ -152,9 +207,7 @@ def _check_judge(path, i, j) -> None:
     where = f"{path}: driver.turns[{i}].judge"
     if not isinstance(j, dict):
         raise ScenarioError(f"{where} must be a table: {{ question = \"…\", p_min = 0.9 }}")
-    unknown = set(j) - {"question", "true", "false", "p_min", "p_max_no", "hold", "every"}
-    if unknown:
-        raise ScenarioError(f"{where}: unknown key(s) {sorted(unknown)}")
+    _refuse_unknown(where, j, {"question", "true", "false", "p_min", "p_max_no", "hold", "every"})
     if not isinstance(j.get("question"), str) or not j["question"].strip():
         raise ScenarioError(f"{where}.question must be a non-empty string")
     for k in ("true", "false"):
@@ -201,9 +254,7 @@ def _check_goal(path, sc) -> None:
         w = f"{where}.actions[{i}]"
         if not isinstance(a, dict):
             raise ScenarioError(f"{w} must be a table")
-        unknown = set(a) - {"id", "when", "send", "key", "then", "approve", "on"}
-        if unknown:
-            raise ScenarioError(f"{w}: unknown key(s) {sorted(unknown)}")
+        _refuse_unknown(w, a, {"id", "when", "send", "key", "then", "approve", "on"})
         aid = a.get("id")
         if not isinstance(aid, str) or not _ACTION_ID.match(aid) or aid in GOAL_RESERVED:
             raise ScenarioError(f"{w}.id must be [a-z][a-z0-9_]* and not one of {GOAL_RESERVED}")
@@ -242,6 +293,14 @@ class TomlScenario:
         with open(path, "rb") as fh:
             doc = tomllib.load(fh)
 
+        # Closed schema, checked before any field is read (module docstring).
+        _refuse_unknown(str(path), doc, _TABLES, what="table")
+        for table, allowed in _TABLES.items():
+            if table in doc:
+                if not isinstance(doc[table], dict):
+                    raise ScenarioError(f"{path}: {table} must be a table — write [{table}]")
+                _refuse_unknown(f"{path}: [{table}]", doc[table], allowed)
+
         sc = doc.get("scenario") or {}
         self.name = sc.get("name", path.stem)
         self.subject = sc.get("subject")
@@ -251,6 +310,16 @@ class TomlScenario:
         # container bench (template = image ref; default per config
         # otherwise, i.e. the sbx tier).
         self.bench = sc.get("bench")
+        # A suite that only a bench can prove (it deploys a database through
+        # the bench's Docker, say) names WHY here. The bench-free dry-run then
+        # reports it UNVERIFIED with that reason instead of failing on the
+        # tools it lacks; the arena runs it as any other suite. A reason is
+        # required: an unexplained skip is how checks rot.
+        self.bench_only = sc.get("bench_only", "")
+        if "bench_only" in sc and (not isinstance(self.bench_only, str)
+                                   or not self.bench_only.strip()):
+            raise ScenarioError(f"{path}: scenario.bench_only must be a non-empty string: "
+                                f"why only a bench can prove this suite")
         # What kind of data the scenario touches. "synthetic" is the only
         # value that lets a semantic turn send a screen to a judge (pilot,
         # 2026-09-26); anything else, or nothing, keeps every screen inside
@@ -302,18 +371,18 @@ class TomlScenario:
 
         self.steps = list((doc.get("oracle") or {}).get("steps", []))
         verify = doc.get("verify") or {}
-        self.files = list(verify.get("files", []))
-        self.commands = list(verify.get("commands", []))
+        self.files = _array_of_tables(path, verify, "verify.files")
+        self.commands = _array_of_tables(path, verify, "verify.commands")
         # Soft judgments of the final screen: reported, never the verdict.
-        self.judge_checks = list(verify.get("judge", []))
+        self.judge_checks = _array_of_tables(path, verify, "verify.judge")
 
         driver = doc.get("driver") or {}
         self.driver_command = driver.get("command")
-        self.turns = list(driver.get("turns", []))
+        self.turns = _array_of_tables(path, driver, "driver.turns")
         # A goal-driven pilot: a goal and a CLOSED set of actions; the judge
         # picks one action per step from the screen (README, Goal pilots).
         self.goal = driver.get("goal", "")
-        self.actions = list(driver.get("actions", []))
+        self.actions = _array_of_tables(path, driver, "driver.actions")
         self.max_steps = driver.get("max_steps", 25)
         self.p_act = driver.get("p_act", 0.8)
         self.goal_every = driver.get("every", 2)
@@ -341,6 +410,8 @@ class TomlScenario:
                 raise ScenarioError(
                     f"{path}: driver.turns[{i}].type must be "
                     f"answer|expect|pick|abort|key")
+            _refuse_unknown(f"{path}: driver.turns[{i}] ({kind})", t,
+                            _TURN_KEYS[kind] | {"type"})
             if kind == "expect" and ("pattern" in t) == ("judge" in t):
                 raise ScenarioError(
                     f"{path}: driver.turns[{i}] (expect) needs exactly one of "
@@ -385,9 +456,11 @@ class TomlScenario:
                 f"{path}: [semantic] runs / pass_rate_min are for judged suites only — a "
                 f"deterministic suite must pass every time")
         for i, f in enumerate(self.files):
+            _refuse_unknown(f"{path}: verify.files[{i}]", f, _FILE_KEYS)
             if "path" not in f:
                 raise ScenarioError(f"{path}: verify.files[{i}] missing path")
         for i, c in enumerate(self.commands):
+            _refuse_unknown(f"{path}: verify.commands[{i}]", c, _COMMAND_KEYS)
             if "command" not in c:
                 raise ScenarioError(f"{path}: verify.commands[{i}] missing command")
 
