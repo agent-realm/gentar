@@ -50,9 +50,13 @@ Adopters pin a release tag, not a branch.
   whole set), and `run.sh` clears the slots at once, gives each value its
   name inside the script, and exports a name only while the coordinator of
   a suite that declares it (`credentials` or `pass_env`) runs, so another
-  suite's coordinator never sees it. Routed values are redacted
-  from reports. Reserved names (the kit's own, GitHub's, the runner's, and
-  names that steer a shell, loader, git, ssh, docker or python) are refused,
+  suite's coordinator never sees it; a routed name set by hand, with no
+  slot, goes the same one way. Routed values are scrubbed from reports and
+  spans, a `pass_env` declaration included (the kit names them to the
+  coordinator in `GENTAR_REDACT_NAMES`). Reserved names (the kit's own,
+  GitHub's, the runner's, bash's read-only variables, and names that steer
+  a shell, the loader or libc, the locale, git, ssh, docker, python, node,
+  perl, ruby or java) are refused,
   and `--check` flags a route no suite declares. `gentar/run.sh --route`
   reports names and state, never values. The workflow stays byte-identical,
   so a subject with its own secret no longer has to fork it.

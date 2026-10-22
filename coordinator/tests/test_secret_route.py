@@ -85,7 +85,11 @@ class RouteNamesTest(unittest.TestCase):
                     "ACTIONS_RUNTIME_TOKEN", "RUNNER_TEMP", "ANTHROPIC_API_KEY",
                     "TYPESAFE_API_KEY", "PATH", "HOME", "IFS", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES",
                     "BASH_ENV", "DOCKER_HOST", "GIT_SSH_COMMAND", "SSH_AUTH_SOCK",
-                    "PYTHONPATH", "NODE_OPTIONS", "OTEL_EXPORTER_OTLP_ENDPOINT"):
+                    "PYTHONPATH", "NODE_OPTIONS", "OTEL_EXPORTER_OTLP_ENDPOINT",
+                    # agy on #79: libc and locale, read-only bash variables, other runtimes
+                    "GLIBC_TUNABLES", "MALLOC_ARENA_MAX", "GCONV_PATH", "LC_ALL", "BASHOPTS",
+                    "UID", "EUID", "PPID", "NODE_PATH", "PERL5OPT", "RUBYOPT",
+                    "JAVA_TOOL_OPTIONS", "HOSTALIASES", "RES_OPTIONS"):
             with self.subTest(name=bad):
                 self.refused([bad])
 
@@ -281,7 +285,12 @@ class RunShRouteTest(unittest.TestCase):
 FAKE_DOCKER = r"""#!/usr/bin/env bash
 # a fake docker: the arena's services are "up" and healthy; a coordinator
 # run records which -e names it was given and what its environment holds,
-# and writes the report the run loop looks for.
+# and writes the report the run loop looks for. Any other call that can see
+# a routed value says so.
+case " $* " in
+  *" coordinator run "*) ;;
+  *) [ -z "${SUBJECT_KEY:-}" ] || echo "other call sees SUBJECT_KEY: $1 $2" >> "$FIX/docker.log" ;;
+esac
 case "$*" in
   ps\ *) echo cid1; exit 0 ;;
   inspect\ *) echo healthy; exit 0 ;;
@@ -347,9 +356,10 @@ class RunPathRouteTest(unittest.TestCase):
         (self.tmp / "bin" / "docker").chmod(0o755)
         (self.tmp / "key").write_text("not-a-real-key\n")
 
-    def run_suites(self, *suites):
-        _, repo = kit_repo('[secrets]\nroute = ["SUBJECT_KEY", "OTHER_KEY"]\n',
-                           {"needs-key": 'credentials = ["SUBJECT_KEY"]\n', "plain": ""})
+    SCENARIOS = {"needs-key": 'credentials = ["SUBJECT_KEY"]\n', "plain": ""}
+
+    def run_suites(self, *suites, slot=True, **env):
+        _, repo = kit_repo('[secrets]\nroute = ["SUBJECT_KEY", "OTHER_KEY"]\n', self.SCENARIOS)
         self.addCleanup(shutil.rmtree, repo.parent, ignore_errors=True)
         e = {k: v for k, v in os.environ.items()
              if not k.startswith(("GENTAR_", "GITHUB_")) and k not in ("SUBJECT_KEY", "OTHER_KEY", "CI")}
@@ -357,7 +367,9 @@ class RunPathRouteTest(unittest.TestCase):
                  GENTAR_REPO_URL=str(self.engine), GENTAR_REF="main",
                  GENTAR_BENCH_HOST="bench.test", GENTAR_BENCH_USER="u",
                  GENTAR_BENCH_KEY_FILE=str(self.tmp / "key"), GENTAR_LOCK_DIR=str(self.tmp),
-                 GENTAR_ROUTE_1=SECRET)
+                 **env)
+        if slot:
+            e["GENTAR_ROUTE_1"] = SECRET
         r = subprocess.run(["/bin/bash", "gentar/run.sh", *suites], cwd=repo, env=e,
                            capture_output=True, text=True, timeout=120)
         self.assertNotIn(SECRET, r.stdout + r.stderr, "a routed value was printed")
@@ -380,8 +392,99 @@ class RunPathRouteTest(unittest.TestCase):
         self.assertEqual(has, ["suite=needs-key env-has=SUBJECT_KEY value-ok=yes"] * 2)
         self.assertNotIn("OTHER_KEY", log)                     # routed, but no slot value
         self.assertNotIn("slot-in-env", log)                  # slots never reach a child
+        self.assertNotIn("other call sees", log)
         # every report is redacted with the routed value in view
         self.assertEqual(red.splitlines(), ["redact sees SUBJECT_KEY"] * 3)
+
+    def test_the_coordinator_is_told_which_names_carry_a_secret(self):
+        # names only; it scrubs them even when declared in pass_env
+        r, log, _ = self.run_suites("needs-key", "plain")
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        given = [l for l in log.splitlines() if " given=" in l]
+        self.assertIn(" GENTAR_REDACT_NAMES=SUBJECT_KEY", given[0])
+        self.assertNotIn("GENTAR_REDACT_NAMES", given[1])
+
+    def test_without_a_slot_a_routed_name_still_goes_only_to_its_suite(self):
+        # set (and exported) by the caller by hand -- a developer's shell, a
+        # runner's environment -- with no slot: before, the route was not
+        # even read, and the name went in FORWARD to every suite (agy on #79)
+        r, log, red = self.run_suites("needs-key", "plain", slot=False, SUBJECT_KEY=SECRET)
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        given = [l for l in log.splitlines() if " given=" in l]
+        self.assertIn(" SUBJECT_KEY", given[0])
+        self.assertNotIn("SUBJECT_KEY", given[1])
+        has = [l for l in log.splitlines() if "env-has=" in l]
+        self.assertEqual(has, ["suite=needs-key env-has=SUBJECT_KEY value-ok=yes"])
+        self.assertNotIn("other call sees", log)
+        self.assertEqual(red.splitlines(), ["redact sees SUBJECT_KEY"] * 2)
+
+    def test_a_name_in_an_inline_comment_is_not_a_declaration(self):
+        self.SCENARIOS = {"needs-key": 'credentials = ["SUBJECT_KEY"]\n',
+                          "commented": 'pass_env = ["PLAIN_VAR"]  # was "SUBJECT_KEY"\n'}
+        r, log, _ = self.run_suites("commented", "needs-key")
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        given = [l for l in log.splitlines() if " given=" in l]
+        self.assertEqual(given[0].split()[0], "suite=commented")
+        self.assertNotIn("SUBJECT_KEY", given[0])
+        self.assertIn(" SUBJECT_KEY", given[1])
+
+
+class CoordinatorScrubsRoutedNamesTest(unittest.TestCase):
+    """The engine half: a routed secret a suite declares in pass_env, not as
+    a credential, is scrubbed from the report, the CI log and the spans when
+    the kit names it in GENTAR_REDACT_NAMES (agy on #79). pass_env is
+    otherwise for non-secrets, and stays readable."""
+
+    def run_leaky(self, **extra):
+        from unittest import mock
+        from gentar import coordinator as coord
+        from gentar.config import Config
+        from gentar.spans import Spans
+        printed, rows, written = [], [], []
+
+        class Bench:
+            push_before_create = True
+            def workspace(self, name): return f"/ws/{name}"
+            def preflight(self): return []
+            def create(self, *a, **k): raise RuntimeError(f"create failed: export K={SECRET}")
+            def template_digest(self, tag): return ""
+            def exec(self, *a, **k): return 1, ""
+            def rm(self, name): pass
+
+        def insert(self, *a):
+            rows.append(a)
+
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            (Path(d) / "leaky.toml").write_text(
+                '[scenario]\nname = "leaky"\npass_env = ["SUBJECT_KEY"]\n'
+                '[oracle]\nsteps = ["true"]\n')
+            env = {"GENTAR_SCENARIOS_DIR": d, "GENTAR_BENCH_HOST": "bench.example.org",
+                   "GENTAR_BENCH_USER": "arena", "GENTAR_REPORT_DIR": out,
+                   "SUBJECT_KEY": SECRET, **extra}
+            with mock.patch.dict(os.environ, env, clear=True):
+                c = Config()
+                with mock.patch.object(coord, "make_bench", return_value=Bench()), \
+                     mock.patch.object(Spans, "_insert", insert), \
+                     mock.patch("builtins.print",
+                                side_effect=lambda *a, **k: printed.append(" ".join(map(str, a)))):
+                    rc = coord._run("leaky", c)
+            for p in Path(out).glob("report-*.md"):
+                written.append(p.read_text())
+        self.assertEqual(rc, 1)
+        self.assertTrue(written)
+        return "\n".join(written), "\n".join(printed), repr([r for r in rows if "run.end" in r])
+
+    def test_a_routed_pass_env_secret_is_scrubbed_everywhere(self):
+        report, log, spans = self.run_leaky(GENTAR_REDACT_NAMES="SUBJECT_KEY not;a-name")
+        self.assertNotIn(SECRET, report)
+        self.assertNotIn(SECRET, log)
+        self.assertNotIn(SECRET, spans)
+        self.assertIn("«redacted:SUBJECT_KEY»", report)
+
+    def test_unnamed_pass_env_stays_readable(self):
+        # which is why the kit has to name the routed ones
+        report, _, _ = self.run_leaky()
+        self.assertIn(SECRET, report)
 
 
 if __name__ == "__main__":

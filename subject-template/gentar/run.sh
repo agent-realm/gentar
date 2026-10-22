@@ -36,12 +36,10 @@ set -euo pipefail
 # declares that name. Never printed, never written to disk.
 ROUTE_SLOTS=8
 ROUTE_VALS=()
-ROUTE_ANY=0
 _i=1
 while [ "$_i" -le "$ROUTE_SLOTS" ]; do
   _v="GENTAR_ROUTE_$_i"
   ROUTE_VALS[$_i]=${!_v:-}
-  [ -z "${ROUTE_VALS[$_i]}" ] || ROUTE_ANY=1
   unset "$_v"
   _i=$((_i + 1))
 done
@@ -374,14 +372,17 @@ extract_env_names() {         # files... -> one env var name per line
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
     inarr {
-      line = $0
+      # an inline comment declares nothing: `credentials = ["A"]  # was "B"`
+      # must not route B to this suite (agy on #79), as credential_groups
+      # already reads it
+      code = $0; sub(/#.*/, "", code); line = code
       # either TOML quote style — a 'literal' name used to forward nothing,
       # and the coordinator then refused credentials the caller had set
       while (match(line, /["\047][A-Za-z_][A-Za-z0-9_]*["\047]/)) {
         print substr(line, RSTART + 1, RLENGTH - 2)
         line = substr(line, RSTART + RLENGTH)
       }
-      depth += gsub(/\[/, "[") - gsub(/\]/, "]")
+      depth += gsub(/\[/, "[", code) - gsub(/\]/, "]", code)
       if (depth <= 0) inarr = 0
     }
   '
@@ -414,25 +415,30 @@ judge_ready() {
 # from here inherits it. It is exported just before the coordinator starts,
 # and only when a suite about to run declares that name. Done before the
 # sweep, which must see a routed credential to pick the suites needing it.
+# Read on every run, slots or not: a routed name the caller set by hand (a
+# developer's shell, a runner's own environment) goes the same one way, to
+# the suites declaring it, and never in FORWARD to all (agy on #79).
 ROUTE_NAMES=()
-if [ "$ROUTE_ANY" = 1 ] || [ "$ROUTE_ONLY" = 1 ]; then
-  routes=$(python3 "$HERE/plan.py" route) || exit 2
-  _i=0
-  for _n in $routes; do
-    _i=$((_i + 1))
-    ROUTE_NAMES+=("$_n")
-    if [ -n "${ROUTE_VALS[$_i]:-}" ]; then
-      printf -v "$_n" '%s' "${ROUTE_VALS[$_i]}"
-    fi
-  done
-  # A value in a slot the policy names no secret for: the workflow and the
-  # policy disagree, or a slot was set by hand. Dropped, and said by number.
-  while [ "$_i" -lt "$ROUTE_SLOTS" ]; do
-    _i=$((_i + 1))
-    [ -z "${ROUTE_VALS[$_i]:-}" ] \
-      || echo "secret route: slot $_i holds a value but [secrets] route names no secret for it; dropped" >&2
-  done
-fi
+routes=$(python3 "$HERE/plan.py" route) || exit 2
+_i=0
+for _n in $routes; do
+  _i=$((_i + 1))
+  ROUTE_NAMES+=("$_n")
+  if [ -n "${ROUTE_VALS[$_i]:-}" ]; then
+    printf -v "$_n" '%s' "${ROUTE_VALS[$_i]}"
+  fi
+  # Already exported by the caller? Then printf -v kept the export, and
+  # every child up to the first suite would inherit it: take it back.
+  # shellcheck disable=SC2163  # the variable NAMED by $_n
+  export -n "$_n"
+done
+# A value in a slot the policy names no secret for: the workflow and the
+# policy disagree, or a slot was set by hand. Dropped, and said by number.
+while [ "$_i" -lt "$ROUTE_SLOTS" ]; do
+  _i=$((_i + 1))
+  [ -z "${ROUTE_VALS[$_i]:-}" ] \
+    || echo "secret route: slot $_i holds a value but [secrets] route names no secret for it; dropped" >&2
+done
 ROUTE_VALS=()
 
 if [ "$ROUTE_ONLY" = 1 ]; then
@@ -1088,14 +1094,20 @@ for s in "$SCENARIO" "$@"; do
   # of the environment the moment it returns, so the next suite's
   # coordinator never sees them.
   ROUTED=()
+  scrub=""
   for _n in ${ROUTE_NAMES[@]+"${ROUTE_NAMES[@]}"}; do
     if [ -n "${!_n:-}" ] && [ -f "$HERE/scenarios/$s.toml" ] \
        && extract_env_names "$HERE/scenarios/$s.toml" | grep -qx "$_n"; then
       # shellcheck disable=SC2163  # the variable NAMED by $_n
       export "$_n"
       ROUTED+=(-e "$_n")
+      scrub="$scrub $_n"
     fi
   done
+  # Names only: the coordinator scrubs the values of what it declares as
+  # credentials, and a suite may declare a routed secret in pass_env, so it
+  # is told which names carry one (agy on #79).
+  [ -z "$scrub" ] || ROUTED+=(-e "GENTAR_REDACT_NAMES=${scrub# }")
   set +e
   GENTAR_SUBJECTS_DIR="$PWD/subjects" \
     arena run --rm --no-deps \
