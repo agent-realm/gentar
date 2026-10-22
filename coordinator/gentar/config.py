@@ -143,8 +143,9 @@ class Config:
             self.scenarios_dirs.insert(0, extra)
 
         # Flake quarantine: comma-separated scenario names. A quarantined
-        # scenario is SKIPPED (exit 0, span skip), never failed — a known
-        # flake must not paint the suite red while its owner investigates.
+        # scenario is SKIPPED (exit 0, span and report skip), never failed —
+        # a known flake must not paint the suite red while its owner
+        # investigates — and never shown as a pass: it ran nothing.
         self.quarantine = {
             s.strip() for s in _opt("GENTAR_QUARANTINE").split(",") if s.strip()
         }

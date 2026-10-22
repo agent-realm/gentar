@@ -37,6 +37,17 @@ Adopters pin a release tag, not a branch.
   blanked, in reports and in exported traces, for a name the docs publish.
   That pairing is now exempt, like `GENTAR_BENCH_HOST=local`. Any other
   account name is still scrubbed.
+- **A quarantined suite gets the same outcome everywhere, and it is never a
+  pass.** Quarantine (`GENTAR_QUARANTINE`) wrote no report: a direct run
+  exited 0 with nothing to read, and the kit's `run.sh`, which expects a
+  report from every terminal outcome, failed the suite with "no report
+  written" (ground-up review A4). The coordinator now prints
+  `QUARANTINED [<suite>]: not run` and writes a report whose verdict is
+  `skip (exit 0)`; the span still says `skip`. The kit reads that verdict,
+  keeps the run's exit code, and ends with
+  `run summary: N suite(s) quarantined, not run: …`, which is also a warning
+  annotation in Actions. The exit code is still 0: a known flake must not
+  turn a run red.
 
 ## 0.10.0 — 2026-10-22
 

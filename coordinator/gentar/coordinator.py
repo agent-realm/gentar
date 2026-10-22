@@ -4,7 +4,8 @@ The run itself is a TWO-ROW scenario span (gauntlet policy, ported):
 a `running` row opens it, the terminal row carries status/duration and
 the full provenance attrs — stamped on BOTH rows, because the terminal
 row is the one a duration-comparison query selects. Exit code is the
-verdict: 0 pass · 1 fail · 2 usage/config refusal. Dispatches Python
+verdict: 0 pass · 1 fail · 2 usage/config refusal; a quarantined suite
+exits 0 and its report and span say skip. Dispatches Python
 builtins (smoke) and TOML scenarios (oracle runner)."""
 
 import os
@@ -282,14 +283,28 @@ def _run_rate(name: str, cfg: Config, runs: int, rate_min: float) -> int:
 def _run(name: str, cfg: Config | None = None) -> int:
     cfg = cfg or Config()
 
-    # -- quarantine: skip, never fail -----------------------------------
+    # -- quarantine: not run — neither a pass nor a failure -------------
+    # Exit 0, so a known flake cannot turn a sweep red while its owner
+    # investigates. But nothing was checked, so the line below, the span
+    # and the report all say SKIP, never PASS. The report also keeps the
+    # rule that every terminal outcome writes one: without it the kit read
+    # a quarantined suite as broken reporting and failed it (rc 1), while
+    # a direct caller saw a silent 0.
     if name in cfg.quarantine:
-        print(f"SKIP [{name}]: quarantined (known flake — not a failure)")
+        print(f"QUARANTINED [{name}]: not run (GENTAR_QUARANTINE) — neither a pass nor a failure")
         spans = Spans(cfg)
         skip_id = new_run_id(cfg.name_prefix)
         spans.emit(ARENA_SUBJECT, skip_id, name, "run", "skip",
                    attrs={"quarantined": "true"},
                    detail="quarantined scenario skipped")
+        report = RunReport(
+            scenario=name, run_id=skip_id, subject=ARENA_SUBJECT,
+            reproduce=f"docker compose run --rm coordinator run {name}",
+            summary=("Quarantined (GENTAR_QUARANTINE): not run. Nothing was "
+                     "checked, so this is not a pass. Remove the name from "
+                     "GENTAR_QUARANTINE to run it."))
+        report.mark("skip", 0)
+        _write_report(report, cfg)
         return 0
 
     try:

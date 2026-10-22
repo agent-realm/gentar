@@ -351,7 +351,8 @@ a feature.
 ### The fix loop
 
 This is what the arena is *for*. Every terminal outcome — pass, fail,
-refusal — writes `gentar/reports/report-<run_id>.md` stating what ran
+refusal, and skip for a quarantined suite — writes
+`gentar/reports/report-<run_id>.md` stating what ran
 (every step, with its output), what was asserted, what it actually saw,
 and a reproduce command. On a failure that file is a work order, not a
 log:

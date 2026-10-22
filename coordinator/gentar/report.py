@@ -1,7 +1,8 @@
 """Run report v1 — the artifact that closes the loop: run a scenario,
 get a markdown report stating exactly what happened, feed it to an
 agent (or a human) to fix. Written on EVERY terminal outcome of a run
-(pass, fail, refuse); the filename carries the run id.
+(pass, fail, refuse, and skip for a quarantined suite that did not run);
+the filename carries the run id.
 
 The report states facts the way an agent needs them: what ran, in what
 order, with what output, which assertions failed and what they saw."""
@@ -54,7 +55,7 @@ class RunReport:
     # agent-in-the-loop verdict. Tail-rendered; values of declared
     # credentials never appear (they are env, not output).
     transcript: str = ""
-    verdict: str = "pass"          # pass | fail | refuse
+    verdict: str = "pass"          # pass | fail | refuse | skip (quarantined, not run)
     exit_code: int = 0
     error: str = ""
     # Things that did not change the verdict but could explain it — e.g. a
