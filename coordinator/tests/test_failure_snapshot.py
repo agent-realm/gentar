@@ -141,6 +141,20 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(report.failure, {})
         self.assertNotIn("Failure snapshot", report.markdown())
 
+    def test_a_program_that_ended_badly_leaves_a_snapshot(self):
+        # #87's exit-status failure is a failure like any other turn's
+        class Crashed(FakeDriver):
+            def ended(self, settle=10.0):
+                return (3, None)
+        sc = load(BASE)
+        report = RunReport(scenario="tui", run_id="r1")
+        with mock.patch.object(scripted, "PtyDriver", Crashed):
+            with self.assertRaises(scripted.TurnFailure) as cm:
+                scripted.run_turns(sc, FakeBench(), "r1", spans(), report=report)
+        self.assertIn("exited 3", str(cm.exception))
+        self.assertTrue(report.failure)
+        self.assertNotIn(SECRET, report.failure["screen"])
+
 
 class PlainTimeoutTest(unittest.TestCase):
     """GNU timeout's child is a background process group: a TUI under it is
