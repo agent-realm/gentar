@@ -41,6 +41,15 @@ docs = true            # the docs standard, checked by --check (missing, not
 # allow_drift = []     # kit files you have deliberately changed; --check
                        # then notes the difference instead of failing
 
+[secrets]
+route = []             # repository secrets the bench job receives BY NAME,
+                       # for suites that declare them (`credentials` or
+                       # `pass_env`), e.g. ["SUBJECT_READ_KEY"]. Up to 8.
+                       # Only these reach run.sh, and it forwards one to the
+                       # coordinator only when a suite about to run declares
+                       # it. Names the kit wires itself (BENCH_SSH_KEY,
+                       # ANTHROPIC_*, TYPESAFE_API_KEY, GENTAR_*) are refused.
+
 # [stage]
 # git = true           # ship git history (commits, tags) into the bench, for
 #                      # suites that clone their own release tags. A fresh .git

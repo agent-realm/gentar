@@ -43,6 +43,8 @@ _CRED_IN_URL = re.compile(r"https?://[^/\s\"']*@|[a-z][a-z0-9+.-]*://[^/\s@:\"']
                           re.IGNORECASE)
 _CRED_KEYS = re.compile(r"^\s*(extraheader|cookiefile)\s*=|x-access-token|authorization:",
                         re.IGNORECASE | re.MULTILINE)
+# An env var name, as the kit passes them in GENTAR_REDACT_NAMES.
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def subject_credential_problems(subject_dir: str) -> list[str]:
@@ -523,10 +525,15 @@ def _run(name: str, cfg: Config | None = None) -> int:
         _write_report(report, cfg)
         return 2
     spans = Spans(cfg)
-    # Scrub the values of what this run declared from everything it exports.
+    # Scrub the values of what this run declared from everything it exports:
+    # its credentials, and every name the kit says carries a secret
+    # (GENTAR_REDACT_NAMES, names only: the routed secrets it exported for
+    # this suite, which may be declared in pass_env, not only as credentials).
     if scenario:
-        spans.redactor.redact_values(
-            [(n, os.environ.get(n, "")) for n in scenario.credential_names()])
+        names = list(scenario.credential_names())
+        names += [n for n in os.environ.get("GENTAR_REDACT_NAMES", "").split()
+                  if _ENV_NAME.fullmatch(n) and n not in names]
+        spans.redactor.redact_values([(n, os.environ.get(n, "")) for n in names])
     run_id = new_run_id(cfg.name_prefix)
     report = RunReport(
         scenario=name, run_id=run_id, subject=subject,

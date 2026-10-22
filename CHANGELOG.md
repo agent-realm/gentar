@@ -44,6 +44,22 @@ Adopters pin a release tag, not a branch.
   is retired, and `docs-honesty-gentar` checks the new claims.
 
 ### Added
+- **`[secrets] route` — a subject's own secrets reach its suites by name.**
+  Declare up to 8 repository secrets in `gentar/policy.toml`; the kit's bench
+  job looks each one up in a fixed slot (`secrets[<declared name>]`, never the
+  whole set), and `run.sh` clears the slots at once, gives each value its
+  name inside the script, and exports a name only while the coordinator of
+  a suite that declares it (`credentials` or `pass_env`) runs, so another
+  suite's coordinator never sees it; a routed name set by hand, with no
+  slot, goes the same one way. Routed values are scrubbed from reports and
+  spans, a `pass_env` declaration included (the kit names them to the
+  coordinator in `GENTAR_REDACT_NAMES`). Reserved names (the kit's own,
+  GitHub's, the runner's, bash's read-only variables, and names that steer
+  a shell, the loader or libc, the locale, git, ssh, docker, python, node,
+  perl, ruby or java) are refused,
+  and `--check` flags a route no suite declares. `gentar/run.sh --route`
+  reports names and state, never values. The workflow stays byte-identical,
+  so a subject with its own secret no longer has to fork it.
 - **`bin/bench-host-provision`** builds an Ubuntu 24.04 bench host. The
   isolated bench account (`arena` by default) has its password locked, no
   sudo, and the groups its own plus `kvm`. The host gets rootless Docker
