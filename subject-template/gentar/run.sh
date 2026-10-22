@@ -1114,8 +1114,9 @@ for s in "$SCENARIO" "$@"; do
   found=0
   while IFS= read -r f; do
     staged="$STAGE/$(basename "$f")"
-    sed "s|^Reproduce: \`.*\`|Reproduce: \`gentar/run.sh $s\`|" "$f" \
-      > "$staged" && found=1
+    # Owner-only, like the engine's original (umask, so no wider moment).
+    (umask 077; sed "s|^Reproduce: \`.*\`|Reproduce: \`gentar/run.sh $s\`|" "$f" \
+      > "$staged") && found=1
     # gentar/reports/ is what CI publishes. A report that cannot be
     # redacted does not go there — the original stays in the arena's out/
     # for the fix loop, and the run's verdict is unchanged (agy review).
