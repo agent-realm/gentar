@@ -326,6 +326,11 @@ start_arena() {
 cmd_run() {
   [ $# -ge 1 ] || { echo "usage: bin/arena run <scenario> [scenario...]" >&2; exit 64; }
   require_bench_key
+  # The report dir's bind source, made by this user before compose can make
+  # it: a rootful daemon would create it as root, and the user could then
+  # neither read nor clean the reports (the coordinator no longer opens the
+  # dir to everyone, D4).
+  mkdir -p out
   arm_traps
   compose build coordinator
   start_arena
