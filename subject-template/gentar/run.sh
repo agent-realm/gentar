@@ -472,20 +472,31 @@ fi
 if [ "$SWEEP" = 1 ]; then
   runnable=""
   judged_skipped=""
+  skipped=""
   for f in "$HERE"/scenarios/*.toml; do
     [ -f "$f" ] || continue
     s=$(basename "$f" .toml)
     if ! credentials_present "$f"; then
-      echo "skipping $s — no credential group of it is fully set" >&2
+      why="no credential group of it is fully set"
     elif is_pr_event && judged "$f"; then
-      echo "skipping $s — judged suites never run on a pull request (phase 2 only)" >&2
+      why="judged suites never run on a pull request (phase 2 only)"
     elif ! judge_ready "$f"; then
-      echo "skipping $s — it has judged turns and TYPESAFE_API_KEY is not set" >&2
+      why="it has judged turns and TYPESAFE_API_KEY is not set"
       judged_skipped="$judged_skipped $s"
     else
       runnable="$runnable $s"
+      continue
     fi
+    echo "skipping $s — $why" >&2
+    skipped="$skipped$s"$'\t'"$why"$'\n'
   done
+  # Every suite this sweep skipped, one per line (name TAB reason), and an
+  # empty file when it skipped none. The sweep's exit code covers only the
+  # suites it ran; an arena mirror reads this before it calls the sweep a
+  # proof of the commit (subject-template/mirror/arena, "phase 2 ran every
+  # suite").
+  mkdir -p "$HERE/reports"
+  printf '%s' "$skipped" > "$HERE/reports/sweep-skipped.txt"
   # Said once more, loudly, at the end: a phase 2 that skipped its judged
   # suites can finish green without having run them (claude-playbooks-ac,
   # from Codex on cockpit's re-pin). In Actions it is a warning annotation.
@@ -803,14 +814,34 @@ if [ "$LOCAL_BENCH" = 1 ]; then
     exit 2
   fi
   ARENA_FILES+=(-f compose.local-bench.yml)
-  export GENTAR_LOCAL_UID GENTAR_LOCAL_GID GENTAR_LOCAL_HOME GENTAR_BENCH_KEY_FILE
-  GENTAR_LOCAL_UID=$(id -u); GENTAR_LOCAL_GID=$(id -g); GENTAR_LOCAL_HOME=$HOME
+  export GENTAR_LOCAL_HOME GENTAR_BENCH_KEY_FILE
+  GENTAR_LOCAL_HOME=$HOME
   GENTAR_BENCH_KEY_FILE=/dev/null     # the compose secret needs a file; there is no key
   # Create the workspace root as this user before compose binds it: a
   # missing bind source is created by Docker as root, and the coordinator
   # (this user) could then not make a bench's workspace in it.
   export GENTAR_BENCH_WORKSPACE_ROOT="${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}"
   mkdir -p "$GENTAR_BENCH_WORKSPACE_ROOT"
+fi
+# One Docker daemon for the whole run (the engine's bin/docker-identity):
+# every docker call below, the socket a container mounts (GENTAR_DOCKER_SOCK),
+# and in local mode the uid the coordinator runs as -- rootless: 0:0, which
+# is this user; rootful: this user; cannot tell: refused. Read as values,
+# never eval'd; GENTAR_LOCAL_UID/GID set by a caller are overwritten, not
+# used. Local mode refuses an engine without the script (it would guess).
+if [ -x "$ARENA/bin/docker-identity" ]; then
+  if [ "$LOCAL_BENCH" = 1 ]; then ident=$("$ARENA/bin/docker-identity" --local) || exit 2
+  else ident=$("$ARENA/bin/docker-identity") || exit 2; fi
+  ident_get() { printf '%s\n' "$ident" | sed -n "s/^$1=//p"; }
+  export GENTAR_DOCKER_SOCK; GENTAR_DOCKER_SOCK=$(ident_get sock)
+  if [ -n "$(ident_get host)" ]; then export DOCKER_HOST; DOCKER_HOST=$(ident_get host); fi
+  if [ "$LOCAL_BENCH" = 1 ]; then
+    export GENTAR_LOCAL_UID GENTAR_LOCAL_GID
+    GENTAR_LOCAL_UID=$(ident_get uid); GENTAR_LOCAL_GID=$(ident_get gid)
+  fi
+elif [ "$LOCAL_BENCH" = 1 ]; then
+  echo "GENTAR_BENCH_HOST=local needs an engine with bin/docker-identity (GENTAR_REF $REF has none): it decides the coordinator's uid on rootless Docker" >&2
+  exit 2
 fi
 # Telemetry destination (optional; AGENTS.md decision 6): the arena's
 # collector forwards what the coordinator scrubbed to GENTAR_OTLP_EXPORT
