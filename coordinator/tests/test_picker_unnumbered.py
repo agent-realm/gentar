@@ -100,6 +100,9 @@ class SkippedPickTest(unittest.TestCase):
             def wait_done(self, s):
                 return True
 
+            def ended(self, settle=10.0):
+                return (0, None)        # exited cleanly: its status counts since #87
+
             def close(self):
                 pass
 
