@@ -32,6 +32,12 @@ It contains:
   cause is;
 - **every assertion**, with what it checked and what it actually saw;
 - the **driver transcript**, when a driver ran;
+- a **failure snapshot**, when a driver turn failed: the rendered last
+  screen, the raw tail of the pty byte stream with escapes shown as `\xNN`
+  (a TUI waiting on a terminal query shows its `\x1b[6n`), the process
+  tree inside the bench, and the output of the scenario's
+  `[on_failure] commands`. Verify does not run after a failed turn, so
+  this is the session's state at the moment it stopped;
 - **Soft judgments**, when the scenario has `[[verify.judge]]` checks.
 
 Hand the report to an agent with "fix the repo, rerun the suite, iterate

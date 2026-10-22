@@ -52,7 +52,9 @@ pass_env = ["ANTHROPIC_DEFAULT_SONNET_MODEL"]
 # failure leaves it to kill the TUI, wait_done then sees EOF and the
 # verdict comes from the file — an honest bounded failure.
 # Startup update/telemetry disabled (bench egress hangs on them).
-command = 'cd "$WORKSPACE_DIR" && DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout 600 claude --dangerously-skip-permissions'
+# `timeout --foreground`: plain timeout puts claude in a background process
+# group, where its first tty read stops it with SIGTTIN (cockpit, 2026-10-01).
+command = 'cd "$WORKSPACE_DIR" && DISABLE_AUTOUPDATER=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 timeout --foreground 600 claude --dangerously-skip-permissions'
 
 # --- onboarding (first run in a fresh bench) ------------------------
 [[driver.turns]]

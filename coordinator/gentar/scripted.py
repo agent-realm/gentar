@@ -19,6 +19,38 @@ class TurnFailure(AssertionError):
     pass
 
 
+PS_FOREST = ("ps -eo pid,ppid,stat,tty,etime,args --forest 2>/dev/null "
+             "|| ps -ef 2>/dev/null || echo 'no ps on this bench'")
+_CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def failure_snapshot(driver, bench, run_id: str, scenario, scrub) -> dict:
+    """What the pilot's session looked like when a turn failed: the rendered
+    last screen, the raw tail of the byte stream (escapes visible, so a
+    TUI waiting on a terminal query shows its ESC[6n), the bench's process
+    tree, and the scenario's own [on_failure] commands. Every part is
+    scrubbed and best-effort: a part that cannot be read says why."""
+    def part(fn):
+        try:
+            return scrub(fn())
+        except Exception as exc:                        # noqa: BLE001
+            # the error text is scrubbed too: an ssh or bench error can carry
+            # a host or a value (agy on #61)
+            return scrub(f"(could not read: {type(exc).__name__}: {exc})")[:300]
+
+    snap = {"screen": part(driver.screen),
+            "raw_tail": part(lambda: _CTRL.sub(lambda m: f"\\x{ord(m.group()):02x}",
+                                               driver.transcript[-3000:])),
+            "processes": part(lambda: bench.exec(run_id, PS_FOREST, timeout=30)[1][-8000:]),
+            "on_failure": []}
+    for c in getattr(scenario, "on_failure", []) or []:
+        def run(c=c):
+            rc, out = bench.exec(run_id, c["command"], timeout=int(c.get("timeout", 60)))
+            return f"exit {rc}\n{out[-4000:]}"
+        snap["on_failure"].append({"command": scrub(c["command"]), "output": part(run)})
+    return snap
+
+
 # sbx's one-time first-run wizard: on a fresh bench account, the FIRST
 # interactive (TTY) sbx session shows this screen and waits for a key
 # before running the command, so the scenario's prompt never appears
@@ -61,6 +93,7 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
     driver.start(scenario.driver_command, env=env)
     spans.emit(subject, run_id, name, "driver.start",
                attrs={"command": scenario.driver_command[:120]})
+    failed = False
     try:
         if getattr(scenario, "goal", ""):
             summary = _goal_pilot(driver, judge, scenario, spans, subject, run_id)
@@ -173,7 +206,21 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
         if why:
             raise TurnFailure(f"driver command {why}")
         return f"driver ok: {len(scenario.turns)} turns"
+    except BaseException:
+        failed = True
+        raise
     finally:
+        if failed and report is not None:
+            # A stuck TUI used to leave only the transcript: no screen, no
+            # process list, and verify never ran (cockpit's first-run
+            # scenario, parked after 3 rounds). Captured BEFORE close()
+            # kills the session; never raises over the real failure.
+            try:
+                report.failure = failure_snapshot(driver, bench, run_id, scenario,
+                                                  spans.redactor.scrub)
+            except Exception as exc:                    # noqa: BLE001
+                # never over the real failure, never skipping close()
+                report.failure = {"error": f"snapshot not taken: {type(exc).__name__}"}
         if state is not None:
             # The final screen, for soft [[verify.judge]] checks. Never
             # stored: it lives only in this run's memory.
