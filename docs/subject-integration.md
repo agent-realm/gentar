@@ -8,9 +8,12 @@ GitHub shape actually wired today.
 Two modes, pick either or both. Both are first-class; the difference is
 who operates the arena, not what a subject declares.
 
-- **Central arena** (below) — an arena someone else runs does the work;
-  your repo fires a dispatch. Nothing to host. One bench-host, one
-  dashboard.
+- **Central arena** (below): **the central arena is retired** as of
+  2026-10-12. gentar's public workflow no longer has a bench job, so a
+  dispatch to `agent-realm/gentar` (with `GENTAR_DISPATCH_TOKEN`) has
+  nothing to run. gentar's own bench suites run in a private mirror, and
+  only on gentar's own commits. Use the own arena. The section below is
+  kept as the record of how the mode worked.
 - **Own arena** (bottom) — your repo runs the compose stack itself in
   its own CI. Scenarios live in your repo; any trigger conditions you
   want; the engine is a `git clone` away.
@@ -49,7 +52,9 @@ In return, and these are stable across engine versions within a major:
 
 - **The verdict is the exit code.** `0` pass · `1` fail · `2`
   usage/config refusal. No test-report layer in between; a refusal is
-  never reported as a failing test.
+  never reported as a failing test. A suite quarantined with
+  `GENTAR_QUARANTINE` does not run: it exits `0` so a known flake cannot
+  turn a run red, and its report says `skip`, never pass.
 - **A report for every terminal outcome**, at `out/report-<run_id>.md`
   (own-arena runners copy it into the subject's `gentar/reports/`):
   every step with its output tail, every assertion with what it
@@ -145,11 +150,16 @@ the kit wires it end to end.
 
 ## Trigger tiers
 
+These were the central arena's tiers. gentar's own suites now run them in
+the private mirror after merge
+([CI and releases](reference/ci-and-releases.md)), and a subject runs its
+own tiers in its own arena (the kit's run policy).
+
 | Tier | Fires | Suites |
 |---|---|---|
-| gate | every gentar PR / push, every subject dispatch | deterministic subjectless (smoke, bench-template-verify, otlp-selfreport, budget-sim, scripted pair) |
-| nightly | cron (arena repo) | subject suites behind `GENTAR_BUDGET_CAP`; `agent-smoke` when `ANTHROPIC_API_KEY` is set |
-| dispatch | manual / subject repo | one named scenario, arbitrary gentar ref |
+| gate | was: every gentar PR / push, every subject dispatch | deterministic subjectless (smoke, bench-template-verify, otlp-selfreport, budget-sim, scripted pair) |
+| nightly | was: cron (arena repo) | subject suites behind `GENTAR_BUDGET_CAP`; `agent-smoke` when `ANTHROPIC_API_KEY` is set |
+| dispatch | was: manual / subject repo | one named scenario, arbitrary gentar ref |
 
 ## Credentials (agent-in-the-loop suites)
 
@@ -173,8 +183,17 @@ The contract:
 - **Tier-1 transport: env vars on a throwaway bench.** Present values
   are exported into every oracle step and the pty driver process
   inside the sandbox. The bench dies with the run; nothing persists.
+  They never travel on a command line: each is written into an
+  owner-only file inside the bench over stdin, then read, deleted and
+  applied before the command runs, so no other account on the
+  bench-host sees them in its process list. The osb tier, which types
+  its pty command, refuses a driver scenario that forwards env
+  (`credentials` or `pass_env`) (exit 2).
 - **Names only in the record.** Spans and run reports carry the names
-  a run required, never a value.
+  a run required, never a value. Whatever text a run produces (an
+  error, a step's output, the transcript) passes the run's scrubber
+  before it reaches a report, a span or the CI log, and reports are
+  owner-only files.
 - **Invocation:** the credential must reach the coordinator container —
   `docker compose run --rm -e ANTHROPIC_API_KEY coordinator run agent-smoke`
   (CI maps the `ANTHROPIC_API_KEY` secret to env and passes `-e`).

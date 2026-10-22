@@ -41,8 +41,69 @@ cd "$HERE"
 # Local runs layer compose.rm.yml. The documented compose contract in
 # docker-compose.yml is untouched — `docker compose run --rm coordinator …`
 # still works exactly as the README and CI describe it.
+# Local bench mode: GENTAR_BENCH_HOST=local, from the environment or .env.
+# The arena runs on the bench host itself and calls sbx directly
+# (compose.local-bench.yml): no ssh, no bench key. Spaces and quotes are
+# stripped from either source, as the kit's run.sh and the coordinator
+# read it: an exported "local " was local mode inside the coordinator but
+# not here, so the overlay was missing (agy on #83).
+bench_host_setting() {
+  if [ -n "${GENTAR_BENCH_HOST:-}" ]; then printf '%s' "$GENTAR_BENCH_HOST"
+  elif [ -f .env ]; then sed -n 's/^GENTAR_BENCH_HOST=//p' .env | tail -1
+  fi | tr -d "\"' [:space:]"
+}
+local_bench() { [ "$(bench_host_setting)" = local ]; }
+if local_bench; then
+  export GENTAR_BENCH_HOST=local
+  SBX_PATH=$(command -v sbx 2>/dev/null || true)
+  [ -n "$SBX_PATH" ] || { echo "arena: GENTAR_BENCH_HOST=local but no sbx on PATH" >&2; exit 2; }
+  for d in "$HOME/.local/state/sandboxes" "$HOME/.config/sandboxes" "$HOME/.config/com.docker.sandboxes"; do
+    if [ ! -d "$d" ] || [ ! -O "$d" ]; then
+      echo "arena: $d is missing or not owned by $(id -un) — run sbx login as this user first" >&2
+      exit 2
+    fi
+  done
+  # sbx in the coordinator has no session bus: it reads the Docker login
+  # from files only (a keyring login is invisible there). The folder is the
+  # default account profile, docker/auth/metadata/hub/default in base64.
+  SBX_AUTH="$HOME/.config/com.docker.sandboxes/com.docker.sandboxes-auth/sandboxes-auth"
+  SBX_PROFILE="$SBX_AUTH/ZG9ja2VyL2F1dGgvbWV0YWRhdGEvaHViL2RlZmF1bHQ="
+  if [ "${GENTAR_SBX_AUTH_CHECK:-on}" != off ] && ! ls "$SBX_PROFILE" 2>/dev/null | grep -q .; then
+    echo "arena: sbx has no login in files (no default account profile in $SBX_AUTH); run bin/sbx-file-login once as $(id -un) (GENTAR_SBX_AUTH_CHECK=off skips this check)" >&2
+    exit 2
+  fi
+  export GENTAR_LOCAL_SBX_BIN
+  GENTAR_LOCAL_SBX_BIN=$(readlink -f "$SBX_PATH" 2>/dev/null || echo "$SBX_PATH")
+  export GENTAR_LOCAL_HOME=$HOME
+  # The compose secret still needs a file to mount; there is no key.
+  export GENTAR_BENCH_KEY_FILE=/dev/null
+  # The workspace root must exist, owned by this user, BEFORE compose binds
+  # it: a missing bind source is created by Docker as root, and the
+  # coordinator (this user) then cannot make a bench's workspace in it.
+  export GENTAR_BENCH_WORKSPACE_ROOT="${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}"
+  mkdir -p "$GENTAR_BENCH_WORKSPACE_ROOT"
+fi
+
+# One Docker daemon for the whole run (bin/docker-identity): every docker
+# call below, the socket a container mounts (GENTAR_DOCKER_SOCK), and in
+# local mode the uid the coordinator runs as -- rootless: 0:0, which is this
+# user; rootful: this user; cannot tell: refused. Read as values, never
+# eval'd; GENTAR_LOCAL_UID/GID set by a caller are overwritten, not used.
+if local_bench; then ident=$("$HERE/bin/docker-identity" --local) || exit 2
+else ident=$("$HERE/bin/docker-identity") || exit 2; fi
+ident_get() { printf '%s\n' "$ident" | sed -n "s/^$1=//p"; }
+export GENTAR_DOCKER_SOCK; GENTAR_DOCKER_SOCK=$(ident_get sock)
+if [ -n "$(ident_get host)" ]; then export DOCKER_HOST; DOCKER_HOST=$(ident_get host); fi
+if local_bench; then
+  export GENTAR_LOCAL_UID GENTAR_LOCAL_GID
+  GENTAR_LOCAL_UID=$(ident_get uid); GENTAR_LOCAL_GID=$(ident_get gid)
+fi
+
 compose() {
   local extra=()
+  if local_bench; then
+    extra+=(-f compose.local-bench.yml)
+  fi
   # Telemetry destination (otelcol/export.yaml); require_destination has
   # already refused half of one for every command that starts an arena.
   if [ -n "${GENTAR_OTLP_EXPORT:-}" ] && [ -n "${GENTAR_OTLP_KEY:-}" ]; then
@@ -126,6 +187,7 @@ forward_flags() {             # scenario names... -> FORWARD=(-e A -e B)
 }
 
 require_bench_key() {
+  local_bench && return 0      # local bench mode: no ssh, no key
   local key
   # `config --format json` PRETTY-PRINTS: "bench_ssh_key" and its "file"
   # land on different lines, so a single-line match finds nothing and the
@@ -264,6 +326,11 @@ start_arena() {
 cmd_run() {
   [ $# -ge 1 ] || { echo "usage: bin/arena run <scenario> [scenario...]" >&2; exit 64; }
   require_bench_key
+  # The report dir's bind source, made by this user before compose can make
+  # it: a rootful daemon would create it as root, and the user could then
+  # neither read nor clean the reports (the coordinator no longer opens the
+  # dir to everyone, D4).
+  mkdir -p out
   arm_traps
   compose build coordinator
   start_arena

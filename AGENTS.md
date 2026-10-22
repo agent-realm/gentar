@@ -30,7 +30,9 @@ If you find yourself copying `coordinator/`, `docker-compose.yml` or
 pattern, and it is wrong here.
 
 What you actually copy is one directory: `subject-template/gentar/` (plus
-optionally `subject-template/.github/workflows/gentar-arena.yml`).
+optionally `subject-template/.github/workflows/gentar-arena.yml`, or for a
+PUBLIC repo its variant in `subject-template/mirror/public/`, with
+`subject-template/mirror/arena/` going into the private mirror).
 
 ```
 target-repo/
@@ -60,7 +62,7 @@ determine by reading the repo; do not guess and do not silently default.
 | # | Decision | How to answer it |
 |---|---|---|
 | 1 | **Subject name** | The repo's name — **not** necessarily its directory: in a git worktree the directory is named after the branch. Write it as `subject = "…"` in every scenario; `run.sh` reads it from there and refuses `REPLACE-ME`, a bad name, or scenarios that disagree. Safe to infer; state what you chose. |
-| 2 | **Trigger mode** | **Own arena** (the repo runs the stack itself, needs a self-hosted runner with Docker and reach to a bench-host) or **central dispatch** (a ~10-line job fires `workflow_dispatch` at a central arena, needs `GENTAR_DISPATCH_TOKEN` and an operator who has onboarded the repo). Ask. Outside this organisation, own arena is the only self-service path. **If own arena and the repo is PUBLIC, say this before copying the workflow:** its runner is self-hosted and persistent, and a pull request runs the PR's code on it. The kit's workflow runs only same-repository PRs, but a fork can add its own workflow aimed at that runner — so a public repo needs "Require approval for all external contributors" set, or no PR trigger at all. Let the pilot choose; do not recommend the trigger without the risk. |
+| 2 | **Trigger mode** | **Own arena**: the repo runs the stack itself, and needs a self-hosted runner with Docker and reach to a bench-host. The former **central dispatch** to `agent-realm/gentar` is retired (2026-10-12): gentar's public workflow has no bench job any more, so own arena is the only mode. **If own arena and the repo is PUBLIC, say this before copying the workflow:** its runner is self-hosted and persistent, and a pull request runs the PR's code on it. The kit's workflow runs only same-repository PRs, but a fork can add its own workflow aimed at that runner — so a public repo needs "Require approval for all external contributors" set, or no PR trigger at all. Let the pilot choose; do not recommend the trigger without the risk. **The kit's answer for a public repo is the arena mirror** ([`subject-template/mirror/`](subject-template/mirror/README.md)): no self-hosted runner on the public repo at all, phase 2 in a private mirror that pulls it, `arena/phase2` commit status back. |
 | 3 | **Bench tier** | `sbx` microVM is the default and right for nearly everything. `tart` only if the repo's install is macOS-specific; `osb` / `daytona` only if the pilot already runs those. Ask before choosing anything but the default. |
 | 4 | **What the first suite asserts** | **This is the work.** Read the repo: its README's install instructions, its entry points, what it puts on disk. Propose concrete assertions — a binary that answers `--version`, a config file that appears, a service that responds — and confirm them with the pilot before writing. |
 | 5 | **Run policy** | Which suites run when, written once to `gentar/policy.toml` and then automated. The kit's shape: **phase 1** on every PR and default-branch push (bench-free checks on a GitHub-hosted runner, plus a floor of cheap suites on the bench for pushes), **phase 2** — the full regression — only on dispatch, the `arena` tag or a `v*-rc*` tag, and a release gated on a green phase 2 of its commit (`gentar/release-gate.sh` as the first job of the release workflow). Ask two things: **which suites form the floor**, and **whether a PR may run suites on the bench** (`[phase1] bench = "declared"`). The second puts PR code on the self-hosted runner — on a PUBLIC repo that is the pilot's security call; the kit's default is `"off"`. If the dry-run's `prepare()` needs a toolchain, declare it (`[phase1] setup = { go = "1.21" }`); to also run the checks on macOS userland, `[phase1] os = ["ubuntu-latest", "macos-latest"]`. A suite whose bench template supplies a tool the host lacks goes in `hooks.py`'s `TEMPLATES` — never stub the tool to make a dry-run pass. Show the pilot `gentar/run.sh --plan` for a PR, a main push and a release tag before committing. |
@@ -236,16 +238,26 @@ optionally somewhere to send telemetry and a judge. The full how-to is
 agent:
 
 1. **Bench host:** any Linux box with `sbx` installed and logged in once.
+   On Ubuntu 24.04, `bin/bench-host-provision` builds one with an isolated
+   bench account and rootless Docker (the guide, section 1). Running it on
+   a machine is a stop-and-ask, like registering a runner.
    Check its sandbox network policy and its stored secrets before the first
-   run: the engine refuses an sbx host with stored secrets (exit 2).
+   run: the engine refuses an sbx host with stored secrets (exit 2). When the
+   runner runs ON the bench host, prefer local bench mode
+   (`GENTAR_BENCH_HOST=local`, a repository variable): no SSH account, no
+   bench key and no bench secrets to create, so nothing to ask the pilot to
+   grant beyond the runner itself.
 2. **Runner (own-arena CI):** a self-hosted runner labelled `arena` on a
    host with Docker and reach to the bench host. If the organisation has no
    GitHub-hosted minutes or keeps CI in-house, ask which runner the
    bench-free jobs should use and set `GENTAR_CI_RUNNER` (a JSON runs-on
-   value, never the `arena` label). Setting a variable on someone else's
-   repository or organisation is a stop-and-ask. Give each subject its own
-   compose ports (`GENTAR_CLICKHOUSE_HOST_PORT` / `GENTAR_OTLP_HOST_PORT`
-   repo variables) when several share a host.
+   value, never the `arena` label). On GitHub Free, an organisation
+   variable reaches public repositories only: set it on each private
+   repository, and confirm it took by the plan output's `runner=` line.
+   Setting a variable on someone else's repository or organisation is a
+   stop-and-ask. Give each subject its own compose ports
+   (`GENTAR_CLICKHOUSE_HOST_PORT` / `GENTAR_OTLP_HOST_PORT` repo variables)
+   when several share a host.
 3. **Secrets, by reference only.** Pipe them: never print a value, never
    ask the pilot to paste one.
    - `BENCH_SSH_KEY`, `GENTAR_BENCH_HOST`, `GENTAR_BENCH_USER`;

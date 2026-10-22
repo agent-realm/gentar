@@ -15,6 +15,7 @@ has [the adoption kit](../subject-template/README.md).
 | 06 | [goal-pilot](06-goal-pilot/README.md) | `goal`, `[[driver.actions]]`, goal fixtures | yes | `TYPESAFE_API_KEY` |
 | 07 | [rates-and-soft-checks](07-rates-and-soft-checks/README.md) | `[semantic]` rates, `[[verify.judge]]` | yes | `TYPESAFE_API_KEY` |
 | 08 | [full-subject](08-full-subject/README.md) | `policy.toml`, `hooks.py`, the kit's layout | yes | — |
+| 09 | [public-repo-mirror](09-public-repo-mirror/README.md) | `[arena] bench = "mirror"`, `[phase2] evidence`, `[secrets] route` | in the mirror | a routed secret |
 
 "Dry-run: no" means `gentar/dryrun.py` replays it locally without a bench.
 Suites with credentials are skipped by the dry-run; judged suites need the

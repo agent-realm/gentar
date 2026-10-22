@@ -1,7 +1,8 @@
 """Run report v1 — the artifact that closes the loop: run a scenario,
 get a markdown report stating exactly what happened, feed it to an
 agent (or a human) to fix. Written on EVERY terminal outcome of a run
-(pass, fail, refuse); the filename carries the run id.
+(pass, fail, refuse, and skip for a quarantined suite that did not run);
+the filename carries the run id.
 
 The report states facts the way an agent needs them: what ran, in what
 order, with what output, which assertions failed and what they saw."""
@@ -54,7 +55,7 @@ class RunReport:
     # agent-in-the-loop verdict. Tail-rendered; values of declared
     # credentials never appear (they are env, not output).
     transcript: str = ""
-    verdict: str = "pass"          # pass | fail | refuse
+    verdict: str = "pass"          # pass | fail | refuse | skip (quarantined, not run)
     exit_code: int = 0
     error: str = ""
     # Things that did not change the verdict but could explain it — e.g. a
@@ -69,25 +70,51 @@ class RunReport:
     # When a driver turn failed: the last screen, the raw byte tail, the
     # bench's process tree, [on_failure] output (scripted.failure_snapshot).
     failure: dict = field(default_factory=dict)
+    # The run's scrubber (Spans.redactor.scrub), applied to the whole text
+    # at write time: an error, a step's output or the transcript can carry
+    # a declared credential's value (a timeout's text once carried argv).
+    scrub: object = field(default=None, repr=False, compare=False)
 
     def mark(self, verdict: str, exit_code: int) -> None:
         self.verdict = verdict
         self.exit_code = exit_code
 
     def write(self, directory: str | Path) -> Path:
+        import os
         path = Path(directory) / f"report-{self.run_id}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.markdown())
-        # The report dir is a host bind; the coordinator runs as root in
-        # the container, so root would own the artifacts and the host
-        # user could not clean them (CI workspaces died on EACCES).
-        # World-writable test artifacts are fine — they carry no secrets.
-        import os
-        os.chmod(path, 0o666)
+        text = self.markdown()
+        if self.scrub:
+            text = self.scrub(text)
+        # Owner-only from its first byte (C1): a report holds a run's
+        # errors and transcript, and other accounts on the host have no
+        # business reading them. O_EXCL after an unlink, so a rerun's file
+        # never keeps an older, wider mode.
         try:
-            os.chmod(path.parent, 0o777)
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        # The report dir is a host bind; the coordinator runs as root in the
+        # container, so root would own the artifacts and the host user could
+        # neither read nor clean them (CI workspaces died on EACCES). The kit
+        # creates the dir as that user: the report goes to the dir's owner,
+        # on the open descriptor, never by name (agy on #80: a name in a
+        # world-writable dir can be swapped for a symlink before a chown).
+        # Rootless Docker and local bench mode need nothing.
+        # The dir itself is never changed: no chmod (D4: it used to be opened
+        # 0777 on every write, so any account on the host could plant or
+        # delete reports), and no chown (handing a dir root created to the
+        # parent's owner was a rename race: Codex on #85). The bind source
+        # `./out` is made by the user first: the kit's run.sh and bin/arena.
+        try:
+            st = os.stat(path.parent)
+            if os.geteuid() == 0 and st.st_uid != 0:
+                os.fchown(fd, st.st_uid, st.st_gid)
         except OSError:
             pass
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
         return path
 
     def markdown(self) -> str:

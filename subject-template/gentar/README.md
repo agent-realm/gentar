@@ -11,10 +11,10 @@ can hand to an agent to fix what failed.
 | subject name | `subject = "…"` in every scenario TOML — `run.sh` reads it from there and refuses scenarios that disagree | `<REPO>` |
 | suites | `scenarios/*.toml` — decisions + reality assertions | see below |
 | credentials | `credentials = [names]` per suite — entries are ALTERNATIVES, a list entry is an all-of group (`["KEY", ["TOKEN","BASE_URL"]]` = the key alone, or the token and its endpoint together). None present refuses (exit 2) before a bench exists | per suite |
-| trigger | `.github/workflows/gentar-arena.yml` (and/or a dispatch job into a central arena) | the kit's, unedited |
+| trigger | `.github/workflows/gentar-arena.yml` (the central arena's dispatch job is retired, 2026-10-12) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.9.0` |
+| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.10.0` |
 
 ## Quickstart (local)
 
@@ -204,14 +204,16 @@ workflow's first job asks it what this event should run.
 
 | Event | Runs |
 |---|---|
-| pull request | **phase 1**: bench-free checks on GitHub-hosted runners — `ubuntu-latest`, plus `macos-latest` if `[phase1] os` lists it — or on the self-hosted runner `GENTAR_CI_RUNNER` names (below) (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
+| pull request | **phase 1**: bench-free checks on GitHub-hosted runners — `ubuntu-latest`, plus `macos-latest` if `[phase1] os` lists it — or on the self-hosted runner `GENTAR_CI_RUNNER` names (below; with it set, **only same-repository PRs** get checks, and a fork's PR gets none: an all-skipped run is not a passed phase 1) (`gentar/run.sh --check`: dry-run of every suite, adaptation lint, kit drift). With `[phase1] bench = "declared"`, a same-repo PR also runs the floor plus the suites its body names, on the bench |
 | push to the default branch | **phase 1**: the checks, plus `[phase1] floor` on the bench |
-| dispatch (no suites), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
+| dispatch (no suites; on any ref, a release tag included: a drift run), the `arena` tag, a `v*-rc*` tag | **phase 2**: the full regression — every suite this environment can run — as the job `arena / phase2` (each trigger opts in via `[phase2] on`) |
 | `arena-<suite>` tag, or a dispatch naming suites | exactly those suites (`arena / targeted`; never counts as phase 2) |
-| `v*` tag | nothing — a release is **gated** on a green phase 2 of its commit (below), not tested after it |
+| `v*` tag pushed | nothing — a release is **gated** on a green phase 2 of its commit (below), not tested after it |
 
 A fork's pull request never reaches the self-hosted runner, whatever the
-policy says: the bench job checks that from GitHub's own context. Try any
+policy says: the bench job checks that from GitHub's own context. With
+`GENTAR_CI_RUNNER` set, a fork's PR skips even `plan` and the checks, so
+its run shows every job skipped: that is "not checked", never "passed". Try any
 event locally:
 
 ```bash
@@ -239,6 +241,15 @@ a private repo, say) cannot pass it. Declare the template in `hooks.py`'s
 the suite runs; not staged, it reports `UNVERIFIED (template …)` — named,
 never green by stub, never red by harness; a stager that raises is a
 failure. Undeclared templates run as before.
+
+**Suites only a bench can prove.** A suite that deploys a service through
+the bench's Docker (a database, say) cannot be dry-run on the host. Say so in
+the suite, with the reason: `bench_only = "<why>"` in `[scenario]`. The
+dry-run then reports `UNVERIFIED (bench only: <why>)` and does not run or
+prepare it; phase 1 (`--check`) accepts that, a plain dry-run does not, and
+the arena runs it like any other suite. `GENTAR_DRYRUN_BENCH_ONLY=run` runs it
+anyway on a host that has what the reason names. The reason is required:
+an unexplained skip is how checks rot.
 
 **Gating a release.** Make the first job of your release workflow
 
@@ -356,7 +367,13 @@ runner labeled `arena` with Docker + reach to the bench-host.
 organisation variable `GENTAR_CI_RUNNER` to a JSON runs-on value, e.g.
 `["self-hosted", "linux-ci"]`, and `plan` and `checks` run there instead
 (the plan output's `runner=` line says where). It needs `git`, `python3`
-and `bash`, plus `gh` for the release gate below. Three things change with it set:
+and `bash`, plus `gh` for the release gate below. **On GitHub Free, an
+organisation variable reaches public repositories only:** a private
+repository needs it set as a repository variable, or the workflow never
+sees it: `plan` falls back to `ubuntu-latest`, and `checks` to the OSes in
+`[phase1] os` (macOS too, when listed) (found by cockpit, 2026-09-30).
+Check the plan output's `runner=` line after setting it. Three things
+change with it set:
 
 - a **fork's** pull request runs nothing at all, not even the checks: its
   code never reaches a self-hosted runner;
@@ -379,7 +396,8 @@ Secrets/vars the workflow reads:
 - `secrets.BENCH_SSH_KEY` — key the coordinator uses to reach the bench-host
 - `secrets.GENTAR_BENCH_HOST`, `secrets.GENTAR_BENCH_USER` — the bench-host itself; the
   engine ships none, so without these no suite can run (secrets, because a public
-  repo's logs are public)
+  repo's logs are public). `vars.GENTAR_BENCH_HOST` is read when the secret is
+  unset: `local` (local bench mode) is a mode word, not a host to hide
 - `secrets.GENTAR_CLONE_KEY` — read-only deploy key, only if the ENGINE repo is private
 - `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
 - `vars.GENTAR_REF` — only to run an engine ref other than `run.sh`'s pin (a branch or release candidate being proven); delete it afterwards
@@ -388,13 +406,72 @@ Secrets/vars the workflow reads:
 - `vars.GENTAR_BUDGET_CAP` — ceiling the budget guard enforces (default 50000)
 - `vars.GENTAR_CLICKHOUSE_HOST_PORT`, `vars.GENTAR_OTLP_HOST_PORT` — move the
   arena's host ports when another arena shares the runner's Docker host
+- `secrets.GENTAR_OTLP_EXPORT`, `secrets.GENTAR_OTLP_KEY` — a telemetry
+  destination, both or neither (above)
+- `secrets.TYPESAFE_API_KEY` — the judge, for judged suites (semantic turns,
+  goal pilots, soft checks). **Unset, phase 2's `--sweep` skips every judged
+  suite by name** and can come out green without having run them: read the
+  run's `skipping … TYPESAFE_API_KEY is not set` lines before trusting it
+- `vars.GENTAR_CI_RUNNER` — run `plan` and `checks` on a self-hosted runner
+  (above); a repository variable on GitHub Free
+- `vars.GENTAR_FLOOR` — the floor suites, read only when there is no
+  `gentar/policy.toml` (the 0.3.x behaviour)
+- `secrets.<NAME>` for each name in `[secrets] route` — your subject's own
+  secrets (below)
 
 The three bench values are required; the workflow refuses with a named error
 before staging anything if one is missing or still the placeholder. Everything
 else is optional. Phase 2 is `gentar/run.sh --sweep`: suites whose credentials
-are absent are skipped and named, not run into a red refusal. It tears down
+are absent are skipped and named, not run into a red refusal, and listed in
+`gentar/reports/sweep-skipped.txt` (empty when none was skipped; an arena
+mirror refuses to call such a sweep green). It tears down
 with `gentar/run.sh --down`, which also removes the bench sandboxes a cancelled
 job left behind — and never touches an arena another live run holds.
+
+**A PUBLIC repository.** Register no self-hosted runner on it: a fork can
+bring its own workflow to any runner there. Use the arena mirror instead
+(`[arena] bench = "mirror"`): the public repository runs the kit's public
+variant workflow (GitHub-hosted plan and checks only), and a private mirror
+pulls it, verifies the commit, and runs phase 2 on its own runner. The
+result comes back as the commit status `arena/phase2`, which the release
+gate reads with `[phase2] evidence = "status"`. Run it with
+`gentar/mirror.sh dispatch <sha>`. Setup: `subject-template/mirror/README.md`.
+
+**Your own secrets.** A suite that needs a secret the kit does not wire
+(a read key for your own service, say) declares it as usual, in
+`credentials` or `pass_env`, and `gentar/policy.toml` routes it by name:
+
+```toml
+[secrets]
+route = ["SUBJECT_READ_KEY"]   # up to 8 repository secrets
+```
+
+The workflow stays byte-identical. Its bench job has eight fixed slots,
+each looking up ONE declared name (`secrets[<name>]`), so it receives those
+secrets and no others. `run.sh` takes them out of the slots before it does
+anything else, and passes a name only to the coordinator of a suite that
+declares it, taking it back when that suite ends; a routed name you set by
+hand, with no slot, goes the same one way. Values are scrubbed from the
+reports and spans like any credential, in `pass_env` too, and are never
+printed: `gentar/run.sh --route` shows the names, whether each arrived, and
+which suites ask for it. Names the kit wires itself (`BENCH_SSH_KEY`,
+`ANTHROPIC_*`, `TYPESAFE_API_KEY`, `GENTAR_*`), GitHub's and the runner's,
+bash's read-only variables, and names that steer a shell, the loader or
+libc, the locale, git, ssh, docker, python, node, perl, ruby or java are
+refused. So is a routed name no suite declares, at `--check`.
+
+**License.** The kit's files are Apache-2.0, as gentar is; each one says so
+in a two-line header (`SPDX-License-Identifier: Apache-2.0`, copyright).
+They are copied byte for byte, so the header travels with them: keep it.
+
+**Git history in the bench.** The subject is staged without `.git`: on
+CI it holds the job's auth header. A suite that needs history (one that
+clones an older release tag to test an update) sets `[stage] git = true`
+in `gentar/policy.toml`. The kit then gives the staged copy a fresh `.git`
+from a local clone: every commit and tag, a new config, no remote. The
+engine refuses a subject whose git config still holds a credential. The
+checkout must be full (the kit workflow's bench job uses `fetch-depth: 0`);
+a shallow one is refused.
 
 **Credential grouping.** `credentials` lists *alternatives*. A provider that is
 a pair must be a nested list — `[["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"]]`.
@@ -423,7 +500,8 @@ gentar/
   scenarios/*.toml   # suites (this repo's own)
   policy.toml        # run policy — which suites run when (this repo's own)
   hooks.py           # dry-run hooks: prepare(), HIDE_FROM_PATH (this repo's own)
-  run.sh             # kit — stage, run, report; --check, --plan, --down
+  run.sh             # kit — stage, run, report; --check, --plan, --route, --down
+  mirror.sh          # kit — phase 2 in the arena mirror (public repos)
   dryrun.py          # kit — local, bench-less step/assertion replay
   plan.py            # kit — the run policy's only reader
   release-gate.sh    # kit — may this commit be released?

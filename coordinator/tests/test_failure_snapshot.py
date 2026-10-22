@@ -42,8 +42,13 @@ class FakeDriver:
     def screen(self):
         return f"Starting cockpit... token={SECRET}"
 
+    transport = "sbx"
+
     def wait_done(self, s):
         return True
+
+    def ended(self, settle=10.0):
+        return (0, None)            # a clean exit: its status counts since #87
 
     def close(self):
         self.closed = True
