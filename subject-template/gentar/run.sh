@@ -426,7 +426,12 @@ judge_ready() {
 # developer's shell, a runner's own environment) goes the same one way, to
 # the suites declaring it, and never in FORWARD to all (agy on #79).
 ROUTE_NAMES=()
-routes=$(python3 "$HERE/plan.py" route) || exit 2
+# --review runs no suite, so it needs no route, and a broken policy must
+# not hide its diff (it reports; it never fails a build).
+routes=""
+if [ "$REVIEW_ONLY" != 1 ]; then
+  routes=$(python3 "$HERE/plan.py" route) || exit 2
+fi
 _i=0
 for _n in $routes; do
   _i=$((_i + 1))
