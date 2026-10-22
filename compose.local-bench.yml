@@ -1,7 +1,10 @@
 # Local bench mode (GENTAR_BENCH_HOST=local): the arena runs ON the bench
 # host, so the coordinator calls the host's sbx directly instead of over
 # ssh: no bench key. Layered by bin/arena and the kit's run.sh only in that
-# mode. The coordinator runs as the host user, with the host's sbx binary,
+# mode. The coordinator runs as the host user -- as that user's own uid on
+# rootful Docker, as 0:0 on rootless Docker (where container root IS the
+# user running the daemon), refused when that cannot be told; decided by
+# bin/docker-identity, never by a caller's GENTAR_LOCAL_UID -- with the host's sbx binary,
 # its daemon state and config, and the workspace root mounted at the SAME
 # paths: sbx resolves a workspace path on the host. Benches never see any
 # of this; they get only their own workspace directory.

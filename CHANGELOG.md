@@ -22,6 +22,10 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.10.0 — 2026-10-22
+
+Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what changed and why, upgrade for adopters, what is not live-proven, known limits, verification).
+
 ### Changed
 - **The scenario schema is closed: an unknown table or key is refused.**
   A scenario that misspelled a key used to load and run a weaker test that
@@ -57,6 +61,64 @@ Adopters pin a release tag, not a branch.
   is retired, and `docs-honesty-gentar` checks the new claims.
 
 ### Added
+- **The arena mirror: phase 2 for a PUBLIC repository, with no self-hosted
+  runner on it.** `[arena] bench = "mirror"` (with `mirror = "owner/name"`)
+  puts the repository on the kit's public variant workflow
+  (`subject-template/mirror/public/`: plan and checks, GitHub-hosted, no
+  self-hosted job), which `--check` holds it to; `plan.py` then plans no
+  bench here, and refuses a floor, `bench = "declared"` or a
+  `GENTAR_CI_RUNNER`. A private mirror (`subject-template/mirror/arena/`)
+  pulls the public repository and runs the kit's own bench job on a commit
+  `verify-ref.sh` admitted: reachable from the default branch or a `v*` tag,
+  or any branch head when the MIRROR's variable `GENTAR_ALLOW_BRANCH_HEADS`
+  is `true` (default off). Since GitHub serves a fork's commit by sha
+  through the parent's URL, it fetches only those refs (never
+  `refs/pull/*`, no partial clone) and checks ancestry. `verify-ref.sh` is
+  self-contained, so a mirror can vendor one file. The mirror's daily
+  schedule is a no-op on an already-green default-branch head.
+  Routed secrets have an upper bound in the MIRROR: its variable
+  `GENTAR_ROUTE_ALLOW` names what it will route, and a commit's
+  `[secrets] route` can only narrow it (`route.py`; a dropped name keeps its
+  slot empty and is logged by name). The mirror's plan job runs none of the
+  public repository's code, so a branch editing its own policy or `plan.py`
+  reaches no secret the mirror did not offer.
+- **`gentar/mirror.sh dispatch <sha> [suites]`** runs the mirror, waits (by
+  polling the run's own status, so a fine-grained token works; at most
+  `GENTAR_MIRROR_WAIT` seconds, after which it posts nothing), and
+  for a full phase 2 posts the commit status `arena/phase2` (success,
+  failure, or error) linking the mirror run. It finds its own run by a
+  request id, never "the newest". `mirror.sh status <sha>` reads it back. A
+  mirror holding `GENTAR_STATUS_TOKEN` posts the status itself, and
+  `mirror.sh` then leaves that status as it is.
+- **`[phase2] evidence = "status"`**: `release-gate.sh` then requires the
+  latest `arena/phase2` commit status on exactly the release sha to be
+  `success` and to link a run of `[arena] mirror` by its run number (it
+  needs that mirror set; `max_age_days` applies). Mirror mode requires it
+  whenever the gate is on.
+- **A mirror's phase 2 that skipped a suite is not green.** `run.sh --sweep`
+  writes the suites it skipped, with each reason, to
+  `gentar/reports/sweep-skipped.txt` (empty when none). The mirror's bench job
+  fails on a non-empty or missing list ("phase 2 ran every suite") before it
+  marks the commit green, so `arena/phase2` is a `failure` naming the skipped
+  suites and the release gate refuses it. Without this, a sweep that skipped
+  every keyed suite posted success and its `phase2-green-<sha>` marker kept
+  the schedule from ever sweeping that commit again (ground-up review, A1).
+- **`[secrets] route` — a subject's own secrets reach its suites by name.**
+  Declare up to 8 repository secrets in `gentar/policy.toml`; the kit's bench
+  job looks each one up in a fixed slot (`secrets[<declared name>]`, never the
+  whole set), and `run.sh` clears the slots at once, gives each value its
+  name inside the script, and exports a name only while the coordinator of
+  a suite that declares it (`credentials` or `pass_env`) runs, so another
+  suite's coordinator never sees it; a routed name set by hand, with no
+  slot, goes the same one way. Routed values are scrubbed from reports and
+  spans, a `pass_env` declaration included (the kit names them to the
+  coordinator in `GENTAR_REDACT_NAMES`). Reserved names (the kit's own,
+  GitHub's, the runner's, bash's read-only variables, and names that steer
+  a shell, the loader or libc, the locale, git, ssh, docker, python, node,
+  perl, ruby or java) are refused,
+  and `--check` flags a route no suite declares. `gentar/run.sh --route`
+  reports names and state, never values. The workflow stays byte-identical,
+  so a subject with its own secret no longer has to fork it.
 - **`bin/bench-host-provision`** builds an Ubuntu 24.04 bench host. The
   isolated bench account (`arena` by default) has its password locked, no
   sudo, and the groups its own plus `kvm`. The host gets rootless Docker
@@ -72,7 +134,68 @@ Adopters pin a release tag, not a branch.
   section 2 adds the runner's rootless `DOCKER_HOST` and repository-level
   registration.
 
+### Security
+- **Credential values never ride a command line, an error, a report or a
+  span (C1, the 2026-10-19 ground-up review).** Env values used to be put
+  on the command line: `export K='v'` in the `sbx exec … sh -lc` argv for
+  oracle steps, `env K=v` in the pty's `sbx exec -t` line, run through ssh
+  (the tart and daytona tiers did the same). Any account on the bench-host
+  could read them in `/proc`, and a timeout's error text was that argv, so
+  it reached the report and the spans. Now every tier with a shell
+  transport writes the env into an owner-only file inside the bench over
+  stdin, in an exec of its own (`sbx exec -i`), which reports the absolute
+  path it used; the command reads that file, deletes it and only then
+  applies it (so an env that moves `HOME` cannot strand it), all before it
+  runs; a name that is not a shell identifier is
+  refused. All env takes this path, not only credentials, so the run id
+  now also reaches driver sessions. A timeout names the operation (`sbx
+  exec`), never the argv. As defence in depth, the run's scrubber (bench
+  identity plus the declared credentials' values) now runs over the whole
+  report, the run's error text in the CI log, and every local span row,
+  not only the export. Reports are written owner-only (`0600`, given to the
+  report directory's owner when the coordinator runs as root) instead of
+  world-readable (handed to the owner through the open descriptor, never by
+  name), and the kit's staged copies are owner-only too. The osb tier types
+  its pty command into a shell, which echoes it, so it refuses a driver
+  scenario that forwards any env (`credentials` or `pass_env`) before any
+  bench (exit 2). Not live-proven:
+  a real provider key end to end through the new path. The gate suites
+  exercise it with non-secret env (the run id, the OTLP endpoint); the
+  provider-key suites run only where a key is configured.
+
 ### Fixed
+- **`GENTAR_BENCH_WORKSPACE_ROOT` reaches the coordinator in SSH mode.**
+  `docker-compose.yml` forwarded it only in local bench mode, so over SSH the
+  coordinator always used `/tmp/gentar-workspaces` while `bin/bench-reap`
+  followed the caller's value. An arena whose bench user has its own
+  workspace root (D5: one 0700 root per bench user) made its workspaces in
+  the shared default instead. The compose default repeats config.py's,
+  behind `:-`, so an empty value also falls back (config.py treats empty as
+  set).
+- **Local bench mode on rootless Docker.** The local coordinator ran as the
+  user's own uid, which under rootless Docker maps to a subordinate uid
+  owning none of the user's files (workspace root, sbx state). The new
+  `bin/docker-identity` asks the daemon the run actually uses: rootless runs
+  the coordinator as `0:0` (there, the user); rootful keeps the user's uid
+  and refuses local mode run as root (never `0:0`); a daemon it cannot read
+  is refused, never guessed. No variable or flag chooses the uid. `bin/arena`
+  and the kit's `run.sh` export that daemon as `DOCKER_HOST` and its socket
+  as `GENTAR_DOCKER_SOCK`, which the `osb` tier's server now mounts instead
+  of a hard-coded `/var/run/docker.sock` (unchanged for rootful). The kit's
+  local mode refuses an engine without the script. `bin/arena` reads
+  `GENTAR_BENCH_HOST` as `run.sh` and the coordinator do, spaces and
+  quotes stripped.
+- **The kit's CI jobs do not leave SSH keys behind on a self-hosted runner.**
+  `checks` and `bench` write `bench_key` and `gentar_clone_key` under
+  `umask 077` (never readable by others, not even for a moment), remove stale
+  ones when they start, and remove their own however the job ends. In
+  `bench` the clone key goes right after the suites, and the teardown
+  removes the bench key itself through a shell trap (run with `wait`, so a
+  cancellation's signal is handled at once) under a 180 s timeout, before
+  the reports upload: GitHub gives a cancelled run's `always()` steps five
+  minutes in all, so a later step cannot be trusted to run. A last
+  `always()` step stays as a backstop. A self-hosted runner does not always
+  empty `RUNNER_TEMP` when a job is cancelled.
 - **A fresh bench account's sbx setup wizard is named, not guessed at.** On
   a new bench account, the first interactive sbx session shows sbx's
   one-time first-run wizard ("sbx setup — detected configuration … continue

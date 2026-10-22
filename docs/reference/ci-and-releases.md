@@ -78,7 +78,10 @@ Cutting a release:
 4. Land 1–3 through a reviewed release PR, merged as a merge commit.
 5. Prove the merge commit on the mirror. Dispatch its gate on that sha
    (`gh workflow run arena.yml -R agent-realm/gentar-arena -f scenario=gate -f sha=<merge commit>`)
-   and wait for it to pass.
+   and wait for it to pass. Then read the newest such run's report for every
+   suite (verdict, assertion count, nothing skipped or quarantined) and list
+   them in the release PR. A skipped or failed suite means no tag. A green
+   job alone is not enough: it does not show a suite that never ran.
 6. Tag `v$(cat VERSION)` (annotated) on that commit and push the tag.
 7. Publish the GitHub release from the document:
    `gh release create v$(cat VERSION) --title "gentar v$(cat VERSION)" --notes-file docs/releases/v$(cat VERSION).md`.
