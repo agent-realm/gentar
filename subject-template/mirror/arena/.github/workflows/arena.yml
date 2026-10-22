@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 # gentar arena MIRROR: the workflow of a PRIVATE repository that runs a
 # PUBLIC repository's phase 2 on a self-hosted runner. Copy this directory
 # (subject-template/mirror/arena/) into the mirror repository as it is; the
@@ -148,6 +150,8 @@ jobs:
     # GitHub's context, which the PR's files cannot change.
     if: needs.plan.outputs.bench != 'none'
     runs-on: [self-hosted, arena]
+    outputs:
+      skipped: ${{ steps.ran-all.outputs.skipped }}
     env:
       # Names every bench sandbox this job creates, so teardown removes the
       # ones a CANCELLED job strands and nothing else on the shared
@@ -346,6 +350,31 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/bench_key" "$RUNNER_TEMP/gentar_clone_key"
 
+      # A sweep exits 0 when every suite it RAN passed, and it skips a suite
+      # whose key is not set. Such a phase 2 is not a proof of this commit:
+      # without this step it would post success and mark the commit green,
+      # and the schedule would never sweep it again. So it fails here,
+      # naming the skipped suites, after the teardown, the upload and the
+      # key removal above have run. run.sh writes the list
+      # (gentar/reports/sweep-skipped.txt, name TAB reason, empty = none).
+      - name: phase 2 ran every suite
+        id: ran-all
+        if: success() && needs.plan.outputs.bench == 'phase2'
+        run: |
+          list=gentar/reports/sweep-skipped.txt
+          if [ ! -f "$list" ]; then
+            echo "::error title=phase 2 not proven::the sweep left no list of skipped suites"
+            exit 1
+          fi
+          if [ -s "$list" ]; then
+            names=$(cut -f1 "$list" | tr -cd 'A-Za-z0-9._\n-' | tr '\n' ' ')
+            names=${names% }
+            echo "skipped=$names" >> "$GITHUB_OUTPUT"
+            echo "::error title=phase 2 not proven::skipped: $names (see run suites for each reason)"
+            exit 1
+          fi
+          echo "phase 2 ran every suite"
+
       # Green phase 2 on this commit: a marker the next scheduled run looks
       # for, so an unchanged default branch is not swept again.
       - name: mark phase 2 green
@@ -371,13 +400,16 @@ jobs:
             exit 0
           fi
           case "$RESULT" in success|failure) state=$RESULT ;; *) state=error ;; esac
+          desc="phase 2: $RESULT (arena mirror)"
+          [ -z "$SKIPPED" ] || desc="phase 2 not proven, skipped: $SKIPPED (arena mirror)"
           GH_TOKEN="$STATUS_TOKEN" gh api -X POST "repos/$PUBLIC/statuses/$SHA" \
             -f state="$state" -f context=arena/phase2 -f target_url="$RUN_URL" \
-            -f description="phase 2: $RESULT (arena mirror)" >/dev/null
+            -f description="${desc:0:140}" >/dev/null
           echo "posted arena/phase2 = $state on $PUBLIC@$SHA"
         env:
           STATUS_TOKEN: ${{ secrets.GENTAR_STATUS_TOKEN }}
           RESULT: ${{ needs.bench.result }}
+          SKIPPED: ${{ needs.bench.outputs.skipped }}
           PUBLIC: ${{ vars.GENTAR_PUBLIC_REPO }}
           SHA: ${{ needs.plan.outputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

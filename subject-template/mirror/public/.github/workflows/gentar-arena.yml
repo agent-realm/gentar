@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 # gentar own arena, PUBLIC-repository variant: plan and checks only, both
 # GitHub-hosted. There is NO self-hosted job here, so nothing in this file
 # -- or in a fork's copy of it -- can be scheduled on a runner holding the

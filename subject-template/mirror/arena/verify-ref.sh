@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 # verify-ref: may this private arena mirror run phase 2 on this commit?
 #
 #   verify-ref.sh [--allow-branch-heads] <public-repo-url> [<sha>]

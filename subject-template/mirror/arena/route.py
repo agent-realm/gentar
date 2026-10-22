@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 """route: which of this mirror's secrets the bench job may hand to a commit.
 
     python3 route.py <public checkout>/gentar/policy.toml "<allowed names>"

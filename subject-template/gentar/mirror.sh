@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ramazan Polat
 # mirror: run phase 2 in this repository's private arena mirror.
 #
 #   gentar/mirror.sh dispatch <sha> [suite ...]   # run, wait, report back
