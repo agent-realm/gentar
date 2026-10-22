@@ -45,6 +45,18 @@ script that works and one that is subtly lying:
   pre-accept the *next* dialog's default. A dialog that appears only
   sometimes is an `optional` turn.
 
+**How the command ends counts, not only that it ended.** After the last
+turn the driver waits for the command to exit and reads its status; a
+headless scenario with no turns is the same, the agent's own exit status
+counts. A non-zero exit or a death by signal fails the run even when the
+files look right: an agent that crashed, was stopped by its own `timeout`
+(124), or lost its ssh (255 on the ssh tiers) after writing half the work
+must not pass on what it left behind. The one ending a scenario asks for
+itself is ctrl-c: when the last turn presses it, a death by SIGINT (or a
+shell's 130) is the expected end. A goal pilot's `done` does not wait for
+the program to exit, but if it already ended on its own, the same rule
+applies.
+
 The hard safety rule in the driver is the **danger gate**: if the agent
 provokes a prompt asking to run a command matching the destructive-command
 pattern, the driver aborts the run rather than approving it. That is not a

@@ -10,7 +10,8 @@ import time
 
 from gentar.benchhost import BenchHost
 from gentar.goal import _LOW, GOAL_RESERVED, goal_instructions, goal_offer, screen_key  # noqa: F401
-from gentar.pty_driver import _KEYS, APPROVAL_RE, DANGER_RE, DriverAbort, PtyDriver, _tail
+from gentar.pty_driver import (_KEYS, APPROVAL_RE, DANGER_RE, DriverAbort, PtyDriver,
+                               _tail, exit_problem)
 from gentar.spans import Spans
 
 
@@ -62,7 +63,19 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                attrs={"command": scenario.driver_command[:120]})
     try:
         if getattr(scenario, "goal", ""):
-            return _goal_pilot(driver, judge, scenario, spans, subject, run_id)
+            summary = _goal_pilot(driver, judge, scenario, spans, subject, run_id)
+            # `done` stops driving and the program may well still run (close()
+            # ends it). If it already ended on its own, its status counts.
+            status = driver.ended(settle=0)
+            if status is not None:
+                # SIGINT is the expected end only if the pilot actually
+                # pressed ctrl-c, not merely because the scenario offers it
+                # (Codex on #87).
+                why = exit_problem(status, driver.transport,
+                                   interrupted=driver.sent_ctrl_c and not driver.aborted)
+                if why:
+                    raise TurnFailure(f"goal: the driver command {why}")
+            return summary
         for i, turn in enumerate(scenario.turns):
             kind = turn["type"]
             if kind == "answer":
@@ -145,6 +158,13 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                 "driver command never exited after the final turn "
                 "(wait_done 300s) — the scripted exit keys did not "
                 "produce EOF")
+        # EOF is not success: how the command ended counts. A crash, a
+        # `timeout` kill or a dropped ssh after partial work must not pass
+        # on the files it left behind (ground-up review A3).
+        why = exit_problem(driver.ended(), driver.transport,
+                           interrupted=_ends_with_ctrl_c(scenario.turns))
+        if why:
+            raise TurnFailure(f"driver command {why}")
         return f"driver ok: {len(scenario.turns)} turns"
     finally:
         if state is not None:
@@ -159,6 +179,15 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
         if report is not None:
             report.transcript = driver.transcript
         driver.close()
+
+
+def _ends_with_ctrl_c(turns: list[dict]) -> bool:
+    """The last turn pressed ctrl-c: the scenario ended the program itself."""
+    if not turns or turns[-1].get("type") != "key":
+        return False
+    last = turns[-1]
+    keys = last.get("keys") or ([last["key"]] if last.get("key") else [])
+    return bool(keys) and keys[-1] == "ctrl-c"
 
 
 def _goal_pilot(driver: PtyDriver, judge, sc, spans, subject, run_id,

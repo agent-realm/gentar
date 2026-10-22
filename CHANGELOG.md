@@ -38,6 +38,16 @@ Adopters pin a release tag, not a branch.
   repositories loads unchanged.
 
 ### Fixed
+- **The driver command's exit status counts; EOF alone is no longer a
+  pass.** The driver waited for the command to end and never asked how it
+  ended, so an agent that crashed, was stopped by its own `timeout`, or
+  lost its ssh after writing half the work could still pass on the files it
+  left. Now a non-zero exit or a death by signal fails the run, and the
+  message names the status: `timeout`'s 124, ssh's own 255 on the ssh
+  tiers, a signal by name. A scenario whose last turn presses ctrl-c to end
+  the program still passes on that SIGINT. A goal pilot's `done` does not
+  wait for the program, but if the program already ended on its own, its
+  status counts too (ground-up review A3).
 - **The report directory is no longer opened to everyone** (D4). Every report
   write ran `chmod 0777` on the report dir, a host bind, so any account on the
   host could plant or delete reports. It existed so the host user could clean
