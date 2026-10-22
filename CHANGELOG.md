@@ -65,6 +65,16 @@ Adopters pin a release tag, not a branch.
   `GENTAR_CI_RUNNER` and `GENTAR_FLOOR`; a test keeps it complete.
 
 ### Fixed
+- Driver `pick` turns recognise **unnumbered** pickers (`❯ No, exit` /
+  `Yes, I trust this folder`, Claude Code 2.1.283's API-key and trust
+  dialogs); only `❯ N.` lines counted before, so an optional pick was
+  skipped silently and a required one failed "not reachable" (cockpit).
+  A label missing from the list fails instead of cycling: on a numbered
+  picker once the cursor wraps, on an unnumbered one before any key (it
+  counts as the turn's picker only when the label is in its aligned option
+  block, so a prompt with typed text never gets keys). A slow redraw is
+  waited for, not read as a wrap, and a skipped optional pick is named in
+  the report's warnings.
 - **The driver command's exit status counts; EOF alone is no longer a
   pass.** The driver waited for the command to end and never asked how it
   ended, so an agent that crashed, was stopped by its own `timeout`, or

@@ -22,7 +22,55 @@ from gentar.benchhost import BenchHost
 
 from gentar.gates import APPROVAL_RE, DANGER_RE  # noqa: E402,F401  (re-exported)
 PICKER_CURSOR_RE = re.compile(r"^\s*❯\s*[0-9]+\.", re.MULTILINE)
+# An UNNUMBERED picker's cursor line: `❯ <text>`. Claude Code 2.1.283's
+# API-key and trust dialogs ("❯ No, exit" / "Yes, I trust this folder") have
+# no numbers (cockpit). Text after the glyph is required: an empty `❯` is the
+# input prompt, not a picker.
+CURSOR_TEXT_RE = re.compile(r"^\s*❯\s*\S.*$", re.MULTILINE)
 SPINNER_RE = re.compile(r"^[✻✽✢·✳✶]", re.MULTILINE)
+
+
+def _option_block(rows: list[str]) -> list[str]:
+    """The unnumbered option block around the LAST `❯ <text>` row: that row
+    plus the contiguous rows above and below indented to the column where
+    its text starts (`❯ No, exit` / `  Yes, I trust this folder`). A prompt
+    line with typed text (`❯ git status`) has no such siblings."""
+    at = next((i for i in range(len(rows) - 1, -1, -1) if CURSOR_TEXT_RE.match(rows[i])), None)
+    if at is None:
+        return []
+    cur = rows[at]
+    glyph = cur.index("❯")
+    col = glyph + 1 + (len(cur) - glyph - 1 - len(cur[glyph + 1:].lstrip()))
+
+    def sibling(r: str) -> bool:
+        body = r.lstrip(" ")
+        return bool(body) and not body.startswith("❯") and len(r) - len(body) == col
+
+    block = [cur]
+    i = at - 1
+    while i >= 0 and sibling(rows[i]):
+        block.insert(0, rows[i])
+        i -= 1
+    i = at + 1
+    while i < len(rows) and sibling(rows[i]):
+        block.append(rows[i])
+        i += 1
+    return block
+
+
+def picker_visible(screen: str, label: "re.Pattern") -> bool:
+    """A picker is on screen: a numbered `❯ N.` cursor line, or an
+    unnumbered `❯ <text>` cursor line in a block of at least two aligned
+    options, one of which is the wanted label. Requiring the aligned
+    siblings keeps a prompt with typed text (`❯ git status`) from passing as
+    a picker even when the label's word is elsewhere on screen (agy on #62);
+    requiring the label means an unnumbered picker without it is not this
+    turn's picker, so the pick fails after `settle` rather than pressing
+    keys into it."""
+    if PICKER_CURSOR_RE.search(screen):
+        return True
+    block = _option_block(screen.splitlines()[-20:])
+    return len(block) >= 2 and any(label.search(r) for r in block)
 
 
 class DriverAbort(RuntimeError):
@@ -204,12 +252,13 @@ class PtyDriver:
         label = re.compile(label_pattern, re.IGNORECASE)
         waited = 0.0
         while waited < settle:
-            if PICKER_CURSOR_RE.search(self.screen()):
+            if picker_visible(self.screen(), label):
                 break
             time.sleep(0.5)
             waited += 0.5
         else:
             return False
+        seen = []
         for _ in range(max_tries):
             # The transcript is a raw stream, not a rendered pane (gauntlet
             # had tmux capture-pane); in-place redraws stack blocks, so the
@@ -219,8 +268,23 @@ class PtyDriver:
             if label.search(cursor):
                 self.send_key("enter")
                 return True
+            # Back at an option already passed: the list wrapped (or the
+            # cursor does not move), and the label is not in it.
+            text = cursor.strip()
+            if text in seen:
+                return False
+            seen.append(text)
             self.send_key("down")
-            time.sleep(1)
+            # Wait for the redraw: on a loaded bench it can land after a
+            # second, and a cursor read before it would look like a wrap
+            # (agy on #62). Unchanged after 3s: the cursor does not move,
+            # and the next pass sees a repeat.
+            for _ in range(6):
+                time.sleep(0.5)
+                now = next((ln for ln in reversed(self.screen().splitlines())
+                            if ln.lstrip().startswith("❯")), "")
+                if now.strip() != text:
+                    break
         return False
 
 
