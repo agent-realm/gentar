@@ -134,7 +134,7 @@ names=$(printf '%s\n' "$listing" \
 
 # The prefix is [A-Za-z0-9-] only (checked above), so it is safe to splice
 # into an ERE unescaped.
-shape="^${PREFIX}-[0-9]{8}-[0-9]{6}-[0-9a-f]{6}\$"
+shape="^${PREFIX}-[0123456789]{8}-[0123456789]{6}-[0123456789abcdef]{6}\$"
 mine=$(printf '%s\n' "$names" | grep -E "$shape" || true)
 mine_ws=$(printf '%s\n' "$workspaces" | grep -E "$shape" || true)
 all=$(printf '%s\n%s\n' "$mine" "$mine_ws" | grep -v '^$' | sort -u || true)
