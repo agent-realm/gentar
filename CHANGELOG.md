@@ -22,6 +22,27 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Changed
+- **The mirror's schedule is documented.** `docs/reference/ci-and-releases.md`
+  says what the private mirror runs on its own: the gate daily at 00:17 UTC
+  and the nightly at 01:17 UTC, on the head of `main`. The times are
+  nominal and the schedule is best-effort: GitHub can delay a scheduled run,
+  or under heavy load drop it, so a dispatch is the certain path. The
+  nightly's agent suite skips without a provider key, and its subject
+  suites without a subject token.
+- **gentar's public CI is GitHub-hosted only; the bench suites moved to a
+  private mirror.** gentar is public, and a self-hosted runner registered
+  to a public repository can be reached by a fork's own workflow (D5,
+  2026-10-08). `.github/workflows/gentar.yml` now runs only two hosted jobs:
+  the unit suite on every PR and every push to `main`, and the release-tag
+  check on `v*` tags. The gate, nightly and dispatch jobs and every bench
+  secret and variable reference are gone from it. The bench suites run in
+  the private mirror `agent-realm/gentar-arena`, on commits reachable from
+  `main` or a `v*` tag. That makes them a **post-merge check, not a PR
+  gate**. A release is proven by dispatching the mirror's gate on the
+  release commit before tagging. The central dispatch to `agent-realm/gentar`
+  is retired, and `docs-honesty-gentar` checks the new claims.
+
 ### Added
 - **The arena mirror: phase 2 for a PUBLIC repository, with no self-hosted
   runner on it.** `[arena] bench = "mirror"` (with `mirror = "owner/name"`)
@@ -66,6 +87,20 @@ Adopters pin a release tag, not a branch.
   and `--check` flags a route no suite declares. `gentar/run.sh --route`
   reports names and state, never values. The workflow stays byte-identical,
   so a subject with its own secret no longer has to fork it.
+- **`bin/bench-host-provision`** builds an Ubuntu 24.04 bench host. The
+  isolated bench account (`arena` by default) has its password locked, no
+  sudo, and the groups its own plus `kvm`. The host gets rootless Docker
+  with the rootful daemon disabled, sbx pinned and held, the headless
+  unlocked keyring with its restart and D-Bus pieces, and a 0700 workspace
+  root. The script refuses before any change on another OS, a bad
+  parameter, a workspace root that is not a dedicated directory, or an
+  existing account with another uid or in another group than its own and
+  kvm. It verifies the Docker apt key's fingerprint and masks the rootful
+  daemon. It exits 1 unless every proof is refused for the expected reason,
+  and it contains no secret value. It is adopted from the operator's build
+  of the 2026-10-11 bench host. The guide (section 1) now points to it, and
+  section 2 adds the runner's rootless `DOCKER_HOST` and repository-level
+  registration.
 
 ### Fixed
 - **The kit's CI jobs do not leave SSH keys behind on a self-hosted runner.**
@@ -79,6 +114,32 @@ Adopters pin a release tag, not a branch.
   minutes in all, so a later step cannot be trusted to run. A last
   `always()` step stays as a backstop. A self-hosted runner does not always
   empty `RUNNER_TEMP` when a job is cancelled.
+- **A fresh bench account's sbx setup wizard is named, not guessed at.** On
+  a new bench account, the first interactive sbx session shows sbx's
+  one-time first-run wizard ("sbx setup — detected configuration … continue
+  without importing") and waits for a key, so the first suite with a
+  terminal failed with a bare "prompt … never appeared" (found on a new
+  bench host, 2026-10-12). The driver now recognises the screen and says
+  what to do: run `sbx setup` once as the bench user and press `q`.
+  `bin/bench-host-provision` and the deploy guide list it among the steps
+  after `sbx login`.
+- **`bin/bench-host-provision` no longer closes gpg's pipe early.** The
+  fingerprint read used `awk … { print; exit }`, which can SIGPIPE gpg under
+  `pipefail` and stop the script with no message. awk now reads everything
+  and prints the first fingerprint at the end.
+
+### Changed
+- **License: MIT to Apache-2.0**, from v0.10.0 (the pilot's decision,
+  2026-10-10). `LICENSE` is apache.org's LICENSE-2.0.txt verbatim, and `NOTICE`
+  holds the copyright line, which Apache-2.0 asks redistributors to keep.
+  Releases v0.1.1 through v0.9.3 remain MIT (v0.1.0 shipped without a
+  license).
+- **The kit's files carry their license.** Each file a subject copies byte
+  for byte (`gentar/run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh` and
+  the arena workflow) starts with `SPDX-License-Identifier: Apache-2.0` and
+  the copyright line, after a shebang where there is one, so the license
+  travels with the copy (AK47's ruling on #73). Subjects pick it up at
+  their next kit re-copy.
 
 ## 0.9.3 — 2026-10-08
 

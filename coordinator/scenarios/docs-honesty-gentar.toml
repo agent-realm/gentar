@@ -29,8 +29,10 @@ for s in claude-playbooks-install scripted-onboarding scripted-danger bench-temp
   test -f "coordinator/scenarios/$s.toml" || { echo "README names missing scenario: $s"; exit 1; }
 done
 echo named-scenarios-exist''',
-  # --- CI tier claim: the workflow file carries the three tiers ---
-  'grep -qF "gate:" "$WORKSPACE_DIR/.github/workflows/gentar.yml" && grep -qF "nightly:" "$WORKSPACE_DIR/.github/workflows/gentar.yml" && grep -qF "dispatch:" "$WORKSPACE_DIR/.github/workflows/gentar.yml" && echo tiers-claim-true',
+  # --- CI claim (since 2026-10-12): every runs-on in the public workflow is
+  # exactly `ubuntu-latest` (an allowlist: a renamed self-hosted label fails),
+  # and the docs say the bench suites are a post-merge check in the mirror ---
+  'wf="$WORKSPACE_DIR/.github/workflows/gentar.yml"; grep -qE "^[[:space:]]*runs-on:" "$wf" && ! grep -E "^[[:space:]]*runs-on:" "$wf" | grep -qvxE "[[:space:]]*runs-on: ubuntu-latest" && grep -qF "POST-MERGE check, not a PR gate" "$WORKSPACE_DIR/docs/reference/ci-and-releases.md" && echo hosted-only-claim-true',
 ]
 
 [[verify.commands]]
@@ -39,6 +41,6 @@ contains = "verdict-contract-stated"
 
 [[verify.commands]]
 # Subject-integration doc referenced by the README's subject story exists
-# and names the subject-side trigger contract.
-command = 'grep -q "subject-integration" "$WORKSPACE_DIR/README.md" || true; test -f "$WORKSPACE_DIR/docs/subject-integration.md" && grep -qF "GENTAR_DISPATCH_TOKEN" "$WORKSPACE_DIR/docs/subject-integration.md" && echo integration-doc-true'
+# and says the central dispatch is retired (since 2026-10-12).
+command = 'grep -q "subject-integration" "$WORKSPACE_DIR/README.md" || true; test -f "$WORKSPACE_DIR/docs/subject-integration.md" && grep -qF "central arena is retired" "$WORKSPACE_DIR/docs/subject-integration.md" && echo integration-doc-true'
 contains = "integration-doc-true"
