@@ -121,16 +121,15 @@ class GuardTest(unittest.TestCase):
 
 class WorkflowTest(unittest.TestCase):
 
-    def test_the_workflow_never_puts_the_token_in_a_url_or_the_script(self):
+    def test_the_public_workflow_never_touches_the_subject_token(self):
+        # Since 2026-10-12 the public workflow runs no bench job at all; the
+        # subject token (when set) lives only in the private mirror.
         wf = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "gentar.yml"
         if not wf.exists():
             self.skipTest("the workflow is not in this build context")
         text = wf.read_text()
-        self.assertNotIn("x-access-token:${{", text)
-        self.assertNotIn('"${{ secrets.GENTAR_SUBJECT_TOKEN }}"', text)
-        self.assertEqual(text.count("SUBJECT_TOKEN: ${{ secrets.GENTAR_SUBJECT_TOKEN }}"), 2)
-        self.assertEqual(text.count('GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"'), 2)
-        self.assertEqual(text.count('echo "::add-mask::$auth"'), 2)
+        self.assertNotIn("x-access-token", text)
+        self.assertNotIn("GENTAR_SUBJECT_TOKEN", text)
 
 
 if __name__ == "__main__":
