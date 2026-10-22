@@ -39,6 +39,7 @@ class PtyDriver:
         self.transcript = ""   # full evidence; spans carry the tail
         self.aborted = False   # the danger gate fired: never type again
         self.transport = ""    # argv[0] of the pty transport ("ssh" on remote tiers)
+        self.sent_ctrl_c = False  # a ctrl-c was actually typed (not just declared)
 
     # -- lifecycle -------------------------------------------------------
 
@@ -108,6 +109,8 @@ class PtyDriver:
 
     def send_key(self, key: str) -> None:  # "enter", "escape", "down", "ctrl-c"
         self.child.send(_KEYS[key])
+        if key == "ctrl-c":
+            self.sent_ctrl_c = True
 
     def send_keys(self, keys: list[str], delay: float = 0.5) -> None:
         """A key sequence with pacing — interactive TUIs read single keys,

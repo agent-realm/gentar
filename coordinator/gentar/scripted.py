@@ -68,8 +68,11 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
             # ends it). If it already ended on its own, its status counts.
             status = driver.ended(settle=0)
             if status is not None:
-                why = exit_problem(status, driver.transport, interrupted=any(
-                    a.get("key") == "ctrl-c" for a in getattr(scenario, "actions", [])))
+                # SIGINT is the expected end only if the pilot actually
+                # pressed ctrl-c, not merely because the scenario offers it
+                # (Codex on #87).
+                why = exit_problem(status, driver.transport,
+                                   interrupted=driver.sent_ctrl_c and not driver.aborted)
                 if why:
                     raise TurnFailure(f"goal: the driver command {why}")
             return summary

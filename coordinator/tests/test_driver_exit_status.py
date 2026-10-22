@@ -84,6 +84,34 @@ class EndingTest(unittest.TestCase):
                 run_turns(sc, LocalBench(), "run1", Spans())
         self.assertIn("goal: the driver command exited 4", str(cm.exception))
 
+    def test_a_declared_ctrl_c_the_pilot_never_pressed_excuses_nothing(self):
+        # the program ends on SIGINT by itself; the scenario merely offers a
+        # ctrl-c action (Codex on #87)
+        sc = Sc("kill -INT $$")
+        sc.goal, sc.actions = "Do the thing.", [{"id": "stop", "key": "ctrl-c"}]
+
+        def goal_pilot(driver, *a, **k):
+            driver.wait_done(10)
+            return "goal done after 0 action(s): none"
+
+        with mock.patch("gentar.scripted._goal_pilot", goal_pilot):
+            with self.assertRaises(TurnFailure) as cm:
+                run_turns(sc, LocalBench(), "run1", Spans())
+        self.assertIn("SIGINT", str(cm.exception))
+
+    def test_a_ctrl_c_the_pilot_pressed_ends_it_cleanly(self):
+        sc = Sc("echo up; sleep 30")
+        sc.goal, sc.actions = "Do the thing.", [{"id": "stop", "key": "ctrl-c"}]
+
+        def goal_pilot(driver, *a, **k):
+            driver.send_key("ctrl-c")
+            driver.wait_done(10)
+            return "goal done after 1 action(s): stop"
+
+        with mock.patch("gentar.scripted._goal_pilot", goal_pilot):
+            self.assertEqual(run_turns(sc, LocalBench(), "run1", Spans()),
+                             "goal done after 1 action(s): stop")
+
     def test_a_goal_whose_program_still_runs_passes(self):
         sc = Sc("echo up; sleep 30")
         sc.goal, sc.actions = "Do the thing.", [{"id": "go", "key": "enter"}]
