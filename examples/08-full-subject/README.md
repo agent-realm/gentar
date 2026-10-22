@@ -46,7 +46,8 @@ exits `0`.
 ## CI on your own runners
 
 With no GitHub-hosted minutes, the bench-free jobs go to a self-hosted
-runner through one repository or organisation variable. No file changes:
+runner through one repository variable (an organisation variable reaches
+private repositories only on paid GitHub plans). No file changes:
 
 ```bash
 gh variable set GENTAR_CI_RUNNER -R owner/repo --body '["self-hosted", "linux-ci"]'

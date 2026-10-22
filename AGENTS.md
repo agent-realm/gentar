@@ -251,10 +251,13 @@ agent:
    host with Docker and reach to the bench host. If the organisation has no
    GitHub-hosted minutes or keeps CI in-house, ask which runner the
    bench-free jobs should use and set `GENTAR_CI_RUNNER` (a JSON runs-on
-   value, never the `arena` label). Setting a variable on someone else's
-   repository or organisation is a stop-and-ask. Give each subject its own
-   compose ports (`GENTAR_CLICKHOUSE_HOST_PORT` / `GENTAR_OTLP_HOST_PORT`
-   repo variables) when several share a host.
+   value, never the `arena` label). On GitHub Free, an organisation
+   variable reaches public repositories only: set it on each private
+   repository, and confirm it took by the plan output's `runner=` line.
+   Setting a variable on someone else's repository or organisation is a
+   stop-and-ask. Give each subject its own compose ports
+   (`GENTAR_CLICKHOUSE_HOST_PORT` / `GENTAR_OTLP_HOST_PORT` repo variables)
+   when several share a host.
 3. **Secrets, by reference only.** Pipe them: never print a value, never
    ask the pilot to paste one.
    - `BENCH_SSH_KEY`, `GENTAR_BENCH_HOST`, `GENTAR_BENCH_USER`;
