@@ -147,6 +147,14 @@ Adopters pin a release tag, not a branch.
   provider-key suites run only where a key is configured.
 
 ### Fixed
+- **`GENTAR_BENCH_WORKSPACE_ROOT` reaches the coordinator in SSH mode.**
+  `docker-compose.yml` forwarded it only in local bench mode, so over SSH the
+  coordinator always used `/tmp/gentar-workspaces` while `bin/bench-reap`
+  followed the caller's value. An arena whose bench user has its own
+  workspace root (D5: one 0700 root per bench user) made its workspaces in
+  the shared default instead. The compose default repeats config.py's,
+  behind `:-`, so an empty value also falls back (config.py treats empty as
+  set).
 - **The kit's CI jobs do not leave SSH keys behind on a self-hosted runner.**
   `checks` and `bench` write `bench_key` and `gentar_clone_key` under
   `umask 077` (never readable by others, not even for a moment), remove stale
