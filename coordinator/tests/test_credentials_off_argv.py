@@ -10,6 +10,7 @@ read, deleted and applied before the command runs.
 """
 
 import os
+import re
 import stat
 import subprocess
 import tempfile
@@ -46,7 +47,10 @@ class Recorder:
 
     def __call__(self, argv, **kw):
         self.calls.append((list(argv), kw.get("input")))
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        # The env write says where it staged the file, like a real bench.
+        m = re.search(r"\.gentar-env-[0-9a-f]{16}", " ".join(argv)) if kw.get("input") else None
+        out = f"/home/arena/{m.group(0)}\n" if m else ""
+        return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
 
     def argv_text(self):
         return "\n".join(" ".join(a) for a, _ in self.calls)
@@ -77,7 +81,8 @@ class SbxEnvOffArgvTest(Checks, unittest.TestCase):
         rec, _ = self.check(lambda: host.exec("box1", "echo hi", env=ENV))
         stage, run = rec.calls
         self.assertIn("sbx exec -i box1 sh -c", stage[0][-1])
-        self.assertIn("umask 077 && cat >", stage[0][-1])
+        self.assertIn('umask 077 && f="${HOME:-/tmp}/.gentar-env-', stage[0][-1])
+        self.assertIn('cat > "$f"', stage[0][-1])
         self.assertIn(".gentar-env-", run[0][-1])
         self.assertIn("rm -f", run[0][-1])
         self.assertIsNone(run[1])
@@ -160,7 +165,7 @@ class TimeoutTextTest(unittest.TestCase):
                               timeout=5)
         self.assertNotIn(SECRET, str(ctx.exception))
         self.assertIn("sbx exec", str(ctx.exception))
-        self.assertTrue(ctx.exception.__suppress_context__)
+        self.assertIsNone(ctx.exception.__context__)
 
 
 class ReportTest(unittest.TestCase):
@@ -251,10 +256,17 @@ class CoordinatorTest(unittest.TestCase):
 class OsbGuardTest(unittest.TestCase):
 
     def test_a_credentialed_driver_scenario_is_refused_on_osb(self):
+        self.refused('credentials = ["FAKE_PROVIDER_KEY"]\n')
+
+    def test_a_pass_env_driver_scenario_is_refused_on_osb_too(self):
+        # A routed secret can be declared in pass_env (agy on #80).
+        self.refused('pass_env = ["FAKE_PROVIDER_KEY"]\n')
+
+    def refused(self, forwards):
         printed = []
         with tempfile.TemporaryDirectory() as d:
             write_scenario(d, "osb-leak", '[scenario]\nname = "osb-leak"\nbench = "osb"\n'
-                           'credentials = ["FAKE_PROVIDER_KEY"]\n[driver]\ncommand = "sh"\n')
+                           + forwards + '[driver]\ncommand = "sh"\n')
             env = {"GENTAR_SCENARIOS_DIR": d, "GENTAR_OSB_SERVER": "http://osb.example.org",
                    "FAKE_PROVIDER_KEY": SECRET, "GENTAR_REPORT_DIR": ""}
             with mock.patch.dict(os.environ, env, clear=True):
@@ -287,8 +299,9 @@ class ShellHost(BenchHost):
         self.home = home
 
     def _write_stdin(self, name, remote_sh, content):
-        subprocess.run(["sh", "-c", remote_sh], input=content, text=True, check=True,
-                       env={"HOME": self.home, "PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+        return subprocess.run(["sh", "-c", remote_sh], input=content, text=True, check=True,
+                              capture_output=True,
+                              env={"HOME": self.home, "PATH": os.environ.get("PATH", "/usr/bin:/bin")}).stdout
 
 
 class StagedFileLifecycleTest(unittest.TestCase):
@@ -323,6 +336,67 @@ class StagedFileLifecycleTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("__gentar_env", r.stdout)
         self.assertIn(f"FAKE_PROVIDER_KEY={SECRET}", r.stdout)
+
+
+class StagingPathTest(unittest.TestCase):
+    """agy on #80: the command must not re-derive the path from its own
+    $HOME; it uses the absolute path the write reported."""
+
+    def test_the_command_uses_the_reported_path(self):
+        home = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        prefix = ShellHost(home)._stage_env("box", ENV)
+        self.assertNotIn("${HOME", prefix)
+        self.assertIn(home + "/.gentar-env-", prefix)
+        # The command runs with a DIFFERENT HOME and still finds and removes it.
+        r = subprocess.run(["sh", "-c", prefix + 'printf "%s" "$FAKE_PROVIDER_KEY"'],
+                           capture_output=True, text=True,
+                           env={"HOME": "/nonexistent", "PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+        self.assertEqual((r.returncode, r.stdout), (0, SECRET), r.stderr)
+        self.assertEqual([f for f in os.listdir(home) if f.startswith(".gentar-env-")], [])
+
+    def test_a_bench_that_does_not_report_the_path_is_refused(self):
+        class Silent(ShellHost):
+            def _write_stdin(self, name, remote_sh, content):
+                return "motd noise\n/tmp/.gentar-env-0000000000000000\n"
+        with self.assertRaises(BenchHostError):
+            Silent("/tmp")._stage_env("box", ENV)
+
+
+class TimeoutContextTest(unittest.TestCase):
+
+    def test_the_original_timeout_is_not_even_its_context(self):
+        host = SbxBenchHost(cfg())
+        def slow(argv, **kw):
+            raise subprocess.TimeoutExpired(argv, 5)
+        with mock.patch("gentar.benchhost.subprocess.run", slow):
+            with self.assertRaises(subprocess.TimeoutExpired) as cm:
+                host._ssh_run(["ssh", "h"], f"sbx exec box sh -lc 'export K={SECRET}'", timeout=5)
+        self.assertIsNone(cm.exception.__context__)
+        self.assertNotIn(SECRET, str(cm.exception))
+
+
+class ReportOwnerTest(unittest.TestCase):
+    """As root, a report goes to its directory's owner through the open
+    descriptor, never by name (agy on #80: a name in a world-writable dir
+    can be swapped for a symlink between the write and a chown)."""
+
+    def test_root_hands_the_report_over_by_descriptor(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        real_stat = os.stat
+        def stat_(path, *a, **kw):
+            st = real_stat(path, *a, **kw)
+            if str(path) == d:
+                return os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink,
+                                       4242, 4343, st.st_size, st.st_atime, st.st_mtime, st.st_ctime))
+            return st
+        with mock.patch("os.geteuid", return_value=0), mock.patch("os.stat", stat_), \
+             mock.patch("os.fchown") as fchown, mock.patch("os.chown") as chown:
+            RunReport(scenario="s", run_id="r1").write(d)
+        self.assertEqual(fchown.call_count, 1)
+        self.assertEqual(fchown.call_args.args[1:], (4242, 4343))
+        chown.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -142,10 +142,13 @@ class BenchHost:
                 argv + [remote], capture_output=True, text=True,
                 timeout=timeout, input=input)
         except subprocess.TimeoutExpired:
+            proc = None
+        if proc is None:
             # Its text is the whole argv, and an error text reaches the
             # report, the spans and the CI log: name the operation only.
-            # `from None`: a printed traceback would show the original.
-            raise subprocess.TimeoutExpired(_op_label(remote), timeout) from None
+            # Raised OUTSIDE the except block, so the original is not even
+            # its __context__ (agy on #80: `from None` only hides it).
+            raise subprocess.TimeoutExpired(_op_label(remote), timeout)
         transport_error = (proc.returncode == 255
                            and "ssh" in proc.stderr.lower())
         if transport_error:
@@ -200,9 +203,10 @@ class BenchHost:
         how to reach a tty."""
         raise NotImplementedError
 
-    def _write_stdin(self, name: str, remote_sh: str, content: str) -> None:
-        """Run `remote_sh` in bench `name` with `content` on its stdin;
-        raise on failure. The tier's transport, for _stage_env."""
+    def _write_stdin(self, name: str, remote_sh: str, content: str) -> str:
+        """Run `remote_sh` in bench `name` with `content` on its stdin and
+        return its stdout; raise on failure. The tier's transport, for
+        _stage_env."""
         raise NotImplementedError
 
     def _stage_env(self, name: str, env: dict[str, str] | None) -> str:
@@ -216,9 +220,19 @@ class BenchHost:
         exported. '' when there is nothing to pass."""
         if not env:
             return ""
-        path = f'"${{HOME:-/tmp}}/.gentar-env-{secrets.token_hex(8)}"'
-        self._write_stdin(name, f"umask 077 && cat > {path}", _env_file(env))
-        return (f'__gentar_env=$(cat {path}) && rm -f {path} || exit 97; '
+        # The write resolves the path once and says where it wrote, and the
+        # command uses that absolute path: the two execs need not agree on
+        # $HOME (a login shell may set it, agy on #80).
+        base = f".gentar-env-{secrets.token_hex(8)}"
+        out = self._write_stdin(
+            name, f'umask 077 && f="${{HOME:-/tmp}}/{base}" && cat > "$f" && printf "%s\\n" "$f"',
+            _env_file(env))
+        lines = (out or "").strip().splitlines()
+        path = lines[-1] if lines else ""
+        if not (path.startswith("/") and path.endswith("/" + base)):
+            raise BenchHostError("the bench did not say where it staged the env file")
+        q = shlex.quote(path)
+        return (f'__gentar_env=$(cat {q}) && rm -f {q} || exit 97; '
                 f'eval "$__gentar_env"; unset __gentar_env; ')
 
 
@@ -277,11 +291,11 @@ class SbxBenchHost(BenchHost):
         return self._ssh_run(self._ssh_base(), remote,
                              timeout=timeout, strict=strict, input=input)
 
-    def _write_stdin(self, name: str, remote_sh: str, content: str) -> None:
+    def _write_stdin(self, name: str, remote_sh: str, content: str) -> str:
         # -i: docker-exec semantics, stdin reaches the command only with it
         # (`sbx exec --help`, sbx on gentar-bench, 2026-10-22).
-        self._run([self.cfg.sbx_bin, "exec", "-i", name, "sh", "-c", remote_sh],
-                  timeout=60, input=content)
+        return self._run([self.cfg.sbx_bin, "exec", "-i", name, "sh", "-c", remote_sh],
+                         timeout=60, input=content).stdout
 
     def workspace(self, name: str) -> str:
         return f"{self.cfg.bench_workspace_root}/{name}"
@@ -495,8 +509,8 @@ class TartBenchHost(BenchHost):
         self.last_stderr = proc.stderr or ""
         return proc.returncode, proc.stdout
 
-    def _write_stdin(self, name: str, remote_sh: str, content: str) -> None:
-        self._ssh_run(self._vm_ssh(name), remote_sh, timeout=60, input=content)
+    def _write_stdin(self, name: str, remote_sh: str, content: str) -> str:
+        return self._ssh_run(self._vm_ssh(name), remote_sh, timeout=60, input=content).stdout
 
     def push_dir(self, local_dir: str, remote_dir: str) -> None:
         """Ship a local directory into the guest via tar over ssh. The
@@ -761,8 +775,8 @@ class DaytonaBenchHost(BenchHost):
         self.last_stderr = proc.stderr or ""
         return proc.returncode, proc.stdout
 
-    def _write_stdin(self, name: str, remote_sh: str, content: str) -> None:
-        self._ssh_run(self._sb_ssh(name), remote_sh, timeout=60, input=content)
+    def _write_stdin(self, name: str, remote_sh: str, content: str) -> str:
+        return self._ssh_run(self._sb_ssh(name), remote_sh, timeout=60, input=content).stdout
 
     def push_dir(self, local_dir: str, remote_dir: str) -> None:
         """Tar over ssh stdin — the tart pattern. remote_dir's last

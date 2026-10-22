@@ -185,7 +185,8 @@ The contract:
   owner-only file inside the bench over stdin, then read, deleted and
   applied before the command runs, so no other account on the
   bench-host sees them in its process list. The osb tier, which types
-  its pty command, refuses a credentialed driver scenario (exit 2).
+  its pty command, refuses a driver scenario that forwards env
+  (`credentials` or `pass_env`) (exit 2).
 - **Names only in the record.** Spans and run reports carry the names
   a run required, never a value. Whatever text a run produces (an
   error, a step's output, the transcript) passes the run's scrubber

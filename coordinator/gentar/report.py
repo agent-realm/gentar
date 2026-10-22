@@ -91,17 +91,22 @@ class RunReport:
         except FileNotFoundError:
             pass
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w") as fh:
-            fh.write(text)
-        # The report dir is a host bind; the coordinator runs as root in
-        # the container, so root would own the artifacts and the host user
-        # could neither read nor clean them (CI workspaces died on EACCES).
-        # The kit creates the dir as that user: the report goes to the
-        # dir's owner. Rootless Docker and local bench mode need nothing.
+        # The report dir is a host bind; the coordinator runs as root in the
+        # container, so root would own the artifacts and the host user could
+        # neither read nor clean them (CI workspaces died on EACCES). The kit
+        # creates the dir as that user: the report goes to the dir's owner,
+        # on the open descriptor, never by name (agy on #80: a name in a
+        # world-writable dir can be swapped for a symlink before a chown).
+        # Rootless Docker and local bench mode need nothing.
         try:
             st = os.stat(path.parent)
             if os.geteuid() == 0 and st.st_uid != 0:
-                os.chown(path, st.st_uid, st.st_gid)
+                os.fchown(fd, st.st_uid, st.st_gid)
+        except OSError:
+            pass
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        try:
             os.chmod(path.parent, 0o777)
         except OSError:
             pass

@@ -8,6 +8,7 @@ a pty, shared the workspace both ways, and removed it).
 """
 
 import os
+import re
 import tarfile
 import tempfile
 import unittest
@@ -53,7 +54,10 @@ class LocalHostTest(unittest.TestCase):
     def test_the_pty_is_the_coordinators_own(self):
         h = SbxBenchHost(cfg())
         staged = []
-        h._write_stdin = lambda name, sh, content: staged.append(content)
+        def write(name, sh, content):
+            staged.append(content)
+            return "/home/u/" + re.search(r"\.gentar-env-[0-9a-f]{16}", sh).group(0) + "\n"
+        h._write_stdin = write
         argv = h.pty_spawn_args("box1", 120, 40, {"K": "v w"}, "claude")
         self.assertEqual(argv[:2], ["sh", "-c"])
         self.assertNotIn("-tt", argv)

@@ -449,13 +449,16 @@ def _run(name: str, cfg: Config | None = None) -> int:
 
     # -- osb guard: a credential is never typed -------------------------
     # The osb tier starts a pty session by TYPING its command into a shell,
-    # which echoes it into the transcript; it has no way to stage env in a
-    # file first. A driver scenario that declares credentials is refused
-    # there (C1), before any bench. osb is not a 1.0 tier.
-    if bench_kind == "osb" and scenario and scenario.driver_command and scenario.credentials:
-        msg = (f"osb guard: scenario {name!r} drives a pty and declares credentials; "
-               f"the osb tier would type their values into the session (refusing "
-               f"before any bench exists). Run it on the sbx tier.")
+    # which echoes it into the transcript and puts it on the bridge's argv;
+    # it has no way to stage env in a file first. A driver scenario that
+    # forwards any env from the runner (credentials, or pass_env, which can
+    # carry a routed secret too: agy on #80) is refused there (C1), before
+    # any bench. osb is not a 1.0 tier.
+    if (bench_kind == "osb" and scenario and scenario.driver_command
+            and (scenario.credentials or scenario.pass_env)):
+        msg = (f"osb guard: scenario {name!r} drives a pty and forwards env "
+               f"(credentials or pass_env); the osb tier would type the values into "
+               f"the session (refusing before any bench exists). Run it on the sbx tier.")
         print(f"Error: {msg}")
         Spans(cfg).emit(ARENA_SUBJECT, "", name, "osb.credential.refuse", "error",
                         attrs={"credentials": ",".join(scenario.credential_names())},
