@@ -51,11 +51,15 @@ class LocalHostTest(unittest.TestCase):
         self.assertEqual((dest / "sub" / "f.txt").read_text(), "hello\n")
 
     def test_the_pty_is_the_coordinators_own(self):
-        argv = SbxBenchHost(cfg()).pty_spawn_args("box1", 120, 40, {"K": "v w"}, "claude")
+        h = SbxBenchHost(cfg())
+        staged = []
+        h._write_stdin = lambda name, sh, content: staged.append(content)
+        argv = h.pty_spawn_args("box1", 120, 40, {"K": "v w"}, "claude")
         self.assertEqual(argv[:2], ["sh", "-c"])
         self.assertNotIn("-tt", argv)
         self.assertIn("exec -t box1", argv[2])
-        self.assertIn("'K=v w'", argv[2])
+        self.assertNotIn("v w", argv[2])             # staged in the bench, never argv (C1)
+        self.assertEqual(staged, ["export K='v w'\n"])
 
     def test_no_user_is_needed(self):
         self.assertEqual(cfg().missing_bench_env("sbx"), [])

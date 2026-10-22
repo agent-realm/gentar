@@ -181,8 +181,16 @@ The contract:
 - **Tier-1 transport: env vars on a throwaway bench.** Present values
   are exported into every oracle step and the pty driver process
   inside the sandbox. The bench dies with the run; nothing persists.
+  They never travel on a command line: each is written into an
+  owner-only file inside the bench over stdin, then sourced and
+  deleted before the command runs, so no other account on the
+  bench-host sees them in its process list. The osb tier, which types
+  its pty command, refuses a credentialed driver scenario (exit 2).
 - **Names only in the record.** Spans and run reports carry the names
-  a run required, never a value.
+  a run required, never a value. Whatever text a run produces (an
+  error, a step's output, the transcript) passes the run's scrubber
+  before it reaches a report, a span or the CI log, and reports are
+  owner-only files.
 - **Invocation:** the credential must reach the coordinator container —
   `docker compose run --rm -e ANTHROPIC_API_KEY coordinator run agent-smoke`
   (CI maps the `ANTHROPIC_API_KEY` secret to env and passes `-e`).

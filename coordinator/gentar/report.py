@@ -66,22 +66,42 @@ class RunReport:
     agent_stats: dict = field(default_factory=dict)
     # Soft [[verify.judge]] results — reported, never the verdict.
     soft: list = field(default_factory=list)
+    # The run's scrubber (Spans.redactor.scrub), applied to the whole text
+    # at write time: an error, a step's output or the transcript can carry
+    # a declared credential's value (a timeout's text once carried argv).
+    scrub: object = field(default=None, repr=False, compare=False)
 
     def mark(self, verdict: str, exit_code: int) -> None:
         self.verdict = verdict
         self.exit_code = exit_code
 
     def write(self, directory: str | Path) -> Path:
+        import os
         path = Path(directory) / f"report-{self.run_id}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.markdown())
-        # The report dir is a host bind; the coordinator runs as root in
-        # the container, so root would own the artifacts and the host
-        # user could not clean them (CI workspaces died on EACCES).
-        # World-writable test artifacts are fine — they carry no secrets.
-        import os
-        os.chmod(path, 0o666)
+        text = self.markdown()
+        if self.scrub:
+            text = self.scrub(text)
+        # Owner-only from its first byte (C1): a report holds a run's
+        # errors and transcript, and other accounts on the host have no
+        # business reading them. O_EXCL after an unlink, so a rerun's file
+        # never keeps an older, wider mode.
         try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        # The report dir is a host bind; the coordinator runs as root in
+        # the container, so root would own the artifacts and the host user
+        # could neither read nor clean them (CI workspaces died on EACCES).
+        # The kit creates the dir as that user: the report goes to the
+        # dir's owner. Rootless Docker and local bench mode need nothing.
+        try:
+            st = os.stat(path.parent)
+            if os.geteuid() == 0 and st.st_uid != 0:
+                os.chown(path, st.st_uid, st.st_gid)
             os.chmod(path.parent, 0o777)
         except OSError:
             pass
