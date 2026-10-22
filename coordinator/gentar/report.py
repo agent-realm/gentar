@@ -99,6 +99,11 @@ class RunReport:
         # on the open descriptor, never by name (agy on #80: a name in a
         # world-writable dir can be swapped for a symlink before a chown).
         # Rootless Docker and local bench mode need nothing.
+        # The dir itself is never changed: no chmod (D4: it used to be opened
+        # 0777 on every write, so any account on the host could plant or
+        # delete reports), and no chown (handing a dir root created to the
+        # parent's owner was a rename race: Codex on #85). The bind source
+        # `./out` is made by the user first: the kit's run.sh and bin/arena.
         try:
             st = os.stat(path.parent)
             if os.geteuid() == 0 and st.st_uid != 0:
@@ -107,10 +112,6 @@ class RunReport:
             pass
         with os.fdopen(fd, "w") as fh:
             fh.write(text)
-        try:
-            os.chmod(path.parent, 0o777)
-        except OSError:
-            pass
         return path
 
     def markdown(self) -> str:

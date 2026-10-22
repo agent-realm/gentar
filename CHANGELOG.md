@@ -23,6 +23,20 @@ Adopters pin a release tag, not a branch.
 ## Unreleased
 
 ### Fixed
+- **The report directory is no longer opened to everyone** (D4). Every report
+  write ran `chmod 0777` on the report dir, a host bind, so any account on the
+  host could plant or delete reports. It existed so the host user could clean
+  what root wrote. Reports already go to the dir's owner on the open
+  descriptor, and the dir itself is never chmodded or chowned. `bin/arena run`
+  now makes the bind source `./out` as the user before compose can, as the
+  kit's `run.sh` already did.
+- **A report's subject no longer reads `«redacted:GENTAR_BENCH_USER»`.**
+  v0.10.0 scrubs the whole report and every exported span with the bench
+  identity. The default bench account `arena` (bin/bench-host-provision's
+  documented default) is also the default subject, so every subject was
+  blanked, in reports and in exported traces, for a name the docs publish.
+  That pairing is now exempt, like `GENTAR_BENCH_HOST=local`. Any other
+  account name is still scrubbed.
 - **A quarantined suite gets the same outcome everywhere, and it is never a
   pass.** Quarantine (`GENTAR_QUARANTINE`) wrote no report: a direct run
   exited 0 with nothing to read, and the kit's `run.sh`, which expects a
