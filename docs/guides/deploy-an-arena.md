@@ -11,6 +11,48 @@ see [`AGENTS.md`](../../AGENTS.md).
 
 Any Linux machine reachable over SSH.
 
+**On Ubuntu 24.04, `bin/bench-host-provision` builds it.** Run it once as
+an admin with sudo (`ssh <admin>@<host> 'bash -s' < bin/bench-host-provision`).
+Running it again is safe. It sets up:
+
+- **The bench account** (`arena` by default): the only account the arena
+  and the CI runner use. Its password is locked, it has no sudo, and it is
+  in no group other than its own and `kvm`.
+- **Rootless Docker** for that account, with the rootful daemon disabled.
+- **sbx**, pinned (`SBX_VERSION`) and held.
+- **The headless keyring** described below, all three pieces.
+- **The workspace root**, owned by that account with mode 0700.
+- **Docker's address pool**, kept off the host's own networks
+  (`GENTAR_DOCKER_POOL`).
+
+It refuses before it changes anything when:
+- the OS is not Ubuntu 24.04;
+- a parameter is bad;
+- the workspace root is not a dedicated directory (at least two levels
+  deep, no `..`, and if it exists, already the bench account's);
+- the bench account already exists with another uid, or in another group
+  than its own and kvm, or its uid belongs to another account.
+
+It also checks the Docker apt key's fingerprint before trusting it, and
+masks the rootful daemon.
+
+It ends with proofs. Each escalation attempt must be refused for the
+expected reason. Docker must be rootless, and sbx must run. If any proof
+fails it exits 1, so a run that exits 0 has proven the layout.
+
+Five things are each a step of their own:
+- `sbx login` as the bench account (step 1 below, or `bin/sbx-file-login`);
+- sbx's one-time first-run wizard, cleared as the bench account: run
+  `sbx setup` once and press `q` (continue without importing). On a fresh
+  account the FIRST interactive sbx session shows that screen and waits
+  for a key, so the first suite with a terminal fails with "prompt never
+  appeared". The driver names this cause when it sees the screen;
+- the bench template;
+- the runner (section 2);
+- the bench key in that account's `~/.ssh/authorized_keys` (step 2).
+
+Without the script, or on another OS, do the steps by hand:
+
 1. Install the [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)
    CLI `sbx`, and log in once with `sbx login` (device flow; the token
    persists).
@@ -23,6 +65,94 @@ Any Linux machine reachable over SSH.
    purpose.
 
 Check: `ssh <user>@<host> sbx ls` works with that key.
+
+**A headless host with a session bus keeps the sbx login in gnome-keyring.**
+Nobody is there to unlock it, so the host needs three pieces
+(`bin/bench-host-provision` sets up all three). This auto-unlock pattern is for
+disposable test benches only, never a production host: the keyring password
+sits in a file next to the keyring it unlocks.
+
+1. A user unit that starts the keyring UNLOCKED, e.g.
+   `~/.config/systemd/user/gnome-keyring.service` with
+   `ExecStart=/bin/sh -c "exec /usr/bin/gnome-keyring-daemon --foreground --components=secrets --unlock < $HOME/.keyring-pass"`
+   (the password file is mode 600, readable by that user only).
+2. A drop-in that brings it back after a crash:
+   `ExecStartPre=-/usr/bin/pkill -x gnome-keyring-d`, `Restart=always`,
+   `RestartSec=3`. gnome-keyring 46.1 crashed 14 times in 30 days on VM 142
+   (a GLib assertion when a client leaves during a session handshake).
+3. A D-Bus override, so that a client asking for the secrets service in
+   the 3-second restart gap starts THAT unit and waits for it, instead of
+   D-Bus starting the stock, LOCKED daemon, whose unlock prompt cannot
+   appear headless (sbx: "prompt dismissed", then `401 Unauthorized`; one
+   suite failed that way on 2026-10-05). In
+   `~/.local/share/dbus-1/services/org.freedesktop.secrets.service`:
+
+       [D-BUS Service]
+       Name=org.freedesktop.secrets
+       Exec=/bin/false
+       SystemdService=gnome-keyring.service
+
+   It needs a session bus with systemd activation (`dbus-daemon
+   --systemd-activation`, or dbus-broker). Leave the stock file under
+   `/usr/share` alone. Rollback: delete the override. Check: stop the
+   unit, call the service (`busctl --user call org.freedesktop.secrets
+   /org/freedesktop/secrets org.freedesktop.DBus.Peer Ping`), and the
+   journal says `Activating via systemd: ... unit='gnome-keyring.service'`
+   with no `gcr-prompter` line.
+
+Local bench mode reads a FILE login instead (below), so its coordinator never
+touches the keyring; the host's own `sbx` (ssh mode, `sbx daemon`) still does.
+
+**When the runner IS the bench host (local bench mode).** Put the runner
+(section 2) on the bench host itself and set `GENTAR_BENCH_HOST=local`, a
+plain repository variable: no SSH account, no key, no `BENCH_SSH_KEY`,
+`GENTAR_BENCH_USER` or bench secret at all. The arena then calls the host's
+`sbx` directly: the engine's `compose.local-bench.yml` runs the coordinator
+as the runner's user, with the host's `sbx` binary, its state and config
+(`~/.local/state/sandboxes`, `~/.config/sandboxes`,
+`~/.config/com.docker.sandboxes`) and the workspace root mounted at the same
+paths. The runner's user must be the one that ran `sbx login`. Benches see
+none of it; each gets only its own workspace directory. Proven on an arf VM
+(sbx 0.45.1) with the `smoke` and `scripted-onboarding` suites.
+
+**Rootless Docker.** Which uid "the runner's user" is inside the coordinator
+depends on the daemon, and `bin/docker-identity` decides it from the daemon
+the run actually uses (`DOCKER_HOST`, else the current context):
+
+| the daemon | the coordinator runs as | why |
+|---|---|---|
+| rootless (`docker info` lists `name=rootless`) | `0:0` | container root IS the user running the daemon; the user's own uid would map to a subordinate uid owning none of its files |
+| rootful | the user's own uid and gid, as before | container root is real root: never `0:0`, so local mode run AS root is refused |
+| cannot tell (`docker info` fails, times out, or is unreadable; not a unix socket) | nothing: refused | it never guesses |
+
+Nothing a caller sets chooses the uid: `GENTAR_LOCAL_UID`/`GID` are outputs.
+The same daemon is the one every later `docker` call uses (`DOCKER_HOST` is
+exported) and the socket the `osb` tier's server mounts
+(`GENTAR_DOCKER_SOCK`, e.g. `$XDG_RUNTIME_DIR/docker.sock`); a
+`GENTAR_DOCKER_SOCK` that is not that daemon is refused. On a host running
+both daemons, point `DOCKER_HOST` at the one the runner's user owns.
+
+The login must be in **files**. sbx in the coordinator has no session bus,
+so it reads the Docker login only from
+`~/.config/com.docker.sandboxes/com.docker.sandboxes-auth/`. On a host with
+a session bus and a keyring (gnome-keyring), `sbx login` puts the login in
+the keyring instead, and the coordinator cannot see it: every bench then
+fails at `PREPARE IMAGE` with "no default account profile set". Sign in once
+more, from a container, so the login is also written as files:
+
+    bin/sbx-file-login                 # device flow, as the runner's user
+    printf %s "$PAT" | bin/sbx-file-login --username <user> --password-stdin
+
+The token goes through a pipe only. The script passes `sbx login` nothing
+but `--username`, `--password-stdin` and `--help`, and refuses anything
+else without echoing it (a token on the command line would show in `ps`
+and `docker inspect`; `-D` debug output may print auth). It also refuses
+`--password-stdin` from a terminal, where a typed token would echo. After the
+login it makes the store owner-only (sbx writes its files 644). The host's
+keyring login stays as it is. The arena refuses with exit 2
+while that folder has no default account profile
+(`GENTAR_SBX_AUTH_CHECK=off` skips the check, for an sbx that keeps it
+elsewhere).
 
 ## 2. A self-hosted runner
 
@@ -39,6 +169,19 @@ GitHub-hosted runner cannot reach an internal bench-host.
 
 Several repositories can share one runner machine: register one runner
 per repository.
+
+On a host built by `bin/bench-host-provision`, register the runner as the
+bench account. Put `DOCKER_HOST=unix:///run/user/<uid>/docker.sock` and
+`XDG_RUNTIME_DIR=/run/user/<uid>` in the Actions runner's own `.env` (in the
+runner's install directory, which the runner service exports to every job;
+not the arena's compose `.env`): the account's rootless Docker is a user
+service, and the runner's system service does not read the account's
+`environment.d`.
+
+**Register the runner at REPOSITORY level, never at organisation level.**
+Give it a label no workflow in a public repository uses. An
+organisation-level runner can be picked up by every repository in the
+organisation.
 
 The `arena` runner only drives benches. The bench-free `plan` and `checks`
 jobs run on GitHub-hosted runners unless `GENTAR_CI_RUNNER` names a

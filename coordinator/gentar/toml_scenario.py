@@ -251,6 +251,16 @@ class TomlScenario:
         # container bench (template = image ref; default per config
         # otherwise, i.e. the sbx tier).
         self.bench = sc.get("bench")
+        # A suite that only a bench can prove (it deploys a database through
+        # the bench's Docker, say) names WHY here. The bench-free dry-run then
+        # reports it UNVERIFIED with that reason instead of failing on the
+        # tools it lacks; the arena runs it as any other suite. A reason is
+        # required: an unexplained skip is how checks rot.
+        self.bench_only = sc.get("bench_only", "")
+        if "bench_only" in sc and (not isinstance(self.bench_only, str)
+                                   or not self.bench_only.strip()):
+            raise ScenarioError(f"{path}: scenario.bench_only must be a non-empty string: "
+                                f"why only a bench can prove this suite")
         # What kind of data the scenario touches. "synthetic" is the only
         # value that lets a semantic turn send a screen to a judge (pilot,
         # 2026-09-26); anything else, or nothing, keeps every screen inside
