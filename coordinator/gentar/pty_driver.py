@@ -30,16 +30,47 @@ CURSOR_TEXT_RE = re.compile(r"^\s*❯\s*\S.*$", re.MULTILINE)
 SPINNER_RE = re.compile(r"^[✻✽✢·✳✶]", re.MULTILINE)
 
 
+def _option_block(rows: list[str]) -> list[str]:
+    """The unnumbered option block around the LAST `❯ <text>` row: that row
+    plus the contiguous rows above and below indented to the column where
+    its text starts (`❯ No, exit` / `  Yes, I trust this folder`). A prompt
+    line with typed text (`❯ git status`) has no such siblings."""
+    at = next((i for i in range(len(rows) - 1, -1, -1) if CURSOR_TEXT_RE.match(rows[i])), None)
+    if at is None:
+        return []
+    cur = rows[at]
+    glyph = cur.index("❯")
+    col = glyph + 1 + (len(cur) - glyph - 1 - len(cur[glyph + 1:].lstrip()))
+
+    def sibling(r: str) -> bool:
+        body = r.lstrip(" ")
+        return bool(body) and not body.startswith("❯") and len(r) - len(body) == col
+
+    block = [cur]
+    i = at - 1
+    while i >= 0 and sibling(rows[i]):
+        block.insert(0, rows[i])
+        i -= 1
+    i = at + 1
+    while i < len(rows) and sibling(rows[i]):
+        block.append(rows[i])
+        i += 1
+    return block
+
+
 def picker_visible(screen: str, label: "re.Pattern") -> bool:
     """A picker is on screen: a numbered `❯ N.` cursor line, or an
-    unnumbered `❯ <text>` cursor line with the wanted label somewhere in
-    the option block around it (the last 20 rows). The label condition keeps
-    the input prompt (`❯ ` plus typed text) from passing as a picker."""
+    unnumbered `❯ <text>` cursor line in a block of at least two aligned
+    options, one of which is the wanted label. Requiring the aligned
+    siblings keeps a prompt with typed text (`❯ git status`) from passing as
+    a picker even when the label's word is elsewhere on screen (agy on #62);
+    requiring the label means an unnumbered picker without it is not this
+    turn's picker, so the pick fails after `settle` rather than pressing
+    keys into it."""
     if PICKER_CURSOR_RE.search(screen):
         return True
-    rows = screen.splitlines()[-20:]
-    return (any(CURSOR_TEXT_RE.match(r) for r in rows)
-            and any(label.search(r) for r in rows))
+    block = _option_block(screen.splitlines()[-20:])
+    return len(block) >= 2 and any(label.search(r) for r in block)
 
 
 class DriverAbort(RuntimeError):
@@ -244,7 +275,16 @@ class PtyDriver:
                 return False
             seen.append(text)
             self.send_key("down")
-            time.sleep(1)
+            # Wait for the redraw: on a loaded bench it can land after a
+            # second, and a cursor read before it would look like a wrap
+            # (agy on #62). Unchanged after 3s: the cursor does not move,
+            # and the next pass sees a repeat.
+            for _ in range(6):
+                time.sleep(0.5)
+                now = next((ln for ln in reversed(self.screen().splitlines())
+                            if ln.lstrip().startswith("❯")), "")
+                if now.strip() != text:
+                    break
         return False
 
 

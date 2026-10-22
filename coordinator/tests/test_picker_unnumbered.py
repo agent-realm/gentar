@@ -79,6 +79,52 @@ class PickTest(unittest.TestCase):
         self.assertTrue(pty_driver.picker_visible("❯ No, exit\n  Yes, I trust\n", label))
 
 
+class SecondLookTest(unittest.TestCase):
+    """agy's first review of #62."""
+
+    def test_a_prompt_with_the_label_elsewhere_is_not_a_picker(self):
+        # a shell or input prompt with typed text, and the label's word in
+        # earlier output: down/enter must never be typed into it
+        label = re.compile("Yes", re.IGNORECASE)
+        screen = "All checks passed: Yes\n\n❯ git status\n"
+        self.assertFalse(pty_driver.picker_visible(screen, label))
+        d = MenuDriver(["unused"])
+        d.screen = lambda: screen
+        with fast():
+            self.assertFalse(d.pick_option("Yes", settle=2))
+        self.assertEqual(d.keys, [])
+
+    def test_an_unnumbered_picker_without_the_label_gets_no_keys(self):
+        d = MenuDriver(["No, exit", "Yes, I trust this folder"])
+        with fast():
+            self.assertFalse(d.pick_option("Maybe", settle=2))
+        self.assertEqual(d.keys, [])
+
+    def test_a_slow_redraw_is_not_read_as_a_wrap(self):
+        class Laggy(MenuDriver):
+            """The cursor moves one screen read after the key."""
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.pending = 0
+
+            def send_key(self, key):
+                self.keys.append(key)
+                if key == "down":
+                    self.pending = 2
+
+            def screen(self):
+                if self.pending:
+                    self.pending -= 1
+                    if not self.pending:
+                        self.pos = (self.pos + 1) % len(self.options)
+                return super().screen()
+
+        d = Laggy(["One", "Two", "Three"])
+        with fast():
+            self.assertTrue(d.pick_option("Three"))
+        self.assertEqual(d.keys, ["down", "down", "enter"])
+
+
 class SkippedPickTest(unittest.TestCase):
 
     def test_a_skipped_optional_pick_is_in_the_report(self):

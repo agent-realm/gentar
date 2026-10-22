@@ -106,7 +106,8 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                         if report is not None:
                             report.warnings.append(
                                 f"turn {i}: optional pick /{turn['label']}/ skipped: no "
-                                f"picker showing it appeared")
+                                f"picker offering it appeared (or the label was not among "
+                                f"its options)")
                         continue
                     raise TurnFailure(f"turn {i}: picker option /{turn['label']}/ not reachable")
                 _ok(spans, subject, run_id, name, i, f"pick /{turn['label']}/")
