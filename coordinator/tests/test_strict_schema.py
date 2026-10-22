@@ -13,6 +13,7 @@ from pathlib import Path
 from gentar.toml_scenario import ScenarioError, TomlScenario
 
 ROOT = Path(__file__).resolve().parents[2]
+ENGINE = Path(__file__).resolve().parents[1]
 ORACLE = '[scenario]\n[oracle]\nsteps = ["true"]\n'
 
 
@@ -83,12 +84,15 @@ class ClosedSchemaTest(unittest.TestCase):
         self.assertEqual((len(s.turns), len(s.files), len(s.commands)), (5, 1, 1))
 
     def test_every_shipped_scenario_parses(self):
-        shipped = [*ROOT.glob("coordinator/scenarios/*.toml"),
+        # the engine's own suites sit beside tests/ (coordinator/ in the
+        # repo, the image build's context); the examples and the kit only in
+        # a full checkout
+        shipped = [*ENGINE.glob("scenarios/*.toml"),
                    *ROOT.glob("examples/*/gentar/scenarios/*.toml"),
                    *ROOT.glob("subject-template/gentar/scenarios/*.toml")]
-        self.assertGreater(len(shipped), 20)
+        self.assertGreater(len(shipped), 20 if (ROOT / "examples").is_dir() else 5)
         for f in shipped:
-            with self.subTest(f=f.relative_to(ROOT)):
+            with self.subTest(f=f.name):
                 TomlScenario(f)
 
 
