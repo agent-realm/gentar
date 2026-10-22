@@ -986,9 +986,16 @@ render_dashboard() {
   fi
 }
 
+# The verdict a report states, from its own verdict row: pass, fail,
+# refuse, or skip (a quarantined suite, which did not run).
+report_verdict() {
+  sed -n 's/^| verdict | `\([a-z]*\) (exit [0-9]*)` |$/\1/p' "$1" | head -1
+}
+
 # Run every requested scenario; report all, fail if any failed.
 mkdir -p "$HERE/reports"
 status=0
+quarantined=""
 RUN_T0=$(( $(date +%s) - 5 ))   # the dashboard shows this invocation's runs only
 for s in "$SCENARIO" "$@"; do
   # Exit code is the verdict: 0 pass · 1 fail · 2 usage/config refusal.
@@ -1006,7 +1013,9 @@ for s in "$SCENARIO" "$@"; do
   # reproduce command that works for own-arena scenarios (the
   # engine's default assumes the central arena's invocation).
   found=0
+  skipped=0
   while IFS= read -r f; do
+    [ "$(report_verdict "$f")" = skip ] && skipped=1
     staged="$STAGE/$(basename "$f")"
     sed "s|^Reproduce: \`.*\`|Reproduce: \`gentar/run.sh $s\`|" "$f" \
       > "$staged" && found=1
@@ -1019,13 +1028,26 @@ for s in "$SCENARIO" "$@"; do
   done < <(find out -name 'report-*.md' -newer "$MARKER" 2>/dev/null)
   rm -f "$MARKER"
   if [ "$found" -ne 1 ]; then
-    # Every terminal outcome (pass/fail/refuse) writes one; a missing
+    # Every terminal outcome (pass/fail/refuse/skip) writes one; a missing
     # report means reporting itself broke — fail loudly, don't pass
     # silently without the fix-loop artifact.
     echo "no report written for $s" >&2
     rc=1
+  elif [ "$skipped" = 1 ] && [ "$rc" -eq 0 ]; then
+    quarantined="$quarantined $s"
   fi
   [ "$rc" -eq 0 ] || status=$rc
 done
+# A quarantined suite exits 0, so a known flake cannot turn the run red,
+# but it ran nothing. Said once more at the end, like the sweep's skipped
+# judged suites, so a green run is never read as having checked it.
+if [ -n "$quarantined" ]; then
+  n=$(echo $quarantined | wc -w | tr -d ' ')
+  msg="$n suite(s) quarantined, not run:$quarantined (GENTAR_QUARANTINE; neither a pass nor a failure)"
+  echo "run summary: $msg" >&2
+  if [ "${GITHUB_ACTIONS:-}" = true ]; then
+    echo "::warning title=quarantined suites not run::$msg"
+  fi
+fi
 render_dashboard || true
 exit "$status"

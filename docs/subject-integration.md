@@ -52,7 +52,9 @@ In return, and these are stable across engine versions within a major:
 
 - **The verdict is the exit code.** `0` pass · `1` fail · `2`
   usage/config refusal. No test-report layer in between; a refusal is
-  never reported as a failing test.
+  never reported as a failing test. A suite quarantined with
+  `GENTAR_QUARANTINE` does not run: it exits `0` so a known flake cannot
+  turn a run red, and its report says `skip`, never pass.
 - **A report for every terminal outcome**, at `out/report-<run_id>.md`
   (own-arena runners copy it into the subject's `gentar/reports/`):
   every step with its output tail, every assertion with what it

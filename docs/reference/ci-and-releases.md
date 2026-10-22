@@ -59,8 +59,11 @@ a **budget guard** (`GENTAR_BUDGET_CAP` against each scenario's declared
 `[budget] tokens`, accumulated from past runs' spans) that refuses an
 over-cap run with exit 2, and a **flake quarantine**
 (`GENTAR_QUARANTINE=name,…`) that skips a named suite rather than failing
-it. Both live in the engine, not in forge features, so they survive a
-change of forge.
+it. A quarantined suite does not run and is never a pass: it exits 0, its
+report and span say `skip`, and the kit's `run.sh` ends with a
+`run summary: … quarantined, not run` line (a warning annotation in
+Actions). Both live in the engine, not in forge features, so they survive
+a change of forge.
 
 ## Releases
 
