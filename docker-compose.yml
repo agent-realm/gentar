@@ -108,6 +108,15 @@ services:
       GENTAR_BENCH_HOST: ${GENTAR_BENCH_HOST:-}
       GENTAR_BENCH_USER: ${GENTAR_BENCH_USER:-}
       GENTAR_BENCH_JUMP: ${GENTAR_BENCH_JUMP:-}
+      # Where each bench's workspace lives ON THE BENCH HOST. Forwarded so the
+      # coordinator and bin/bench-reap (which reads the caller's shell) agree
+      # on it in SSH mode too; it used to reach the coordinator only in
+      # local mode, so an arena whose bench user has its own root (D5: a
+      # 0700 /tmp/gentar-workspaces-<user>) made workspaces in the default
+      # one instead. config.py's default, repeated: config._opt treats an
+      # EMPTY value as set, so `:-` (unset OR empty -> the default) is what
+      # keeps workspaces out of /<name>.
+      GENTAR_BENCH_WORKSPACE_ROOT: ${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}
       GENTAR_TART_HOST: ${GENTAR_TART_HOST:-}
       GENTAR_TART_USER: ${GENTAR_TART_USER:-}
       GENTAR_DAYTONA_API_KEY: ${GENTAR_DAYTONA_API_KEY:-}

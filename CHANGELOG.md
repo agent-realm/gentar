@@ -147,6 +147,14 @@ Adopters pin a release tag, not a branch.
   provider-key suites run only where a key is configured.
 
 ### Fixed
+- **`GENTAR_BENCH_WORKSPACE_ROOT` reaches the coordinator in SSH mode.**
+  `docker-compose.yml` forwarded it only in local bench mode, so over SSH the
+  coordinator always used `/tmp/gentar-workspaces` while `bin/bench-reap`
+  followed the caller's value. An arena whose bench user has its own
+  workspace root (D5: one 0700 root per bench user) made its workspaces in
+  the shared default instead. The compose default repeats config.py's,
+  behind `:-`, so an empty value also falls back (config.py treats empty as
+  set).
 - **Local bench mode on rootless Docker.** The local coordinator ran as the
   user's own uid, which under rootless Docker maps to a subordinate uid
   owning none of the user's files (workspace root, sbx state). The new
@@ -157,7 +165,9 @@ Adopters pin a release tag, not a branch.
   and the kit's `run.sh` export that daemon as `DOCKER_HOST` and its socket
   as `GENTAR_DOCKER_SOCK`, which the `osb` tier's server now mounts instead
   of a hard-coded `/var/run/docker.sock` (unchanged for rootful). The kit's
-  local mode refuses an engine without the script.
+  local mode refuses an engine without the script. `bin/arena` reads
+  `GENTAR_BENCH_HOST` as `run.sh` and the coordinator do, spaces and
+  quotes stripped.
 - **The kit's CI jobs do not leave SSH keys behind on a self-hosted runner.**
   `checks` and `bench` write `bench_key` and `gentar_clone_key` under
   `umask 077` (never readable by others, not even for a moment), remove stale
