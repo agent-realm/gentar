@@ -78,7 +78,6 @@ class RunReport:
     def write(self, directory: str | Path) -> Path:
         import os
         path = Path(directory) / f"report-{self.run_id}.md"
-        created = not path.parent.is_dir()
         path.parent.mkdir(parents=True, exist_ok=True)
         text = self.markdown()
         if self.scrub:
@@ -99,25 +98,15 @@ class RunReport:
         # on the open descriptor, never by name (agy on #80: a name in a
         # world-writable dir can be swapped for a symlink before a chown).
         # Rootless Docker and local bench mode need nothing.
-        # A dir root had to create itself (no one made the bind source first)
-        # goes to the owner of the dir it sits in, on a descriptor opened
-        # without following a symlink; the report then follows it. The dir is
-        # never opened to everyone (D4: it used to be chmod 0777 on every
-        # write, so any account on the host could plant or delete reports).
+        # The dir itself is never changed: no chmod (D4: it used to be opened
+        # 0777 on every write, so any account on the host could plant or
+        # delete reports), and no chown (handing a dir root created to the
+        # parent's owner was a rename race: Codex on #85). The bind source
+        # `./out` is made by the user first: the kit's run.sh and bin/arena.
         try:
-            if os.geteuid() == 0:
-                st = os.stat(path.parent)
-                if created and st.st_uid == 0:
-                    up = os.stat(path.parent.parent)
-                    if up.st_uid != 0:
-                        dfd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-                        try:
-                            os.fchown(dfd, up.st_uid, up.st_gid)
-                        finally:
-                            os.close(dfd)
-                        st = os.stat(path.parent)
-                if st.st_uid != 0:
-                    os.fchown(fd, st.st_uid, st.st_gid)
+            st = os.stat(path.parent)
+            if os.geteuid() == 0 and st.st_uid != 0:
+                os.fchown(fd, st.st_uid, st.st_gid)
         except OSError:
             pass
         with os.fdopen(fd, "w") as fh:

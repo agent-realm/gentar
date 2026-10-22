@@ -27,9 +27,9 @@ Adopters pin a release tag, not a branch.
   write ran `chmod 0777` on the report dir, a host bind, so any account on the
   host could plant or delete reports. It existed so the host user could clean
   what root wrote. Reports already go to the dir's owner on the open
-  descriptor. A dir root has to create itself (nothing made the bind source
-  first) now goes to the owner of the dir it sits in, on a descriptor opened
-  without following a symlink.
+  descriptor, and the dir itself is never chmodded or chowned. `bin/arena run`
+  now makes the bind source `./out` as the user before compose can, as the
+  kit's `run.sh` already did.
 - **A report's subject no longer reads `«redacted:GENTAR_BENCH_USER»`.**
   v0.10.0 scrubs the whole report and every exported span with the bench
   identity. The default bench account `arena` (bin/bench-host-provision's
