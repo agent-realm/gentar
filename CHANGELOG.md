@@ -22,10 +22,6 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
-## 0.10.0 — 2026-10-22
-
-Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what changed and why, upgrade for adopters, what is not live-proven, known limits, verification).
-
 ### Changed
 - **The scenario schema is closed: an unknown table or key is refused.**
   A scenario that misspelled a key used to load and run a weaker test that
@@ -38,8 +34,14 @@ Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what change
   refused the same way. The dry-run uses the engine's parser, so it fails
   such a suite as well. **Schema change:** a suite with a stray key that
   loaded on 0.9.x is refused from this release, so it ships in a minor
-  version. Every scenario in gentar, its examples, and the known adopters'
+  version (0.11.0). Every scenario in gentar, its examples, and the known adopters'
   repositories loads unchanged.
+
+## 0.10.0 — 2026-10-22
+
+Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what changed and why, upgrade for adopters, what is not live-proven, known limits, verification).
+
+### Changed
 - **The mirror's schedule is documented.** `docs/reference/ci-and-releases.md`
   says what the private mirror runs on its own: the gate daily at 00:17 UTC
   and the nightly at 01:17 UTC, on the head of `main`. The times are
