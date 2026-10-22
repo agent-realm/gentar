@@ -1,0 +1,21 @@
+# A PUBLIC repository: no self-hosted job here. Phase 2 runs in the private
+# mirror named below, which pulls this repository (subject-template/mirror/).
+
+[phase1]
+checks = true          # GitHub-hosted: dry-run, lint, kit drift
+bench = "off"          # required in mirror mode: there is no bench runner here
+floor = []             # required in mirror mode; the mirror's schedule covers main
+
+[phase2]
+release_gate = true
+evidence = "status"    # a success commit status `arena/phase2` on the commit
+
+[arena]
+bench = "mirror"
+mirror = "example-org/example-arena"   # private; it holds the runner and the secrets
+
+[secrets]
+route = ["EXAMPLE_READ_KEY"]   # a secret of this subject's own, set in the MIRROR
+
+[check]
+docs = false
