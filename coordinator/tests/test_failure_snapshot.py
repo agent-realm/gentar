@@ -62,7 +62,7 @@ class FakeBench:
     def exec(self, run_id, command, timeout=300, env=None):
         self.cmds.append((command, timeout))
         if command.startswith("ps ") and self.fail_ps:
-            raise TimeoutError("ssh hung")
+            raise TimeoutError(f"ssh hung after {SECRET}")
         if command.startswith("ps "):
             return 0, f"  PID  PPID STAT TT  ARGS\n  41  1 Ss pts/0 claude --key {SECRET}\n"
         return 3, f"diag output {SECRET}"
@@ -84,14 +84,19 @@ class TableTest(unittest.TestCase):
         self.assertEqual(load(BASE + TURN).on_failure, [])
 
     def test_refusals(self):
-        for bad in ('[on_failure]\ncommands = [""]\n', '[on_failure]\ncommands = [3]\n',
-                    '[on_failure]\ncommands = [{ command = "x", timeout = 0 }]\n',
-                    '[on_failure]\ncommands = [{ command = "x", timeout = true }]\n',
-                    '[on_failure]\ncommands = [{ command = "x", shell = "zsh" }]\n',
-                    '[on_failure]\nscript = "x"\n'):
-            with self.subTest(bad=bad), self.assertRaises(ScenarioError):
+        # each refusal says why, so a reverted feature (an unknown table)
+        # cannot pass for one (agy on #61)
+        entry = r"on_failure\.commands\[0\] must be a command string"
+        for bad, why in (('[on_failure]\ncommands = [""]\n', entry),
+                         ('[on_failure]\ncommands = [3]\n', entry),
+                         ('[on_failure]\ncommands = [{ command = "x", timeout = 0 }]\n', entry),
+                         ('[on_failure]\ncommands = [{ command = "x", timeout = true }]\n', entry),
+                         ('[on_failure]\ncommands = [{ command = "x", shell = "zsh" }]\n', entry),
+                         ('[on_failure]\ncommands = "uptime"\n', r"commands must be a list"),
+                         ('[on_failure]\nscript = "x"\n', r"'script'")):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ScenarioError, why):
                 load(BASE + TURN + bad)
-        with self.assertRaises(ScenarioError):                   # needs a driver
+        with self.assertRaisesRegex(ScenarioError, r"needs a \[driver\]"):
             load('[scenario]\nname = "x"\n[oracle]\nsteps = ["true"]\n'
                  '[on_failure]\ncommands = ["ps"]\n')
 
@@ -131,7 +136,17 @@ class SnapshotTest(unittest.TestCase):
     def test_a_part_that_cannot_be_read_says_why_and_never_masks_the_failure(self):
         r = self.run_turns(FakeBench(fail_ps=True))
         self.assertIn("could not read: TimeoutError", r.failure["processes"])
+        self.assertNotIn(SECRET, r.failure["processes"])        # the error text is scrubbed too
         self.assertIn("Starting cockpit", r.failure["screen"])
+
+    def test_a_snapshot_that_breaks_never_replaces_the_failure(self):
+        sc = load(BASE + TURN)
+        report = RunReport(scenario="tui", run_id="r1")
+        with mock.patch.object(scripted, "PtyDriver", FakeDriver), \
+             mock.patch.object(scripted, "failure_snapshot", side_effect=RuntimeError("boom")):
+            with self.assertRaises(scripted.TurnFailure):
+                scripted.run_turns(sc, FakeBench(), "r1", spans(), report=report)
+        self.assertEqual(report.failure, {"error": "snapshot not taken: RuntimeError"})
 
     def test_a_passing_run_has_no_snapshot(self):
         sc = load(BASE)                                      # no turns: passes
@@ -165,10 +180,13 @@ class PlainTimeoutTest(unittest.TestCase):
         flagged = ["timeout 300 claude", "/usr/bin/timeout 9 x", "cd x && timeout 5 y",
                    "FOO=1 timeout 5 y", "exec timeout 5 y", 'bash -lc "timeout 60 claude"',
                    "timeout -k 5 60 x", "timeout --kill-after 5 60 x",
-                   'timeout -s INT 60 bash -lc "cockpit run"']
+                   'timeout -s INT 60 bash -lc "cockpit run"',
+                   # agy on #61: a prefix by path, a command on a later line
+                   "/usr/bin/env timeout 60 claude", "cd /app\ntimeout 60 claude"]
         clean = ["timeout --foreground 300 claude", "timeout -k 5 --foreground 60 x",
                  "timeout --signal=INT --foreground 5 x", "claude --timeout 5", "echo timeout",
-                 "echo timeout 5", 'sh -c "cd x && timeout --foreground 5 y"', "cockpit run"]
+                 "echo timeout 5", 'sh -c "cd x && timeout --foreground 5 y"', "cockpit run",
+                 "cd /app\ntimeout --foreground 60 claude", "cd /app\necho timeout 5"]
         for c in flagged:
             self.assertTrue(p(c), c)
         for c in clean:

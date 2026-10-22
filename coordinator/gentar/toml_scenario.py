@@ -304,14 +304,16 @@ def plain_timeout(command: str, depth: int = 0) -> bool:
     import re
     import shlex
     try:
-        lex = shlex.shlex(command, posix=True, punctuation_chars=";&|(){}!")
+        # a newline separates commands as `;` does (agy on #61)
+        lex = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=";&|(){}!")
         lex.whitespace_split = True
         words = list(lex)
     except ValueError:
         return False
     prev = None
     for i, w in enumerate(words):
-        command_pos = (prev is None or prev in _SEPARATORS or prev in _PREFIXES
+        command_pos = (prev is None or prev in _SEPARATORS
+                       or (prev or "").rsplit("/", 1)[-1] in _PREFIXES
                        or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", prev or "") is not None)
         if command_pos and w.rsplit("/", 1)[-1] == "timeout" and i + 1 < len(words):
             # options before the duration; -k/-s (and the long forms without
@@ -421,6 +423,9 @@ class TomlScenario:
         if not isinstance(on_failure, dict) or set(on_failure) - {"commands"}:
             raise ScenarioError(f"{path}: [on_failure] takes only `commands`")
         self.on_failure = []
+        if not isinstance(on_failure.get("commands", []), list):
+            # a bare string would be iterated letter by letter (agy on #61)
+            raise ScenarioError(f"{path}: [on_failure] commands must be a list")
         for i, c in enumerate(on_failure.get("commands", [])):
             c = {"command": c} if isinstance(c, str) else c
             if (not isinstance(c, dict) or not isinstance(c.get("command"), str)

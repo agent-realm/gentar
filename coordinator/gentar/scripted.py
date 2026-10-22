@@ -34,7 +34,9 @@ def failure_snapshot(driver, bench, run_id: str, scenario, scrub) -> dict:
         try:
             return scrub(fn())
         except Exception as exc:                        # noqa: BLE001
-            return f"(could not read: {type(exc).__name__}: {exc})"[:300]
+            # the error text is scrubbed too: an ssh or bench error can carry
+            # a host or a value (agy on #61)
+            return scrub(f"(could not read: {type(exc).__name__}: {exc})")[:300]
 
     snap = {"screen": part(driver.screen),
             "raw_tail": part(lambda: _CTRL.sub(lambda m: f"\\x{ord(m.group()):02x}",
@@ -213,8 +215,12 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
             # process list, and verify never ran (cockpit's first-run
             # scenario, parked after 3 rounds). Captured BEFORE close()
             # kills the session; never raises over the real failure.
-            report.failure = failure_snapshot(driver, bench, run_id, scenario,
-                                              spans.redactor.scrub)
+            try:
+                report.failure = failure_snapshot(driver, bench, run_id, scenario,
+                                                  spans.redactor.scrub)
+            except Exception as exc:                    # noqa: BLE001
+                # never over the real failure, never skipping close()
+                report.failure = {"error": f"snapshot not taken: {type(exc).__name__}"}
         if state is not None:
             # The final screen, for soft [[verify.judge]] checks. Never
             # stored: it lives only in this run's memory.
