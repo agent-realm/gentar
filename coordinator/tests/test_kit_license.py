@@ -29,16 +29,19 @@ def kit_files():
 class KitLicenseHeaderTest(unittest.TestCase):
 
     def test_every_kit_file_carries_the_header(self):
-        files = kit_files()
-        self.assertGreaterEqual(len(files), 5)
-        for f in files:
+        checked = 0
+        for f in kit_files():
             p = ROOT / f
             if not p.exists():
                 continue                      # an optional file this tree does not ship
+            checked += 1
             lines = p.read_text().splitlines()
             start = 1 if lines and lines[0].startswith("#!") else 0
             with self.subTest(file=f):
                 self.assertEqual(lines[start:start + 2], HEADER)
+        # Count what was actually read, not the list: a list of names that
+        # all went missing would otherwise pass with nothing checked.
+        self.assertGreaterEqual(checked, 10)
 
     def test_the_repository_license_is_apache_2(self):
         self.assertIn("Apache License", (ROOT / "LICENSE").read_text()[:200])
