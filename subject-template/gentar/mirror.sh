@@ -22,8 +22,12 @@
 #
 # Needs `gh`, authenticated as someone who can run the mirror's workflows and
 # write commit statuses here. GENTAR_PUBLIC_REPO overrides this repository's
-# owner/name (default: what `gh repo view` says).
-# Exit: 0 green · 1 not green · 2 usage, or the mirror run could not be found.
+# owner/name (default: what `gh repo view` says). The wait polls the run's
+# own status every GENTAR_MIRROR_POLL seconds (30) for at most
+# GENTAR_MIRROR_WAIT seconds (10800); any token kind works, fine-grained
+# PATs included.
+# Exit: 0 green · 1 not green · 2 usage, the mirror run could not be found,
+# or it did not finish within the wait (no status posted).
 
 set -euo pipefail
 
@@ -74,8 +78,26 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 [ -n "$id" ] || { echo "mirror: the dispatched run did not appear in $MIRROR (request $REQ)" >&2; exit 2; }
-gh run watch "$id" -R "$MIRROR" --exit-status >/dev/null 2>&1 || true
-read -r concl url < <(gh run view "$id" -R "$MIRROR" --json conclusion,url --jq '"\(.conclusion) \(.url)"')
+# Wait by polling the run's own status, never by `gh run watch`: it does not
+# support fine-grained PATs (its --help), and a watch that failed must never
+# read as a finished run (Codex on #81). A gh call that fails is retried; a
+# field that is empty stays in place ("|"-separated, "-" for none).
+POLL=${GENTAR_MIRROR_POLL:-30}
+WAIT=${GENTAR_MIRROR_WAIT:-10800}
+case "$POLL$WAIT" in ''|*[!0-9]*) echo "mirror: GENTAR_MIRROR_POLL and GENTAR_MIRROR_WAIT are seconds" >&2; exit 2 ;; esac
+waited=0
+while :; do
+  status=""
+  IFS='|' read -r status concl url < <(gh run view "$id" -R "$MIRROR" --json status,conclusion,url \
+      --jq '"\(.status)|\(.conclusion // "-")|\(.url)"' 2>/dev/null) || true
+  [ "$status" = completed ] && break
+  if [ "$waited" -ge "$WAIT" ]; then
+    echo "mirror: run $id is still ${status:-unknown} after ${WAIT}s; no status posted (read it later: gentar/mirror.sh status $SHA)" >&2
+    exit 2
+  fi
+  sleep "$POLL"
+  waited=$((waited + POLL))
+done
 echo "mirror: run $url -- $concl"
 
 if [ $# -eq 0 ]; then

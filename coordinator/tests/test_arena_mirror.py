@@ -430,7 +430,14 @@ case "$1 $2" in
   "workflow run") : ;;
   "run list") jq -r "$(for a; do [ "$p" = --jq ] && printf '%s' "$a"; p=$a; done)" "$FIX/runs.json" ;;
   "run watch") exit "${WATCH_RC:-0}" ;;
-  "run view") echo "${CONCLUSION:-success} https://github.com/owner/repo-arena/actions/runs/77" ;;
+  "run view")
+    # VIEW_PENDING=N: the first N views find the run still in progress.
+    n=$(cat "$FIX/views" 2>/dev/null || echo 0); echo $((n + 1)) > "$FIX/views"
+    if [ "$n" -lt "${VIEW_PENDING:-0}" ]; then
+      echo "in_progress|-|https://github.com/owner/repo-arena/actions/runs/77"
+    else
+      echo "completed|${CONCLUSION:-success}|https://github.com/owner/repo-arena/actions/runs/77"
+    fi ;;
   api*)
     if [ "$2" = -X ]; then exit 0; fi
     case "$2" in
@@ -498,6 +505,29 @@ class MirrorDispatchTest(unittest.TestCase):
         r = self.run_with_match(CONCLUSION="cancelled", WATCH_RC="1")
         self.assertEqual(r.returncode, 1)
         self.assertIn("state=error", [c for c in self.calls() if c.startswith("api -X POST")][0])
+
+    def test_a_run_still_in_progress_is_waited_for_not_read_as_done(self):
+        # Codex on #81: `gh run watch` fails under a fine-grained PAT, and the
+        # old script then read the conclusion of a run still queued.
+        r = self.run_with_match(VIEW_PENDING="2", WATCH_RC="1", GENTAR_MIRROR_POLL="0")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(len([c for c in self.calls() if c.startswith("run view")]), 3)
+        self.assertEqual([c for c in self.calls() if c.startswith("run watch")], [])
+        post = [c for c in self.calls() if c.startswith("api -X POST")]
+        self.assertEqual(len(post), 1)
+        self.assertIn("state=success", post[0])
+        self.assertIn("target_url=https://github.com/owner/repo-arena/actions/runs/77", post[0])
+
+    def test_a_run_that_never_finishes_posts_nothing(self):
+        r = self.run_with_match(VIEW_PENDING="99", GENTAR_MIRROR_POLL="0", GENTAR_MIRROR_WAIT="0")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("still in_progress", r.stderr)
+        self.assertEqual([c for c in self.calls() if c.startswith("api -X POST")], [])
+
+    def test_the_wait_knobs_are_seconds(self):
+        r = self.run_with_match(GENTAR_MIRROR_POLL="soon")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual([c for c in self.calls() if c.startswith("api -X POST")], [])
 
     def test_a_targeted_run_posts_nothing(self):
         r = self.run_with_match("smoke")

@@ -65,7 +65,9 @@ Adopters pin a release tag, not a branch.
   slot empty and is logged by name). The mirror's plan job runs none of the
   public repository's code, so a branch editing its own policy or `plan.py`
   reaches no secret the mirror did not offer.
-- **`gentar/mirror.sh dispatch <sha> [suites]`** runs the mirror, waits, and
+- **`gentar/mirror.sh dispatch <sha> [suites]`** runs the mirror, waits (by
+  polling the run's own status, so a fine-grained token works; at most
+  `GENTAR_MIRROR_WAIT` seconds, after which it posts nothing), and
   for a full phase 2 posts the commit status `arena/phase2` (success,
   failure, or error) linking the mirror run. It finds its own run by a
   request id, never "the newest". `mirror.sh status <sha>` reads it back. A
