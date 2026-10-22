@@ -110,14 +110,20 @@ ROUTE_NAME = re.compile(r"[A-Z][A-Z0-9_]*")
 # (bench key, provider keys, judge key, telemetry), GitHub and the runner
 # own theirs, and a routed value becomes an environment variable of
 # run.sh and everything it starts, so names that steer a shell, a loader,
-# git, ssh, docker or python would let a policy line change how the arena
-# itself runs, not just what a suite sees.
+# libc, git, ssh, docker, python, node, perl, ruby or java would let a policy
+# line change how the arena itself runs, not just what a suite sees. Bash's
+# read-only variables are refused too: run.sh could not assign them. LC_*
+# also rides ssh's default SendEnv to the bench-host. (agy on #79 added
+# GLIBC_TUNABLES and BASHOPTS.)
 ROUTE_RESERVED_PREFIXES = ("GITHUB_", "ACTIONS_", "RUNNER_", "GENTAR_", "LD_", "DYLD_",
                            "BASH_", "DOCKER_", "COMPOSE_", "GIT_", "SSH_", "PYTHON",
-                           "ANTHROPIC_", "TYPESAFE_", "OTEL_")
+                           "ANTHROPIC_", "TYPESAFE_", "OTEL_", "GLIBC_", "MALLOC_", "LC_",
+                           "NODE_", "PERL", "RUBY", "JAVA_")
 ROUTE_RESERVED = {"BENCH_SSH_KEY", "PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD",
-                  "OLDPWD", "IFS", "ENV", "CDPATH", "PS4", "SHELLOPTS", "TMPDIR", "TERM",
-                  "LANG", "CI", "HOSTNAME", "PROMPT_COMMAND", "NODE_OPTIONS"}
+                  "OLDPWD", "IFS", "ENV", "CDPATH", "PS4", "SHELLOPTS", "BASHOPTS", "UID",
+                  "EUID", "PPID", "GROUPS", "TMPDIR", "TERM", "LANG", "LANGUAGE", "CI",
+                  "HOSTNAME", "PROMPT_COMMAND", "GCONV_PATH", "LOCPATH", "NLSPATH",
+                  "HOSTALIASES", "RES_OPTIONS", "LOCALDOMAIN"}
 
 README_MAX_LINES = 150
 # [text](target) and [text](target "title") / (target 'title')

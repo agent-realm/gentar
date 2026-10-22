@@ -431,11 +431,14 @@ The workflow stays byte-identical. Its bench job has eight fixed slots,
 each looking up ONE declared name (`secrets[<name>]`), so it receives those
 secrets and no others. `run.sh` takes them out of the slots before it does
 anything else, and passes a name only to the coordinator of a suite that
-declares it, taking it back when that suite ends. Values are redacted from the reports like any
-credential, and are never printed: `gentar/run.sh --route` shows the names,
-whether each arrived, and which suites ask for it. Names the kit wires itself
-(`BENCH_SSH_KEY`, `ANTHROPIC_*`, `TYPESAFE_API_KEY`, `GENTAR_*`), GitHub's and
-the runner's, and names that steer a shell, git, ssh, docker or python are
+declares it, taking it back when that suite ends; a routed name you set by
+hand, with no slot, goes the same one way. Values are scrubbed from the
+reports and spans like any credential, in `pass_env` too, and are never
+printed: `gentar/run.sh --route` shows the names, whether each arrived, and
+which suites ask for it. Names the kit wires itself (`BENCH_SSH_KEY`,
+`ANTHROPIC_*`, `TYPESAFE_API_KEY`, `GENTAR_*`), GitHub's and the runner's,
+bash's read-only variables, and names that steer a shell, the loader or
+libc, the locale, git, ssh, docker, python, node, perl, ruby or java are
 refused. So is a routed name no suite declares, at `--check`.
 
 **License.** The kit's files are Apache-2.0, as gentar is; each one says so

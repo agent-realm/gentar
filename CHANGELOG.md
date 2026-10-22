@@ -91,9 +91,13 @@ Adopters pin a release tag, not a branch.
   whole set), and `run.sh` clears the slots at once, gives each value its
   name inside the script, and exports a name only while the coordinator of
   a suite that declares it (`credentials` or `pass_env`) runs, so another
-  suite's coordinator never sees it. Routed values are redacted
-  from reports. Reserved names (the kit's own, GitHub's, the runner's, and
-  names that steer a shell, loader, git, ssh, docker or python) are refused,
+  suite's coordinator never sees it; a routed name set by hand, with no
+  slot, goes the same one way. Routed values are scrubbed from reports and
+  spans, a `pass_env` declaration included (the kit names them to the
+  coordinator in `GENTAR_REDACT_NAMES`). Reserved names (the kit's own,
+  GitHub's, the runner's, bash's read-only variables, and names that steer
+  a shell, the loader or libc, the locale, git, ssh, docker, python, node,
+  perl, ruby or java) are refused,
   and `--check` flags a route no suite declares. `gentar/run.sh --route`
   reports names and state, never values. The workflow stays byte-identical,
   so a subject with its own secret no longer has to fork it.
@@ -111,6 +115,35 @@ Adopters pin a release tag, not a branch.
   of the 2026-10-11 bench host. The guide (section 1) now points to it, and
   section 2 adds the runner's rootless `DOCKER_HOST` and repository-level
   registration.
+
+### Security
+- **Credential values never ride a command line, an error, a report or a
+  span (C1, the 2026-10-19 ground-up review).** Env values used to be put
+  on the command line: `export K='v'` in the `sbx exec … sh -lc` argv for
+  oracle steps, `env K=v` in the pty's `sbx exec -t` line, run through ssh
+  (the tart and daytona tiers did the same). Any account on the bench-host
+  could read them in `/proc`, and a timeout's error text was that argv, so
+  it reached the report and the spans. Now every tier with a shell
+  transport writes the env into an owner-only file inside the bench over
+  stdin, in an exec of its own (`sbx exec -i`), which reports the absolute
+  path it used; the command reads that file, deletes it and only then
+  applies it (so an env that moves `HOME` cannot strand it), all before it
+  runs; a name that is not a shell identifier is
+  refused. All env takes this path, not only credentials, so the run id
+  now also reaches driver sessions. A timeout names the operation (`sbx
+  exec`), never the argv. As defence in depth, the run's scrubber (bench
+  identity plus the declared credentials' values) now runs over the whole
+  report, the run's error text in the CI log, and every local span row,
+  not only the export. Reports are written owner-only (`0600`, given to the
+  report directory's owner when the coordinator runs as root) instead of
+  world-readable (handed to the owner through the open descriptor, never by
+  name), and the kit's staged copies are owner-only too. The osb tier types
+  its pty command into a shell, which echoes it, so it refuses a driver
+  scenario that forwards any env (`credentials` or `pass_env`) before any
+  bench (exit 2). Not live-proven:
+  a real provider key end to end through the new path. The gate suites
+  exercise it with non-secret env (the run id, the OTLP endpoint); the
+  provider-key suites run only where a key is configured.
 
 ### Fixed
 - **The kit's CI jobs do not leave SSH keys behind on a self-hosted runner.**
