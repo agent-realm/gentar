@@ -11,6 +11,48 @@ see [`AGENTS.md`](../../AGENTS.md).
 
 Any Linux machine reachable over SSH.
 
+**On Ubuntu 24.04, `bin/bench-host-provision` builds it.** Run it once as
+an admin with sudo (`ssh <admin>@<host> 'bash -s' < bin/bench-host-provision`).
+Running it again is safe. It sets up:
+
+- **The bench account** (`arena` by default): the only account the arena
+  and the CI runner use. Its password is locked, it has no sudo, and it is
+  in no group other than its own and `kvm`.
+- **Rootless Docker** for that account, with the rootful daemon disabled.
+- **sbx**, pinned (`SBX_VERSION`) and held.
+- **The headless keyring** described below, all three pieces.
+- **The workspace root**, owned by that account with mode 0700.
+- **Docker's address pool**, kept off the host's own networks
+  (`GENTAR_DOCKER_POOL`).
+
+It refuses before it changes anything when:
+- the OS is not Ubuntu 24.04;
+- a parameter is bad;
+- the workspace root is not a dedicated directory (at least two levels
+  deep, no `..`, and if it exists, already the bench account's);
+- the bench account already exists with another uid, or in another group
+  than its own and kvm, or its uid belongs to another account.
+
+It also checks the Docker apt key's fingerprint before trusting it, and
+masks the rootful daemon.
+
+It ends with proofs. Each escalation attempt must be refused for the
+expected reason. Docker must be rootless, and sbx must run. If any proof
+fails it exits 1, so a run that exits 0 has proven the layout.
+
+Five things are each a step of their own:
+- `sbx login` as the bench account (step 1 below, or `bin/sbx-file-login`);
+- sbx's one-time first-run wizard, cleared as the bench account: run
+  `sbx setup` once and press `q` (continue without importing). On a fresh
+  account the FIRST interactive sbx session shows that screen and waits
+  for a key, so the first suite with a terminal fails with "prompt never
+  appeared". The driver names this cause when it sees the screen;
+- the bench template;
+- the runner (section 2);
+- the bench key in that account's `~/.ssh/authorized_keys` (step 2).
+
+Without the script, or on another OS, do the steps by hand:
+
 1. Install the [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)
    CLI `sbx`, and log in once with `sbx login` (device flow; the token
    persists).
@@ -25,8 +67,8 @@ Any Linux machine reachable over SSH.
 Check: `ssh <user>@<host> sbx ls` works with that key.
 
 **A headless host with a session bus keeps the sbx login in gnome-keyring.**
-Nobody is there to unlock it, so the host needs three pieces (arf VM 142 has
-all three; a clone of it has them too). This auto-unlock pattern is for
+Nobody is there to unlock it, so the host needs three pieces
+(`bin/bench-host-provision` sets up all three). This auto-unlock pattern is for
 disposable test benches only, never a production host: the keyring password
 sits in a file next to the keyring it unlocks.
 
@@ -127,6 +169,17 @@ GitHub-hosted runner cannot reach an internal bench-host.
 
 Several repositories can share one runner machine: register one runner
 per repository.
+
+On a host built by `bin/bench-host-provision`, register the runner as the
+bench account. Put `DOCKER_HOST=unix:///run/user/<uid>/docker.sock` and
+`XDG_RUNTIME_DIR=/run/user/<uid>` in the runner's `.env`: the account's
+rootless Docker is a user service, and the runner's system service does not
+read the account's `environment.d`.
+
+**Register the runner at REPOSITORY level, never at organisation level.**
+Give it a label no workflow in a public repository uses. An
+organisation-level runner can be picked up by every repository in the
+organisation.
 
 The `arena` runner only drives benches. The bench-free `plan` and `checks`
 jobs run on GitHub-hosted runners unless `GENTAR_CI_RUNNER` names a

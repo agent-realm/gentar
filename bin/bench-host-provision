@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+# bench-host-provision: turn a fresh Ubuntu 24.04 machine into a gentar
+# bench host, with an isolated runner/bench account from the start.
+#
+#   ssh <admin>@<host> 'bash -s' < bin/bench-host-provision
+#   ssh <admin>@<host> 'GENTAR_BENCH_ACCOUNT=arena SBX_VERSION=0.45.1-1~ubuntu.24.04~noble bash -s' < bin/bench-host-provision
+#
+# Run as an admin with sudo, never as the bench account. Idempotent: run it
+# again after a change. The layout it builds:
+#   - the admin account: administration only, no CI anything;
+#   - the bench account (GENTAR_BENCH_ACCOUNT, default `arena`, uid
+#     GENTAR_BENCH_UID, default 1001): the ONLY account the arena and the CI
+#     runner use. Password locked, no sudo, groups <account> + kvm only and no
+#     other (an allow list: docker, sudo, adm, lxd, disk, shadow... never),
+#     home 750;
+#   - rootless Docker for that account; the rootful daemon is installed (a
+#     package dependency) but disabled, so no socket gives root;
+#   - sbx (docker-sbx) pinned (SBX_VERSION) and held, its daemon as a user
+#     unit, and a headless gnome-keyring started UNLOCKED from a password file
+#     (docs/guides/deploy-an-arena.md: the keyring pattern; for disposable test
+#     benches only);
+#   - the bench workspace root (GENTAR_BENCH_WORKSPACE_ROOT, default
+#     /tmp/gentar-workspaces) owned by the bench account, 0700;
+#   - Docker's networks in GENTAR_DOCKER_POOL (default 10.201.0.0/16): keep it
+#     off every range the host's own networks use.
+#
+# Contains no secret values. The one secret it creates is the keyring
+# password: random bytes written straight to ~<account>/.keyring-pass (600),
+# never printed. NOT done here, each its own step: `sbx login` as the bench
+# account (bin/sbx-file-login); clearing sbx's one-time first-run wizard as
+# that account (`sbx setup`, then q: the first interactive sbx session
+# otherwise shows it and waits); the bench template; the CI runner's
+# registration; and the bench SSH key in ~<account>/.ssh/authorized_keys.
+#
+# Ubuntu 24.04 (noble) only: the package names, the Docker apt suite and the
+# AppArmor rule for rootlesskit are noble's. Anything else is refused before
+# a single change is made, as are a bad parameter, a workspace root that is
+# not a dedicated directory, being run as the bench account or as root, and
+# a bench account (or uid) that already exists in a way this layout cannot
+# take over: another uid, the uid held by another account, or any group
+# other than its own and kvm. One refusal can only come after the apt base packages are
+# installed: a Docker apt key whose fingerprint is not Docker's.
+#
+# Exit: 0 provisioned, every proof passed · 1 a proof failed (printed as
+# FAIL or INCONCLUSIVE) · 2 refused.
+
+set -euo pipefail
+
+ACCOUNT=${GENTAR_BENCH_ACCOUNT:-arena}
+ACCOUNT_UID=${GENTAR_BENCH_UID:-1001}
+WSROOT=${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}
+POOL=${GENTAR_DOCKER_POOL:-10.201.0.0/16}
+SBX_VERSION=${SBX_VERSION:-0.39.0-1~ubuntu.24.04~noble}
+OS_RELEASE=${GENTAR_OS_RELEASE:-/etc/os-release}   # tests point this elsewhere
+
+refuse() { echo "bench-host-provision: $*" >&2; exit 2; }
+case "$ACCOUNT" in ''|*[!a-z0-9_-]*|[!a-z]*) refuse "bad GENTAR_BENCH_ACCOUNT: $ACCOUNT" ;; esac
+case "$ACCOUNT_UID" in ''|*[!0-9]*) refuse "bad GENTAR_BENCH_UID: $ACCOUNT_UID" ;; esac
+case "$WSROOT" in /*) ;; *) refuse "GENTAR_BENCH_WORKSPACE_ROOT must be an absolute path" ;; esac
+case "$WSROOT" in *[!A-Za-z0-9._/-]*) refuse "bad GENTAR_BENCH_WORKSPACE_ROOT: $WSROOT" ;; esac
+# A DEDICATED directory: systemd-tmpfiles' `d` line changes the owner and mode
+# of a directory that already exists, so /tmp or /etc here would hand it to
+# the bench account. Two components at least, no `.` or `..` segment, not a
+# symlink, and if it exists it is already the bench account's (a re-run).
+ws_parts=0
+IFS=/ read -ra ws_split <<< "${WSROOT#/}"
+for part in ${ws_split[@]+"${ws_split[@]}"}; do
+  case "$part" in
+    '') ;;
+    .|..) refuse "GENTAR_BENCH_WORKSPACE_ROOT must not contain . or .. ($WSROOT)" ;;
+    *) ws_parts=$((ws_parts + 1)) ;;
+  esac
+done
+[ "$ws_parts" -ge 2 ] || refuse "GENTAR_BENCH_WORKSPACE_ROOT must be a dedicated directory, two levels deep at least, e.g. /tmp/gentar-workspaces (got $WSROOT)"
+[ ! -L "$WSROOT" ] || refuse "GENTAR_BENCH_WORKSPACE_ROOT is a symlink: $WSROOT"
+if [ -e "$WSROOT" ]; then
+  ws_owner=$(stat -c %U "$WSROOT" 2>/dev/null || stat -f %Su "$WSROOT" 2>/dev/null || echo '?')
+  [ "$ws_owner" = "$ACCOUNT" ] || refuse "$WSROOT exists and belongs to $ws_owner, not $ACCOUNT; choose another workspace root"
+fi
+case "$POOL" in *[!0-9./]*|'') refuse "bad GENTAR_DOCKER_POOL: $POOL" ;; esac
+case "$SBX_VERSION" in *[!A-Za-z0-9.~:+-]*|'') refuse "bad SBX_VERSION: $SBX_VERSION" ;; esac
+# Read, not sourced: os-release is data here.
+os="$(sed -n 's/^ID=//p' "$OS_RELEASE" 2>/dev/null | tr -d '"' | head -1) $(sed -n 's/^VERSION_ID=//p' "$OS_RELEASE" 2>/dev/null | tr -d '"' | head -1)"
+[ "$os" = "ubuntu 24.04" ] || refuse "Ubuntu 24.04 only (this is '${os:-unknown}')"
+ADMIN=$(id -un)
+[ "$ADMIN" != "$ACCOUNT" ] || refuse "run it as an admin with sudo, not as $ACCOUNT"
+[ "$(id -u)" != 0 ] || refuse "run it as an admin with sudo, not as root (the proofs compare against the admin's home)"
+RUN="/run/user/$ACCOUNT_UID"
+# Groups other than the account's own and kvm. An ALLOW list: disk, shadow,
+# root, systemd-journal, libvirt and the like are as privileged as docker.
+extra_groups() { id -nG "$ACCOUNT" | tr ' ' '\n' | { grep -vxE "$ACCOUNT|kvm" || true; } | tr '\n' ' ' | sed 's/ *$//'; }
+# An account that already exists is taken over only if it already has the
+# layout's shape. Refused here, before any change, rather than after apt.
+if id "$ACCOUNT" >/dev/null 2>&1; then
+  have_uid=$(id -u "$ACCOUNT")
+  [ "$have_uid" = "$ACCOUNT_UID" ] || refuse "$ACCOUNT exists with uid $have_uid, not $ACCOUNT_UID"
+  extra=$(extra_groups)
+  [ -z "$extra" ] || refuse "$ACCOUNT exists and is in other groups than its own and kvm: $extra; remove them first"
+else
+  uid_owner=$(getent passwd "$ACCOUNT_UID" 2>/dev/null | cut -d: -f1 || true)
+  [ -z "$uid_owner" ] || refuse "uid $ACCOUNT_UID is taken by $uid_owner; set GENTAR_BENCH_UID"
+fi
+
+echo "== apt base"
+sudo DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null
+# libicu74 libkrb5-3 zlib1g: the GitHub Actions runner's own dependencies.
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+  ca-certificates curl gnupg jq git rsync unzip make python3 python3-venv \
+  uidmap slirp4netns dbus-user-session gnome-keyring libsecret-tools \
+  libicu74 libkrb5-3 zlib1g >/dev/null && echo ok
+
+echo "== docker apt repo"
+# Docker's published release key fingerprint; a key that does not match is
+# never installed.
+DOCKER_KEY_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+key=$(mktemp)
+trap 'rm -f "$key"' EXIT
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o "$key"
+# awk reads ALL of gpg's output (no early `exit`): closing the pipe early can
+# SIGPIPE gpg, and under pipefail the empty substitution would stop the
+# script with no message.
+fpr=$(gpg --show-keys --with-colons "$key" 2>/dev/null | awk -F: '/^fpr:/ && f == "" { f = $10 } END { print f }')
+[ "$fpr" = "$DOCKER_KEY_FPR" ] || refuse "the Docker apt key's fingerprint is '${fpr:-none}', not Docker's $DOCKER_KEY_FPR"
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo install -m 0644 "$key" /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu noble stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+sudo DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null
+# A previous run held docker-sbx; release it so a new SBX_VERSION can install.
+sudo apt-mark unhold docker-sbx >/dev/null 2>&1 || true
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+  docker-ce docker-ce-cli containerd.io docker-ce-rootless-extras \
+  docker-buildx-plugin docker-compose-plugin "docker-sbx=${SBX_VERSION}" >/dev/null
+sudo apt-mark hold docker-sbx >/dev/null
+sbx version
+
+echo "== rootful dockerd off and masked (the bench account uses rootless Docker)"
+# Masked, not only disabled: no package upgrade or socket activation can
+# start the rootful daemon again. The bench account's rootless docker.service
+# is a USER unit, which this does not touch.
+sudo systemctl disable --now docker.service docker.socket >/dev/null 2>&1 || true
+sudo systemctl mask docker.service docker.socket >/dev/null
+systemctl is-active docker.service || true
+
+echo "== apparmor: allow rootlesskit user namespaces (Ubuntu 24.04 restricts them)"
+sudo tee /etc/apparmor.d/usr.bin.rootlesskit >/dev/null <<'AA'
+# rootless Docker for the gentar bench account (bin/bench-host-provision)
+abi <abi/4.0>,
+include <tunables/global>
+
+/usr/bin/rootlesskit flags=(unconfined) {
+  userns,
+  include if exists <local/usr.bin.rootlesskit>
+}
+AA
+sudo apparmor_parser -r /etc/apparmor.d/usr.bin.rootlesskit
+
+echo "== bench account $ACCOUNT"
+id "$ACCOUNT" >/dev/null 2>&1 || sudo useradd -m -u "$ACCOUNT_UID" -U -s /bin/bash -G kvm \
+  -c "gentar CI runner + bench account (bin/bench-host-provision)" "$ACCOUNT"
+sudo passwd -l "$ACCOUNT" >/dev/null
+sudo chmod 750 "/home/$ACCOUNT"
+grep -q "^$ACCOUNT:" /etc/subuid || echo "$ACCOUNT:165536:65536" | sudo tee -a /etc/subuid >/dev/null
+grep -q "^$ACCOUNT:" /etc/subgid || echo "$ACCOUNT:165536:65536" | sudo tee -a /etc/subgid >/dev/null
+sudo loginctl enable-linger "$ACCOUNT"
+for _ in $(seq 1 20); do sudo test -S "$RUN/bus" && break; sleep 1; done
+sudo ls -ld "$RUN" "$RUN/bus"
+
+echo "== bench workspace root"
+echo "d $WSROOT 0700 $ACCOUNT $ACCOUNT -" | sudo tee /etc/tmpfiles.d/gentar-workspaces.conf >/dev/null
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/gentar-workspaces.conf
+stat -c '%n %U %a' "$WSROOT"
+
+echo "== $ACCOUNT's user units"
+sudo -u "$ACCOUNT" -H env ACCOUNT="$ACCOUNT" RUN="$RUN" POOL="$POOL" bash -euo pipefail <<'IN'
+umask 077
+cd ~
+[ -s ~/.keyring-pass ] || head -c 48 /dev/urandom | base64 -w0 > ~/.keyring-pass
+chmod 600 ~/.keyring-pass
+mkdir -p ~/.config/systemd/user/gnome-keyring.service.d ~/.local/share/dbus-1/services \
+  ~/.config/environment.d ~/.config/docker
+
+cat > ~/.config/systemd/user/gnome-keyring.service <<'U'
+[Unit]
+Description=gnome-keyring secrets, started unlocked (gentar bench host)
+After=dbus.socket
+[Service]
+ExecStart=/bin/sh -c "exec /usr/bin/gnome-keyring-daemon --foreground --components=secrets --unlock < $HOME/.keyring-pass"
+Type=simple
+Restart=on-failure
+[Install]
+WantedBy=default.target
+U
+
+cat > ~/.config/systemd/user/gnome-keyring.service.d/override.conf <<U
+[Service]
+ExecStartPre=-/usr/bin/pkill -u $ACCOUNT -x gnome-keyring-d
+Restart=always
+RestartSec=3
+U
+
+cat > ~/.config/systemd/user/sandboxd.service <<'U'
+[Unit]
+Description=sbx sandboxd daemon (gentar bench host)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/sbx daemon start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+U
+
+cat > ~/.local/share/dbus-1/services/org.freedesktop.secrets.service <<'U'
+# D-Bus activation of the secrets service goes through the UNLOCKING unit,
+# never the stock locked daemon (docs/guides/deploy-an-arena.md).
+[D-BUS Service]
+Name=org.freedesktop.secrets
+Exec=/bin/false
+SystemdService=gnome-keyring.service
+U
+
+# rootless dockerd: keep Docker's networks off the host's own ranges
+printf '{ "default-address-pools": [ { "base": "%s", "size": 24 } ] }\n' "$POOL" > ~/.config/docker/daemon.json
+
+echo "DOCKER_HOST=unix://$RUN/docker.sock" > ~/.config/environment.d/docker.conf
+grep -q "DOCKER_HOST=unix://$RUN" ~/.bashrc || \
+  sed -i "1i export DOCKER_HOST=unix://$RUN/docker.sock  # rootless docker" ~/.bashrc
+chmod 755 ~/.config ~/.config/systemd ~/.config/systemd/user ~/.local ~/.local/share \
+  ~/.local/share/dbus-1 ~/.local/share/dbus-1/services ~/.config/environment.d ~/.config/docker
+chmod 644 ~/.config/systemd/user/*.service ~/.config/systemd/user/gnome-keyring.service.d/override.conf \
+  ~/.local/share/dbus-1/services/*.service ~/.config/environment.d/docker.conf ~/.config/docker/daemon.json
+
+export XDG_RUNTIME_DIR="$RUN" DBUS_SESSION_BUS_ADDRESS="unix:path=$RUN/bus"
+systemctl --user daemon-reload
+systemctl --user enable --now gnome-keyring.service sandboxd.service
+
+echo "== rootless docker"
+dockerd-rootless-setuptool.sh install 2>&1 | tail -3
+systemctl --user enable docker.service >/dev/null 2>&1 || true
+systemctl --user is-active gnome-keyring.service sandboxd.service docker.service
+IN
+
+echo "== proofs (each must say REFUSED for the expected reason; then rootless Docker and sbx)"
+# --- proofs: a refusal counts only with the EXPECTED reason; a missing file
+# or an unroutable address also fails, and would prove nothing.
+fails=0
+p() {  # $1 label, $2 expected-reason regex, rest = command run as the bench account
+  local label=$1 want=$2 err; shift 2
+  if err=$(sudo -u "$ACCOUNT" -H "$@" 2>&1 >/dev/null); then
+    echo "FAIL (allowed): $label"; fails=$((fails + 1))
+  elif printf '%s' "$err" | grep -qiE "$want"; then
+    echo "REFUSED: $label -- ${err%%$'\n'*}"
+  else
+    echo "INCONCLUSIVE: $label failed for another reason: ${err%%$'\n'*}"; fails=$((fails + 1))
+  fi
+}
+# --- end proofs
+ADMIN_HOME=$(getent passwd "$ADMIN" | cut -d: -f6)
+p "ls $ADMIN_HOME"                  "permission denied"  ls "$ADMIN_HOME"
+p "read $ADMIN's authorized_keys"   "permission denied"  head -c1 "$ADMIN_HOME/.ssh/authorized_keys"
+p "sudo -n"                         "password is required|not in the sudoers|may not run sudo"  sudo -n true
+p "rootful docker socket (info)"    "permission denied|no such file|cannot connect|is the docker daemon running" \
+  docker -H unix:///var/run/docker.sock info
+extra=$(extra_groups)
+if [ -n "$extra" ]; then
+  echo "FAIL (groups other than $ACCOUNT and kvm): $extra"; fails=$((fails + 1))
+else echo "REFUSED: no group other than its own and kvm ($(id -nG "$ACCOUNT"))"; fi
+A=(sudo -u "$ACCOUNT" -H env XDG_RUNTIME_DIR="$RUN" DOCKER_HOST="unix://$RUN/docker.sock")
+if "${A[@]}" docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q '"name=rootless'; then
+  echo "ok: rootless docker"
+else echo "FAIL: $ACCOUNT's docker is not rootless"; fails=$((fails + 1)); fi
+"${A[@]}" docker run --rm alpine:3 sh -c 'ip -4 route | head -1' || { echo "FAIL: rootless docker cannot run a container"; fails=$((fails + 1)); }
+"${A[@]}" sbx version || { echo "FAIL: sbx does not run as $ACCOUNT"; fails=$((fails + 1)); }
+id "$ACCOUNT"
+if [ "$fails" -gt 0 ]; then
+  echo "bench-host-provision: $fails proof(s) failed (see FAIL / INCONCLUSIVE above); the host is not ready" >&2
+  exit 1
+fi
+echo "next, each its own step: sbx login as $ACCOUNT (bin/sbx-file-login), then clear sbx's one-time first-run wizard as $ACCOUNT (sbx setup, press q), the bench template, the runner (as $ACCOUNT, with DOCKER_HOST=unix://$RUN/docker.sock and XDG_RUNTIME_DIR=$RUN in its .env), and the bench key in ~$ACCOUNT/.ssh/authorized_keys"
