@@ -94,7 +94,14 @@ if [ -n "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
     [ "$entry" != "$rest" ] || refuse "cannot tell whether the Docker daemon at $sock is rootless: unexpected 'docker info' output"
     rest=${rest#*\"}
     [ "${entry%%,*}" = name=rootless ] && rootless=yes
-    rest=${rest#,}
+    # After an entry: the end, or a comma and the next entry. A trailing
+    # comma or two entries with no separator is not the array docker
+    # prints, and is refused (Codex on #83), not read entry by entry.
+    case "$rest" in
+      '') ;;
+      ,'"'*) rest=${rest#,} ;;
+      *) refuse "cannot tell whether the Docker daemon at $sock is rootless: unexpected 'docker info' output" ;;
+    esac
   done
 fi
 

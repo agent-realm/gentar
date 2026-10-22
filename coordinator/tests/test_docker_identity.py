@@ -169,7 +169,10 @@ class DockerIdentityTest(unittest.TestCase):
 
     def test_unparseable_output_refuses(self):
         for info in ("", "rootless", "[name=rootless]", '["name=rootless"', '"name=rootless"]',
-                     'map[name:rootless]', '["name=rootless",]x'):
+                     'map[name:rootless]', '["name=rootless",]x',
+                     # Codex on #83: a trailing comma, or no separator
+                     '["name=rootless",]', '["name=rootless""bad"]', '["name=apparmor",]',
+                     '["name=apparmor"x"name=rootless"]'):
             with self.subTest(info=info):
                 self.refused("unexpected 'docker info' output", "--local",
                              DOCKER_HOST=f"unix://{USER_SOCK}", FAKE_INFO=info)
