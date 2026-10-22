@@ -155,6 +155,19 @@ Adopters pin a release tag, not a branch.
   the shared default instead. The compose default repeats config.py's,
   behind `:-`, so an empty value also falls back (config.py treats empty as
   set).
+- **Local bench mode on rootless Docker.** The local coordinator ran as the
+  user's own uid, which under rootless Docker maps to a subordinate uid
+  owning none of the user's files (workspace root, sbx state). The new
+  `bin/docker-identity` asks the daemon the run actually uses: rootless runs
+  the coordinator as `0:0` (there, the user); rootful keeps the user's uid
+  and refuses local mode run as root (never `0:0`); a daemon it cannot read
+  is refused, never guessed. No variable or flag chooses the uid. `bin/arena`
+  and the kit's `run.sh` export that daemon as `DOCKER_HOST` and its socket
+  as `GENTAR_DOCKER_SOCK`, which the `osb` tier's server now mounts instead
+  of a hard-coded `/var/run/docker.sock` (unchanged for rootful). The kit's
+  local mode refuses an engine without the script. `bin/arena` reads
+  `GENTAR_BENCH_HOST` as `run.sh` and the coordinator do, spaces and
+  quotes stripped.
 - **The kit's CI jobs do not leave SSH keys behind on a self-hosted runner.**
   `checks` and `bench` write `bench_key` and `gentar_clone_key` under
   `umask 077` (never readable by others, not even for a moment), remove stale
