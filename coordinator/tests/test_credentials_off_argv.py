@@ -6,7 +6,7 @@ the pty's ssh/`sbx exec -t` command line, both readable by every account on
 the bench-host through /proc; a timeout's text was that argv, and it went
 into the report (world-readable) and the spans. Now env goes into an
 owner-only file in the bench over stdin, in an exec of its own, and is
-sourced and deleted before the command runs.
+read, deleted and applied before the command runs.
 """
 
 import os
@@ -18,8 +18,8 @@ from pathlib import Path
 from unittest import mock
 
 from gentar import coordinator as coord
-from gentar.benchhost import (BenchHostError, DaytonaBenchHost, SbxBenchHost,
-                              TartBenchHost)
+from gentar.benchhost import (BenchHost, BenchHostError, DaytonaBenchHost,
+                              SbxBenchHost, TartBenchHost)
 from gentar.config import Config
 from gentar.report import RunReport
 from gentar.spans import Spans
@@ -277,6 +277,52 @@ class KitStagedCopyTest(unittest.TestCase):
     def test_the_kits_staged_report_copy_is_owner_only(self):
         text = RUN_SH.read_text()
         self.assertIn('(umask 077; sed "s|^Reproduce:', text)
+
+
+class ShellHost(BenchHost):
+    """_stage_env's real shell behaviour, with this machine's sh as the
+    bench: the staged file lands in a temporary HOME."""
+
+    def __init__(self, home):              # no Config: only staging is used
+        self.home = home
+
+    def _write_stdin(self, name, remote_sh, content):
+        subprocess.run(["sh", "-c", remote_sh], input=content, text=True, check=True,
+                       env={"HOME": self.home, "PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+
+
+class StagedFileLifecycleTest(unittest.TestCase):
+    """The prefix applies every value, leaves no file behind and exports no
+    helper variable, even when the env itself moves HOME (Codex on #80: the
+    old `. f; rm -f f` expanded the delete's path under the NEW home)."""
+
+    def run_prefixed(self, shell, env, probe):
+        home = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        prefix = ShellHost(home)._stage_env("box", env)
+        r = subprocess.run([shell, "-c", prefix + probe], capture_output=True, text=True,
+                           env={"HOME": home, "PATH": os.environ.get("PATH", "/usr/bin:/bin")})
+        left = [f for f in os.listdir(home) if f.startswith(".gentar-env-")]
+        return r, left
+
+    def test_values_arrive_and_the_file_is_gone(self):
+        for shell in ("sh", "bash"):
+            with self.subTest(shell=shell):
+                r, left = self.run_prefixed(shell, ENV, 'printf "%s|%s" "$FAKE_PROVIDER_KEY" "$SPACEY"')
+                self.assertEqual((r.returncode, r.stdout), (0, f"{SECRET}|a b'c"), r.stderr)
+                self.assertEqual(left, [])
+
+    def test_a_home_override_cannot_strand_the_file(self):
+        env = {"HOME": "/elsewhere", **ENV}
+        r, left = self.run_prefixed("sh", env, 'printf "%s|%s" "$HOME" "$FAKE_PROVIDER_KEY"')
+        self.assertEqual((r.returncode, r.stdout), (0, f"/elsewhere|{SECRET}"), r.stderr)
+        self.assertEqual(left, [])
+
+    def test_the_helper_variable_never_reaches_the_program(self):
+        r, _ = self.run_prefixed("sh", ENV, 'env')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("__gentar_env", r.stdout)
+        self.assertIn(f"FAKE_PROVIDER_KEY={SECRET}", r.stdout)
 
 
 if __name__ == "__main__":

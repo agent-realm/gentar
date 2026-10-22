@@ -68,8 +68,9 @@ Adopters pin a release tag, not a branch.
   could read them in `/proc`, and a timeout's error text was that argv, so
   it reached the report and the spans. Now every tier with a shell
   transport writes the env into an owner-only file inside the bench over
-  stdin, in an exec of its own (`sbx exec -i`), and the command sources and
-  deletes it before it runs; a name that is not a shell identifier is
+  stdin, in an exec of its own (`sbx exec -i`), and the command reads it,
+  deletes it and only then applies it (so an env that moves `HOME` cannot
+  strand the file), all before it runs; a name that is not a shell identifier is
   refused. All env takes this path, not only credentials, so the run id
   now also reaches driver sessions. A timeout names the operation (`sbx
   exec`), never the argv. As defence in depth, the run's scrubber (bench

@@ -210,13 +210,16 @@ class BenchHost:
         every account on the bench-host through /proc, and a timeout's
         error text is the whole argv. They go into an owner-only file in
         the bench, over stdin, in an exec of their own; the returned prefix
-        sources the file and deletes it before the command runs. '' when
-        there is nothing to pass."""
+        reads the file into a shell variable, deletes it, and only then
+        applies it, so an assignment it carries (HOME, say) cannot move the
+        path the delete expands (Codex on #80). The variable is never
+        exported. '' when there is nothing to pass."""
         if not env:
             return ""
         path = f'"${{HOME:-/tmp}}/.gentar-env-{secrets.token_hex(8)}"'
         self._write_stdin(name, f"umask 077 && cat > {path}", _env_file(env))
-        return f". {path} || exit 97; rm -f {path}; "
+        return (f'__gentar_env=$(cat {path}) && rm -f {path} || exit 97; '
+                f'eval "$__gentar_env"; unset __gentar_env; ')
 
 
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")

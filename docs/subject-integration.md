@@ -182,8 +182,8 @@ The contract:
   are exported into every oracle step and the pty driver process
   inside the sandbox. The bench dies with the run; nothing persists.
   They never travel on a command line: each is written into an
-  owner-only file inside the bench over stdin, then sourced and
-  deleted before the command runs, so no other account on the
+  owner-only file inside the bench over stdin, then read, deleted and
+  applied before the command runs, so no other account on the
   bench-host sees them in its process list. The osb tier, which types
   its pty command, refuses a credentialed driver scenario (exit 2).
 - **Names only in the record.** Spans and run reports carry the names
