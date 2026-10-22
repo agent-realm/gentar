@@ -57,6 +57,14 @@ class WorkspaceRootTest(unittest.TestCase):
                          DEFAULT)
 
 
+REAP = ROOT / "bin" / "bench-reap"
+
+
+# The image build runs the unit suite with only coordinator/ as its context,
+# where neither file exists (agy on #82: unguarded, this broke the build).
+# The hosted unit job checks out the whole repository and runs it there.
+@unittest.skipUnless(COMPOSE.exists() and REAP.exists(),
+                     "the repository root is not in the image build context")
 class WorkspaceRootDefaultsAgreeTest(unittest.TestCase):
     """The compose default, config.py's and bin/bench-reap's are one value."""
 
@@ -65,9 +73,7 @@ class WorkspaceRootDefaultsAgreeTest(unittest.TestCase):
         self.assertIn(f"GENTAR_BENCH_WORKSPACE_ROOT: ${{GENTAR_BENCH_WORKSPACE_ROOT:-{DEFAULT}}}", text)
         config = (ROOT / "coordinator" / "gentar" / "config.py").read_text()
         self.assertIn(f'"GENTAR_BENCH_WORKSPACE_ROOT", "{DEFAULT}"', config)
-        reap = ROOT / "bin" / "bench-reap"
-        if reap.exists():
-            self.assertIn(f"${{GENTAR_BENCH_WORKSPACE_ROOT:-{DEFAULT}}}", reap.read_text())
+        self.assertIn(f"${{GENTAR_BENCH_WORKSPACE_ROOT:-{DEFAULT}}}", REAP.read_text())
 
 
 if __name__ == "__main__":
