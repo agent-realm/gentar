@@ -24,7 +24,7 @@ workflow:
 | 1 | **Subject name** | `subject = "…"` in every scenario TOML — `run.sh` reads it from there | `REPLACE-ME`, refused until set |
 | 2 | **Suites** | `gentar/scenarios/*.toml` — install *decisions* + reality assertions, never scripts | `first-suite.toml`, fully commented |
 | 3 | **Credentials** | `credentials = [names]` per suite — env var NAMES; entries are alternatives, a list entry is an all-of group; none = oracle suite | none (first-suite is credential-less) |
-| 4 | **Trigger** | `.github/workflows/gentar-arena.yml` (own arena, kept byte-identical to the kit) and/or a dispatch job (central arena) | own-arena workflow: PRs, push to main, tags, dispatch — what each runs is the run policy's |
+| 4 | **Trigger** | `.github/workflows/gentar-arena.yml` (own arena, kept byte-identical to the kit; the central arena's dispatch job is retired) | own-arena workflow: PRs, push to main, tags, dispatch — what each runs is the run policy's |
 | 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.9.3` — a release tag, bumped deliberately |
 | 6 | **Run policy** | `gentar/policy.toml` — phase 1 on PRs and main pushes, phase 2 (full regression) on dispatch / `arena` / `v*-rc*`, releases gated by `gentar/release-gate.sh` | PRs bench-free (`bench = "off"`), empty floor, gate on |
 | 7 | **Dry-run hooks** | `gentar/hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | no-ops |
@@ -265,15 +265,14 @@ whatever the policy says. A fork can still add its own workflow aimed at the
 runner, so on a public repo also set "Require approval for all external
 contributors".
 
-**Central arena** — a ~10-line dispatch job in your repo fires a
-`workflow_dispatch` at a gentar instance someone else operates, passing
-your PR head sha as the subject ref. Nothing to host; you need a
-`GENTAR_DISPATCH_TOKEN` and the arena side needs read access to your
-checkout. The exact job and both token scopes are in
+**Central arena: retired as of 2026-10-12.** gentar's public workflow has no
+bench job any more, so a dispatch job aimed at it has nothing to run. Use the
+own arena above. The record of how the central mode worked is in
 [`docs/subject-integration.md`](../docs/subject-integration.md).
 
-Observe either way: open a pull request touching anything, and the
-arena runs against its head commit.
+Observe it: open a pull request touching anything, and the arena workflow
+runs against its head commit (with the kit's default policy, its bench-free
+plan and checks).
 
 **Before it merges**, prove the adoption PR on the bench by pushing the
 `arena` keyword tag at its head commit. A tag push
