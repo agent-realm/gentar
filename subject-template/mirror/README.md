@@ -100,7 +100,8 @@ its `plan.py`, still reaches no secret the mirror did not offer.
      - every name in `GENTAR_ROUTE_ALLOW`
      - optionally `GENTAR_STATUS_TOKEN`: a fine-grained token allowed to
        write commit statuses on the public repository, so the mirror posts
-       `arena/phase2` itself.
+       `arena/phase2` itself (naming any skipped suite; `mirror.sh` then
+       leaves it as it is).
    - Register the self-hosted runner to the mirror, label `arena`.
 
 3. **Prove it once**, on the current default-branch head:

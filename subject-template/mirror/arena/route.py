@@ -40,10 +40,19 @@ else:
 
 SLOTS = 8
 NAME = re.compile(r"[A-Z][A-Z0-9_]*")
-# Never routable, whatever the allowlist says: the arena's own and the
-# platform's (a mistyped allowlist must not hand them out).
-NEVER = ("GENTAR_", "GITHUB_", "ACTIONS_", "RUNNER_")
-NEVER_NAMES = {"BENCH_SSH_KEY"}
+# Never routable, whatever the allowlist says: the arena's own, the
+# platform's, and every name the kit's plan.py reserves (the judge and
+# provider keys, names that steer a shell, loader, runtime or tool). A
+# mistyped allowlist must not hand them out, and the mirror does not rely
+# on the commit's own plan.py to refuse them (agy on #81). Kept equal to
+# plan.py's ROUTE_RESERVED(_PREFIXES) by test_arena_mirror.
+NEVER = ("GENTAR_", "GITHUB_", "ACTIONS_", "RUNNER_", "LD_", "DYLD_", "BASH_", "DOCKER_",
+         "COMPOSE_", "GIT_", "SSH_", "PYTHON", "ANTHROPIC_", "TYPESAFE_", "OTEL_", "GLIBC_",
+         "MALLOC_", "LC_", "NODE_", "PERL", "RUBY", "JAVA_")
+NEVER_NAMES = {"BENCH_SSH_KEY", "PATH", "HOME", "USER", "LOGNAME", "SHELL", "PWD", "OLDPWD",
+               "IFS", "ENV", "CDPATH", "PS4", "SHELLOPTS", "BASHOPTS", "UID", "EUID", "PPID",
+               "GROUPS", "TMPDIR", "TERM", "LANG", "LANGUAGE", "CI", "HOSTNAME", "PROMPT_COMMAND",
+               "GCONV_PATH", "LOCPATH", "NLSPATH", "HOSTALIASES", "RES_OPTIONS", "LOCALDOMAIN"}
 
 
 def refuse(msg):

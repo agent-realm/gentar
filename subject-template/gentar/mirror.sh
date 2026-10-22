@@ -101,9 +101,18 @@ done
 echo "mirror: run $url -- $concl"
 
 if [ $# -eq 0 ]; then
-  case "$concl" in success|failure) state=$concl ;; *) state=error ;; esac
-  gh api -X POST "repos/$PUBLIC/statuses/$SHA" -f state="$state" -f context="$CONTEXT" \
-    -f target_url="$url" -f description="phase 2: $concl (arena mirror)" >/dev/null
-  echo "mirror: posted $CONTEXT = $state on $PUBLIC@$SHA"
+  # A mirror holding GENTAR_STATUS_TOKEN has posted this run's status
+  # itself, naming any skipped suite: keep it, never overwrite it with a
+  # plainer one (agy on #81).
+  posted=$(gh api "repos/$PUBLIC/commits/$SHA/status" \
+    --jq ".statuses[] | select(.context == \"$CONTEXT\") | .target_url" 2>/dev/null || true)
+  if [ -n "$url" ] && [ "$posted" = "$url" ]; then
+    echo "mirror: $CONTEXT on $PUBLIC@$SHA was posted by the mirror run itself; left as it is"
+  else
+    case "$concl" in success|failure) state=$concl ;; *) state=error ;; esac
+    gh api -X POST "repos/$PUBLIC/statuses/$SHA" -f state="$state" -f context="$CONTEXT" \
+      -f target_url="$url" -f description="phase 2: $concl (arena mirror)" >/dev/null
+    echo "mirror: posted $CONTEXT = $state on $PUBLIC@$SHA"
+  fi
 fi
 [ "$concl" = success ]

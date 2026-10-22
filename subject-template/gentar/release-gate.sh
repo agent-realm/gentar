@@ -70,16 +70,19 @@ if [ "${EVIDENCE:-job}" = status ]; then
 $line
 EOF
   age=$(( ${secs:-0} / 86400 ))
-  # With [arena] mirror set, only a status linking a run of THAT mirror
-  # counts: another tool posting the same context name proves nothing.
-  # Owner and repository names are case-insensitive on GitHub.
-  if [ -n "$MIRROR" ]; then
-    lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
-    case "$(lc "$url")" in
-      "https://github.com/$(lc "$MIRROR")/actions/runs/"*) ;;
-      *) unproven "$CONTEXT links $url, not a run of the arena mirror $MIRROR" ;;
-    esac
-  fi
+  # Only a status linking a run of THE mirror counts: another tool posting
+  # the same context name proves nothing, and with no mirror set nothing
+  # can be tied to a run (plan.py refuses that policy too). The link must be
+  # exactly a run of it, by number: no prefix that walks elsewhere with
+  # `..` (agy on #81). Owner and repository names are case-insensitive.
+  [ -n "$MIRROR" ] || unproven "[phase2] evidence = \"status\" needs [arena] mirror"
+  lc() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+  pre="https://github.com/$(lc "$MIRROR")/actions/runs/"
+  rid=$(lc "$url")
+  case "$rid" in "$pre"*) rid=${rid#"$pre"} ;; *) rid="" ;; esac
+  case "$rid" in
+    ''|*[!0-9]*) unproven "$CONTEXT links $url, not a run of the arena mirror $MIRROR" ;;
+  esac
   case "$state" in
     success)
       if [ "${MAXAGE:-0}" -gt 0 ] && [ "${secs:-0}" -gt $(( MAXAGE * 86400 )) ]; then

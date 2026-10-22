@@ -71,12 +71,13 @@ Adopters pin a release tag, not a branch.
   for a full phase 2 posts the commit status `arena/phase2` (success,
   failure, or error) linking the mirror run. It finds its own run by a
   request id, never "the newest". `mirror.sh status <sha>` reads it back. A
-  mirror holding `GENTAR_STATUS_TOKEN` posts the status itself.
+  mirror holding `GENTAR_STATUS_TOKEN` posts the status itself, and
+  `mirror.sh` then leaves that status as it is.
 - **`[phase2] evidence = "status"`**: `release-gate.sh` then requires the
   latest `arena/phase2` commit status on exactly the release sha to be
-  `success` and, with `[arena] mirror` set, to link a run of that mirror
-  (`max_age_days` applies). Mirror mode requires it whenever the
-  gate is on.
+  `success` and to link a run of `[arena] mirror` by its run number (it
+  needs that mirror set; `max_age_days` applies). Mirror mode requires it
+  whenever the gate is on.
 - **A mirror's phase 2 that skipped a suite is not green.** `run.sh --sweep`
   writes the suites it skipped, with each reason, to
   `gentar/reports/sweep-skipped.txt` (empty when none). The mirror's bench job

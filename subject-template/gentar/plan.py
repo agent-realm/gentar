@@ -231,6 +231,11 @@ def load_policy(path=POLICY):
         raise Refuse(f"[arena] bench must be \"self-hosted\" or \"mirror\" (got {arena['bench']!r})")
     if not isinstance(arena["mirror"], str) or (arena["mirror"] and not MIRROR_REPO.fullmatch(arena["mirror"])):
         raise Refuse(f"[arena] mirror must be the private mirror as \"owner/name\" (got {arena['mirror']!r})")
+    if p2["evidence"] == "status" and not arena["mirror"]:
+        # Anyone allowed to post a commit status could otherwise prove a
+        # release with one (agy on #81).
+        raise Refuse("[phase2] evidence = \"status\" needs [arena] mirror = \"owner/name\": a status "
+                     "counts only when it links a run of that mirror")
     if arena["bench"] == "mirror":
         # No self-hosted runner serves this repository, so nothing here may
         # need one, and phase 2's proof is the mirror's commit status.

@@ -118,6 +118,13 @@ class MirrorPolicyTest(unittest.TestCase):
                      'needs [arena] mirror = "owner/name"')
         self.refused(MIRROR_POLICY.replace("owner/repo-arena", "not a repo"), "owner/name")
 
+    def test_status_evidence_needs_a_mirror(self):
+        # otherwise any commit status of that name would prove a release
+        # (agy on #81)
+        self.refused('[phase2]\nevidence = "status"\n', 'needs [arena] mirror = "owner/name"')
+        self.refused('[phase2]\nevidence = "status"\n[arena]\nbench = "self-hosted"\n',
+                     'needs [arena] mirror = "owner/name"')
+
     def test_mirror_mode_has_no_bench_here(self):
         self.refused(MIRROR_POLICY + "[phase1]\nbench = \"declared\"\n", "no bench runner")
         (self.tmp / "s").mkdir()
@@ -359,10 +366,21 @@ class MirrorRouteTest(unittest.TestCase):
         self.assertEqual(set(slots.values()), {""})
 
     def test_the_allowlist_never_hands_out_the_arenas_own(self):
-        for bad in ("BENCH_SSH_KEY", "GENTAR_STATUS_TOKEN", "GITHUB_TOKEN", "lower", "A;B"):
+        for bad in ("BENCH_SSH_KEY", "GENTAR_STATUS_TOKEN", "GITHUB_TOKEN", "lower", "A;B",
+                    # the kit's reserved names too (agy on #81)
+                    "TYPESAFE_API_KEY", "ANTHROPIC_API_KEY", "LD_PRELOAD", "GLIBC_TUNABLES",
+                    "PATH", "BASHOPTS"):
             with self.subTest(name=bad):
                 r, _, _ = self.route('[secrets]\nroute = ["A_KEY"]\n', f"A_KEY {bad}")
                 self.assertEqual(r.returncode, 2)
+
+    def test_it_never_routes_what_the_kit_reserves(self):
+        spec = importlib.util.spec_from_file_location("gentar_mirror_route", ROUTE_PY)
+        route = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(route)
+        plan = load_plan()
+        self.assertEqual(set(route.NEVER), set(plan.ROUTE_RESERVED_PREFIXES))
+        self.assertEqual(route.NEVER_NAMES, plan.ROUTE_RESERVED)
 
     def test_a_malformed_commit_policy_is_refused(self):
         for bad in ('[secrets]\nroute = "A_KEY"\n', '[secrets\n', 'secrets = "none"\n',
@@ -564,6 +582,25 @@ class MirrorDispatchTest(unittest.TestCase):
         self.assertIn('no [arena] bench = "mirror"', r.stderr)
         self.assertEqual(self.calls(), [])
 
+    def test_a_status_the_mirror_posted_itself_is_left_alone(self):
+        # it names the skipped suites; a plainer one must not replace it
+        (self.fix / "status.json").write_text(json.dumps({"statuses": [
+            {"context": "arena/phase2", "state": "failure", "updated_at": iso(0),
+             "target_url": "https://github.com/owner/repo-arena/actions/runs/77"}]}))
+        r = self.run_with_match(CONCLUSION="failure")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual([c for c in self.calls() if c.startswith("api -X POST")], [])
+        self.assertIn("posted by the mirror run itself", r.stdout)
+        # an older run's status is replaced
+        (self.fix / "status.json").write_text(json.dumps({"statuses": [
+            {"context": "arena/phase2", "state": "failure", "updated_at": iso(1),
+             "target_url": "https://github.com/owner/repo-arena/actions/runs/76"}]}))
+        (self.fix / "calls").unlink()
+        (self.fix / "views").unlink(missing_ok=True)
+        r = self.run_with_match()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(len([c for c in self.calls() if c.startswith("api -X POST")]), 1)
+
     def test_status_reads_the_latest_arena_phase2(self):
         (self.fix / "status.json").write_text(json.dumps({"statuses": [
             {"context": "ci", "state": "failure", "updated_at": iso(0), "target_url": "x"},
@@ -617,7 +654,12 @@ class StatusEvidenceGateTest(unittest.TestCase):
 
     def test_a_status_not_linking_the_mirror_proves_nothing(self):
         for url in ("https://example.com/ci/1", "https://github.com/owner/repo-arena-evil/actions/runs/9",
-                    "https://github.com/other/repo-arena/actions/runs/9", "-"):
+                    "https://github.com/other/repo-arena/actions/runs/9", "-",
+                    # a prefix is not enough (agy on #81)
+                    "https://github.com/owner/repo-arena/actions/runs/../../other/actions/runs/9",
+                    "https://github.com/owner/repo-arena/actions/runs/",
+                    "https://github.com/owner/repo-arena/actions/runs/9x",
+                    "https://github.com/owner/repo-arena/actions/runs/9/../../../x"):
             with self.subTest(url=url):
                 self.statuses(("arena/phase2", "success", 0, url))
                 r = self.gate()
