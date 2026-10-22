@@ -25,7 +25,8 @@ Adopters pin a release tag, not a branch.
 ### Docs
 - `GENTAR_CI_RUNNER`: on GitHub Free, an organisation variable reaches
   public repositories only; a private subject sets it as a repository
-  variable, or plan and checks silently fall back to `ubuntu-latest`
+  variable, or the workflow never sees it: `plan` silently falls back to
+  `ubuntu-latest` and `checks` to `[phase1] os` (every OS listed there)
   (cockpit's v0.9.0 re-pin, 2026-09-30). Check the plan's `runner=` line.
 - Kit README: with `GENTAR_CI_RUNNER` set, only same-repository PRs get
   phase 1 checks; a fork's all-skipped run is not a pass. The "Secrets/vars
