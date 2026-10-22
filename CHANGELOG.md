@@ -22,6 +22,10 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.10.0 — 2026-10-22
+
+Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what changed and why, upgrade for adopters, what is not live-proven, known limits, verification).
+
 ### Changed
 - **The mirror's schedule is documented.** `docs/reference/ci-and-releases.md`
   says what the private mirror runs on its own: the gate daily at 00:17 UTC
