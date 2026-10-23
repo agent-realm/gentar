@@ -22,6 +22,22 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Fixed
+- **A waiting run no longer changes a running one's files** (ground-up
+  review B3, SB05). `gentar/run.sh` fetched the engine into
+  `gentar/.arena` and replaced `subjects/<subject>` before it took the host
+  lock, so a run queued behind another swapped both under the suites the
+  other was still running: one invocation could test two snapshots. The
+  lock is now taken before the first of those writes. `--stage-engine`,
+  and so `--check`, waits for a running arena of the subject too. Kit
+  file changed: `gentar/run.sh`.
+- **Two `bin/arena run` calls in one checkout no longer tear each other
+  down** (review B3, S2-2). They shared a compose project, and the second's
+  teardown stopped the first's coordinator. `run`, `dashboard` and `ls`
+  now take a host lock named after the compose project before they build
+  (flock where available, else a lock directory, as the kit's), and
+  `bin/arena down` leaves a live run's arena alone.
+
 ## 0.11.0 — 2026-10-23
 
 Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what changed and why, the breaking schema change, upgrade for adopters, what is not live-proven, known limits, verification).

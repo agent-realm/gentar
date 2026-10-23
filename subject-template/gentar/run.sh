@@ -684,6 +684,18 @@ if [ -n "${GENTAR_CLONE_SSH_KEY:-}" ]; then
   export GIT_SSH_COMMAND="ssh -i $GENTAR_CLONE_SSH_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 fi
 
+# The host lock, before the first write to anything a running arena of
+# this subject reads: the engine checkout here, subjects/<subject> below.
+# Taken later, a run waiting behind another fetched a new engine and
+# replaced the staged subject while the other was still running suites
+# from both (ground-up review B3, SB05). One invocation, one snapshot.
+# --stage-engine (and so --check) waits for a running arena too. Released
+# on exit; the arena's teardown trap takes this over once there is one.
+arena_lock wait || exit 2
+trap arena_unlock EXIT
+trap 'arena_unlock; exit 130' INT
+trap 'arena_unlock; exit 143' TERM
+
 if [ ! -d "$ARENA" ]; then
   git clone -q "$CLONE_URL" "$ARENA"
 else
@@ -999,9 +1011,8 @@ teardown_arena() {
 # status 0. A CI cancel is a SIGTERM to this shell, so a cancelled run read
 # as a PASS. Exiting 130/143 keeps a cancel a failure; EXIT then sees
 # _torn_down and does nothing, so teardown still happens exactly once.
-# Take the host lock before anything touches arena-<subject>: the image
+# The host lock is held since the engine was staged (above): the image
 # build and every service start below come after it.
-arena_lock wait || exit 2
 trap teardown_arena EXIT
 trap 'teardown_arena; exit 130' INT
 trap 'teardown_arena; exit 143' TERM
