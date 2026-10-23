@@ -461,6 +461,12 @@ def ci_runner(env):
     raw = (env.get("GENTAR_CI_RUNNER") or "").strip()
     if not raw:
         return None
+    # runs-on reads the DECODED value, and the workflow's guard the raw
+    # text: `"\u0061rena"` passed the one and named the bench runner in the
+    # other (Codex on #98). No runner label needs an escape.
+    if "\\" in raw:
+        raise Refuse(f"GENTAR_CI_RUNNER holds a JSON escape (a backslash): {raw!r}; write "
+                     f"the labels plainly")
     try:
         value = json.loads(raw)
     except ValueError:
@@ -479,7 +485,7 @@ def ci_runner(env):
     # case, so `Arena` IS the bench runner (Codex). A bench runner labelled
     # otherwise (agentmux's `agentmux-lab`) is caught by its own label.
     for label in ["arena"] + ([bench] if bench else []):
-        if label.lower() in raw.lower():
+        if label.lower() in raw.lower():          # no escapes (above): raw IS decoded
             raise Refuse(f"GENTAR_CI_RUNNER names the bench runner's label {label!r} (or a "
                          f"label containing it, in any case): the checks run pull request "
                          f"code and must never land on the bench runner")

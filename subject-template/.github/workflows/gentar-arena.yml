@@ -63,14 +63,17 @@ jobs:
   # would otherwise start plan on the bench runner and run the PR's own
   # plan.py there before plan.py could refuse (Codex). contains() is
   # case-insensitive, as runner labels are, and tests the raw text, so
-  # `Arena`, `ARENA` and a padded " arena" are all caught. The same
-  # expression guards plan and checks below. This job fails the run loudly.
+  # `Arena`, `ARENA` and a padded " arena" are all caught. A backslash is
+  # refused outright: runs-on reads the DECODED JSON, so `"\u0061rena"`
+  # would name the bench runner past a check of the raw text (Codex on #98),
+  # and no runner label needs an escape. The same expression guards plan
+  # and checks below. This job fails the run loudly.
   ci-runner-refused:
-    if: ${{ contains(vars.GENTAR_CI_RUNNER, 'arena') || (vars.GENTAR_BENCH_LABEL != '' && contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL)) }}
+    if: ${{ contains(vars.GENTAR_CI_RUNNER, 'arena') || contains(vars.GENTAR_CI_RUNNER, '\') || (vars.GENTAR_BENCH_LABEL != '' && contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL)) }}
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo "::error::GENTAR_CI_RUNNER names the bench runner's label (arena, or GENTAR_BENCH_LABEL, or a label containing either): the plan and checks run pull request code and must never be scheduled on the bench runner"
+          echo "::error::GENTAR_CI_RUNNER names the bench runner's label (arena, or GENTAR_BENCH_LABEL, or a label containing either) or holds a JSON escape: the plan and checks run pull request code and must never be scheduled on the bench runner"
           exit 2
 
   plan:
@@ -86,7 +89,7 @@ jobs:
     # GENTAR_CI_RUNNER set, plan (and so everything after it) is skipped for
     # it. Unset, forks keep the hosted checks as before.
     if: >-
-      ${{ !(contains(vars.GENTAR_CI_RUNNER, 'arena') || (vars.GENTAR_BENCH_LABEL != '' && contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL))) &&
+      ${{ !(contains(vars.GENTAR_CI_RUNNER, 'arena') || contains(vars.GENTAR_CI_RUNNER, '\') || (vars.GENTAR_BENCH_LABEL != '' && contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL))) &&
       (!vars.GENTAR_CI_RUNNER || github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository) }}
     outputs:
@@ -132,7 +135,7 @@ jobs:
 
   checks:
     needs: plan
-    if: needs.plan.outputs.checks == 'true' && !(contains(vars.GENTAR_CI_RUNNER, 'arena') || (vars.GENTAR_BENCH_LABEL != '' && contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL)))
+    if: needs.plan.outputs.checks == 'true' && !(contains(vars.GENTAR_CI_RUNNER, 'arena') || contains(vars.GENTAR_CI_RUNNER, '\') || (vars.GENTAR_BENCH_LABEL != '' && contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL)))
     # [phase1] os: GitHub-hosted runners only (plan.py refuses anything
     # else). On macOS this is the dry-run on macOS userland — bash 3.2, BSD
     # tools — not a macOS bench; that is gentar's tart tier. With

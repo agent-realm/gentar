@@ -31,7 +31,9 @@ Adopters pin a release tag, not a branch.
   new repository variable `GENTAR_BENCH_LABEL` (default `arena`) is the
   label the bench job runs on, and the guard refuses a `GENTAR_CI_RUNNER`
   containing it as well as `arena`, before scheduling anything; so does
-  `plan.py`. Kit files changed: `.github/workflows/gentar-arena.yml`,
+  `plan.py`. A `GENTAR_CI_RUNNER` holding a backslash is refused the same
+  way: `runs-on` decodes JSON escapes, so `"\u0061rena"` passed a check of
+  the raw text and still named the bench runner (Codex). Kit files changed: `.github/workflows/gentar-arena.yml`,
   `gentar/plan.py`.
 - **`GENTAR_CI_RUNNER` must name a label of its own** (review SB03).
   `["self-hosted", "linux"]` passed the guard, and every self-hosted

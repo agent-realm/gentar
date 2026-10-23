@@ -403,7 +403,9 @@ change with it set:
   case, not even inside a longer label: the checks run pull request code
   and the bench runner must never get it. The workflow fails such a run
   before scheduling anything (`ci-runner-refused`), because runner labels
-  match regardless of case;
+  match regardless of case. A backslash is refused too: `runs-on` decodes
+  JSON escapes, so `"\u0061rena"` would name the bench runner past a check
+  of the raw text, and no label needs one;
 - the value must name a label only your CI runner carries. A job lands on
   any runner that has **all** its labels, and every self-hosted runner has
   the default ones (`self-hosted`, `linux`, `x64`, ...), the bench runner

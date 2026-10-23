@@ -93,6 +93,15 @@ class CiRunnerTest(unittest.TestCase):
         with self.assertRaisesRegex(self.p.Refuse, "GENTAR_BENCH_LABEL must be one"):
             self.plan(SELF, GENTAR_BENCH_LABEL="a b")
 
+    def test_a_json_escape_is_refused(self):
+        # runs-on decodes, the guard reads raw text: "\u0061rena" named the
+        # bench runner past both (Codex on #98). No label needs an escape,
+        # so any backslash is refused, even in a harmless label.
+        for bad in ('["self-hosted", "agentmux\\u002dlab"]', '"\\u0061rena"',
+                    '["self-hosted", "linux\\u002dci"]'):
+            with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse, "JSON escape"):
+                self.plan(bad, GENTAR_BENCH_LABEL="agentmux-lab")
+
     def test_default_labels_alone_are_refused(self):
         # every self-hosted runner carries them, the bench runner included (SB03)
         for bad in ('["self-hosted", "linux"]', '"self-hosted"', '["self-hosted", "Linux", "X64"]',
@@ -144,14 +153,15 @@ class WorkflowTest(unittest.TestCase):
                       " || matrix.os }}", self.job("checks"))
         self.assertIn("GENTAR_CI_RUNNER: ${{ vars.GENTAR_CI_RUNNER }}", self.job("plan"))
 
-    GUARD = ("contains(vars.GENTAR_CI_RUNNER, 'arena') || (vars.GENTAR_BENCH_LABEL != '' && "
-             "contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL))")
+    GUARD = ("contains(vars.GENTAR_CI_RUNNER, 'arena') || contains(vars.GENTAR_CI_RUNNER, '\\') || "
+             "(vars.GENTAR_BENCH_LABEL != '' && contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL))")
 
     def test_the_bench_label_is_refused_before_any_job_is_scheduled(self):
         # runs-on would start plan ON the bench runner, running the PR's
         # plan.py there before plan.py could refuse (Codex). `arena`, and the
         # label GENTAR_BENCH_LABEL names (agentmux-lab), in all three places.
-        # The `!= ''` matters: contains(x, '') is true for every x.
+        # The `!= ''` matters: contains(x, '') is true for every x. The
+        # backslash: runs-on decodes JSON escapes this raw check cannot see.
         refused = self.job("ci-runner-refused")
         self.assertIn(f"if: ${{{{ {self.GUARD} }}}}", refused)
         self.assertIn("exit 2", refused)
