@@ -5,17 +5,24 @@
 # and [[verify]] with what your repo actually does.
 
 [scenario]
-name = "first-suite"          # defaults to the filename stem
+# name = "first-suite"        # defaults to the filename stem: leave it
+                              # unset, so a copy of this file under a new
+                              # name is a new suite, not a second
+                              # "first-suite" hiding this one
 subject = "REPLACE-ME"        # your repo's name — the subjects-root dir
                               # name run.sh stages, and the telemetry
-                              # `subject` column. Match run.sh's SUBJECT.
+                              # `subject` column. run.sh reads it from
+                              # here: every scenario in gentar/scenarios
+                              # must declare the same one.
 agent = "shell"               # oracle vehicle: a plain sandbox shell
 
 # template = "gentar-bench-v1"  # optional sbx template tag; the default
                                 # bench already has shell, git and Docker
 # bench = "tart"                # optional tier override (sbx is the
-                                # default): tart = macOS VM,
-                                # osb/daytona = template is an image ref
+                                # default, and the only tier supported
+                                # for 1.0): tart = macOS VM,
+                                # osb/daytona = template is an image ref;
+                                # all three are experimental
 
 # credentials = ["ANTHROPIC_API_KEY"]
 # Env var NAMES an agent-in-the-loop suite needs — never values; the
@@ -75,7 +82,11 @@ command = "test \"$(cat \"$WORKSPACE_DIR/probe.txt\")\" = gentar-first-suite"
 # type = "expect"          # wait for `pattern` (regex), send nothing
 # pattern = "installed"
 # type = "pick"            # navigate a picker to a line matching `label`
-# type = "abort"           # hard safety gate: danger text on screen
+# type = "key"             # raw keys: key = "enter" (escape, ctrl-c, ...)
+# type = "abort"           # prove the danger gate fires (a short list of
+#                          # destructive commands, docs/reference/pilot-simulator.md)
+# The dry-run (dryrun.py) cannot take pick, key or abort turns: it stops
+# there and reports the suite UNVERIFIED; the arena proves it.
 
 # -- budget (agent suites): spend ceiling for the budget guard -------------
 # [budget]

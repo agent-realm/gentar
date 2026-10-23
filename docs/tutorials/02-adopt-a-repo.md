@@ -27,13 +27,13 @@ cp subject-template/.github/workflows/gentar-arena.yml /path/to/your-repo/.githu
 ```
 
 You should see: `your-repo/gentar/` holding `run.sh`, `dryrun.py`,
-`plan.py`, `release-gate.sh`, `policy.toml`, `hooks.py` and
+`plan.py`, `release-gate.sh`, `mirror.sh`, `policy.toml`, `hooks.py` and
 `scenarios/first-suite.toml`, plus `.github/workflows/gentar-arena.yml`.
 
-`run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh` and the workflow are
-the kit's, and stay byte-identical to the pinned engine's copies. What
-your repo adapts lives in files that are its own: `scenarios/`,
-`policy.toml`, `hooks.py`, and repository variables.
+`run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh`, `mirror.sh` and the
+workflow are the kit's, and stay byte-identical to the pinned engine's
+copies. What your repo adapts lives in files that are its own:
+`scenarios/`, `policy.toml`, `hooks.py`, and repository variables.
 
 ## 2. Name the subject
 
@@ -45,7 +45,8 @@ grep -r REPLACE-ME gentar/ || echo "named"
 
 You should see: `named`. Use the repository's name, not the name of the
 directory it happens to be checked out in: in a git worktree those
-differ.
+differ. `run.sh` reads the name from the scenarios, and every scenario
+must declare the same one.
 
 ## 3. Stage the engine
 
@@ -57,7 +58,8 @@ export GENTAR_BENCH_KEY_FILE="$HOME/.ssh/id_ed25519"
 
 You should see: `engine staged: …/gentar/.arena @ <tag> (<sha>)`. This
 is a git operation: no Docker and no bench yet. The seeded `.env` holds
-placeholders, so edit it before the next step.
+placeholders, so edit it before the next step. On the bench host itself,
+`GENTAR_BENCH_HOST=local` replaces the host, the user and the key.
 
 ## 4. Dry-run
 
@@ -81,7 +83,8 @@ You should see: exit 0 and a `report-<run_id>.md`.
 
 ## 6. Write your real suite
 
-Duplicate `first-suite.toml`, then replace two things:
+Copy `first-suite.toml` to `gentar/scenarios/<your-suite>.toml` (a
+suite's name is its file name), then replace two things:
 
 - `[oracle].steps`: what your repo does, as shell lines run in the bench.
   State decisions (which channel, which mode, which flags), not
@@ -105,7 +108,10 @@ The copied workflow runs the arena on a **self-hosted runner** labelled
 the runner and the repository secrets as in
 [Deploy an arena](../guides/deploy-an-arena.md). The minimum is
 `BENCH_SSH_KEY`, `GENTAR_BENCH_HOST` and `GENTAR_BENCH_USER`, all three
-as secrets.
+as secrets. A runner on the bench host itself needs none of them: set the
+repository variable `GENTAR_BENCH_HOST=local` (local bench mode). A PUBLIC
+repo registers no self-hosted runner at all: see
+[An arena for a public repository](../guides/public-repo-arena.md).
 
 The bench-free `plan` and `checks` jobs use GitHub-hosted runners. If your
 organisation has no hosted minutes, set the variable `GENTAR_CI_RUNNER` to

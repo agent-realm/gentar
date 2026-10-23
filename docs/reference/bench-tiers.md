@@ -6,7 +6,15 @@ The default `sbx` tier needs only the Quickstart. The other three need
 something the CI gate runner does not have, so they are documented rather
 than gated.
 
+**None of the three is supported for 1.0.** Each is experimental, with a
+known defect, listed per tier below and in the
+[bench tiers guide](../guides/bench-tiers.md).
+
 ## `tart` — macOS benches
+
+**Experimental.** A bench's workspace directory is created only when a
+subject is pushed into it (`TartBenchHost.push_dir`), so a subjectless
+suite's steps get a `$WORKSPACE_DIR` that does not exist.
 
 Benches are clones of a local template VM (`gentar-bench-macos-v1`:
 sshd on, the coordinator's public key authorized, agent CLIs on PATH via
@@ -31,6 +39,11 @@ rebuilds are manual: boot the template VM, provision it, `tart stop`.
 
 ## `osb` — OpenSandbox containers
 
+**Experimental.** The server ends a pty session that has been quiet for
+30 seconds. A driver scenario that forwards env (`credentials` or
+`pass_env`) is refused (exit 2) before any bench exists: this tier types
+its pty command, so the values would be echoed into the transcript.
+
 Benches are plain Linux containers under an OpenSandbox server: `create`
 maps to a sandbox, `exec` to the execd command API (real exit codes),
 `push_dir` to a tarball through the files API, and the pty driver reaches
@@ -50,6 +63,10 @@ Templates are image refs on the server's Docker daemon
 works too — point `GENTAR_OSB_SERVER` at it.
 
 ## `daytona` — cloud sandboxes
+
+**Experimental.** A sandbox whose ssh token cannot be minted after
+Daytona created it is never deleted: teardown knows only sandboxes that
+got their token. It idle-stops after 15 minutes; delete it by hand.
 
 `create` mints a sandbox from a public image ref through the Daytona SDK;
 `exec` and the pty driver go over ssh to Daytona's fixed gateway with a

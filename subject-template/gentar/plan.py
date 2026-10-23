@@ -131,8 +131,9 @@ _LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)
 
 # The kit files --check compares byte for byte against the pinned engine's
 # copies. hooks.py, policy.toml and the scenarios are the subject's own.
-# OPTIONAL ones may be absent: a central-dispatch subject has no own-arena
-# workflow, and a repo that never releases needs no release gate.
+# OPTIONAL ones may be absent: a repo that runs its arena only by hand has
+# no workflow, a repo that never releases needs no release gate, and one
+# outside mirror mode no mirror.sh.
 KIT_FILES = {
     "gentar/run.sh": "subject-template/gentar/run.sh",
     "gentar/dryrun.py": "subject-template/gentar/dryrun.py",
@@ -606,8 +607,8 @@ def lint(policy, engine_root):
             continue                      # an older engine without this file
         if not a.exists():
             if mine in OPTIONAL_KIT_FILES:
-                print(f"note: {mine} not present (fine for a central-dispatch subject, "
-                      f"or one that does not gate releases)")
+                print(f"note: {mine} not present (fine for a repo without the kit's CI "
+                      f"workflow, a release gate or the arena mirror)")
             else:
                 problems.append(f"{mine}: missing (copy it from the kit)")
         elif a.read_bytes() != b.read_bytes():

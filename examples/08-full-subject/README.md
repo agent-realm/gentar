@@ -26,7 +26,9 @@ only.
 ## Run it
 
 1. Copy the kit into your repo ([subject-template](../../subject-template/README.md)).
-2. Copy this example's `gentar/` over it.
+2. Copy this example's `gentar/` over it, and delete the kit's template
+   suite `gentar/scenarios/first-suite.toml` (see
+   [trying an example](../README.md#trying-an-example)).
 3. Then:
 
 ```bash
@@ -38,7 +40,9 @@ GITHUB_EVENT_NAME=push GITHUB_REF=refs/tags/v1.0.0 gentar/run.sh --plan
 gentar/run.sh --sweep          # every suite this environment can run
 ```
 
-**Pass:** `--check` is clean; the three `--plan` calls show nothing
+**Pass:** `--check` is clean (its policy turns on `[check] docs`, so in a
+scratch repo without a README, `docs/` and `AGENTS.md` it names those
+instead: set `docs = false` there); the three `--plan` calls show nothing
 bench-side on the PR, the floor (`example-full-install`) on the main push,
 and a release tag gated by `release-gate.sh` rather than run; the sweep
 exits `0`.

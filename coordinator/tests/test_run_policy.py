@@ -258,7 +258,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(self.p.lint(self.policy(), engine), [])
 
     def test_lint_allows_the_optional_kit_files_to_be_absent(self):
-        # a central-dispatch subject has no own-arena workflow; a repo that
+        # a repo that runs its arena only by hand has no workflow; a repo that
         # never releases has no release gate. Required ones still fail.
         repo = self.tmp / "repo2"
         (repo / "gentar").mkdir(parents=True)

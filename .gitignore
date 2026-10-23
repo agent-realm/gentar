@@ -10,7 +10,7 @@
 .vscode/
 *.swp
 
-# subjects are external checkouts/symlinks, mounted at run time
+# subjects are external checkouts (copies; a symlink does not survive the mount), mounted at run time
 subjects/*
 !subjects/README.md
 dashboard/out/

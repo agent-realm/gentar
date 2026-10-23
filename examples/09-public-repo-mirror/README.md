@@ -20,7 +20,9 @@ are; see [the mirror's README](../../subject-template/mirror/README.md).
 
 ## Run it
 
-1. Copy the kit into your repository, then this example's `gentar/` over it.
+1. Copy the kit into your repository, then this example's `gentar/` over
+   it, and delete the kit's template suite `gentar/scenarios/first-suite.toml`
+   (see [trying an example](../README.md#trying-an-example)).
 2. Replace the workflow with the public variant.
 3. Set up the mirror as its README says. Add `EXAMPLE_READ_KEY` as a
    **mirror** secret, by reference.
@@ -34,7 +36,10 @@ are; see [the mirror's README](../../subject-template/mirror/README.md).
 
 ## Passing looks like
 
-`--plan` prints `bench=none` with a reason naming the private mirror.
+`--check` reports `example-reads-its-service.toml: UNVERIFIED (bench only:
+…)`: the suite reads a secret only the mirror holds, so the dry-run does
+not run it. `--plan` prints `bench=none` with a reason naming the private
+mirror.
 `mirror.sh` prints the mirror run, `-- success`, and
 `posted arena/phase2 = success`. `gentar/release-gate.sh <sha>` then passes
 on that commit.

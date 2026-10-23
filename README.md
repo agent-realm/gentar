@@ -28,10 +28,13 @@ answers from reality instead:
 
 - **Verdicts from reality** — the bench's files, processes and output decide.
 - **Real agents at a real pty** — `claude-code` (pinned by
-  `bench-template/VERSION`) driven through its dialogs; a danger gate aborts
-  anything destructive.
+  `bench-template/VERSION`) driven through its dialogs. A danger gate
+  stops a run at an approval prompt for one of about ten destructive
+  commands. It is a tripwire, not a sandbox: `rm -rf ~` passes it
+  ([what it checks](docs/reference/pilot-simulator.md#the-danger-gate)).
 - **Disposable benches** — every scenario gets a fresh sbx microVM; the
-  bench is the reset.
+  bench is the reset. `sbx` is the tier supported for 1.0; `tart`, `osb`
+  and `daytona` are experimental.
 - **Semantic turns, optional** — where a regex would break on rewording, a
   typed judge (TypeSafe) answers a narrow question about the screen, or
   drives toward a goal over a closed set of actions. Synthetic data only;
@@ -87,7 +90,7 @@ Agents adapting a repo: read [`AGENTS.md`](AGENTS.md) first. Humans:
 | [runner](docs/reference/runner.md) · [reviver](docs/reference/reviver.md) · [pilot simulator](docs/reference/pilot-simulator.md) | reference: the three pillars |
 | [telemetry](docs/reference/telemetry.md) · [bench tiers](docs/reference/bench-tiers.md) · [CI and releases](docs/reference/ci-and-releases.md) | reference: operating it |
 | [scenario inventory](docs/reference/scenario-inventory.md) · [design tenets](docs/reference/design-tenets.md) · [layout](docs/reference/layout.md) | reference: what exists and why |
-| [`docs/subject-integration.md`](docs/subject-integration.md) | the full subject contract: trigger modes, credentials, conventions |
+| [`docs/subject-integration.md`](docs/subject-integration.md) | the full subject contract: the own arena and the arena mirror, credentials, conventions |
 | [`examples/README.md`](examples/README.md) | examples, from one step to a full subject |
 | [`AGENTS.md`](AGENTS.md) | the agent entry: adopting a repo, deploying an arena |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed, per release |

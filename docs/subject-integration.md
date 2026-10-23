@@ -1,24 +1,25 @@
 # Subject integration — wiring a repo into the gentar arena
 
-A **subject** is any repo that wants the arena to test it. The arena is
-forge-agnostic at the transport level (a subject job just needs to reach
-`workflow_dispatch` on `agent-realm/gentar`), but this doc describes the
-GitHub shape actually wired today.
+A **subject** is any repo that wants the arena to test it. The engine is
+compose-native and forge-agnostic; this doc describes the GitHub shape the
+kit wires.
 
-Two modes, pick either or both. Both are first-class; the difference is
-who operates the arena, not what a subject declares.
+There is one mode: the **own arena** (below). Your repo runs the compose
+stack itself: scenarios live in your repo, the run policy decides what
+runs when, and the engine is a `git clone` away, pinned to a release tag.
+Where the bench runs is a choice inside it:
 
-- **Central arena** (below): **the central arena is retired** as of
-  2026-10-12. gentar's public workflow no longer has a bench job, so a
-  dispatch to `agent-realm/gentar` (with `GENTAR_DISPATCH_TOKEN`) has
-  nothing to run. gentar's own bench suites run in a private mirror, and
-  only on gentar's own commits. Use the own arena. The section below is
-  kept as the record of how the mode worked.
-- **Own arena** (bottom) — your repo runs the compose stack itself in
-  its own CI. Scenarios live in your repo; any trigger conditions you
-  want; the engine is a `git clone` away.
+- **A self-hosted runner** labelled `arena` on your repo (Docker and reach
+  to a bench-host), or on the bench host itself in local bench mode.
+- **The arena mirror**, for a PUBLIC repo: no self-hosted runner on it at
+  all. A private mirror pulls it, runs phase 2 on its own runner, and
+  posts the commit status `arena/phase2` back
+  ([`subject-template/mirror/`](../subject-template/mirror/README.md)).
 
-Both modes start from the same kit: [`subject-template/`](../subject-template/)
+**The central arena is retired** as of 2026-10-12: see
+[the record](#retired-the-central-arena) at the end.
+
+Both start from the same kit: [`subject-template/`](../subject-template/)
 in this repo — a copyable `gentar/` dir with every file and field
 commented. **This document is the contract; the kit's
 [README](../subject-template/README.md) is the procedure** — the
@@ -34,15 +35,17 @@ your code changes".
 ## What a subject contributes
 
 1. **Scenario configs** — the subject states install *decisions* and
-   verdict assertions, not steps. Either:
-   - TOML scenarios in the subject repo under `gentar/`, passed to the
-     coordinator via `GENTAR_SCENARIOS_DIR`, or
-   - scenarios contributed to `gentar/coordinator/scenarios/` by PR
-     (how `claude-playbooks-install` lives today).
-2. **The subject checkout itself** — mounted into the coordinator
-   (`subjects/<name>/`), never baked into any image. On the CI runner
-   this is a plain `git clone` next to the compose file.
-3. **A trigger** — the ~10-line job below, or the own-arena workflow.
+   verdict assertions, not steps: TOML scenarios in the subject repo
+   under `gentar/scenarios/`, which `run.sh` passes to the coordinator
+   via `GENTAR_SCENARIOS_DIR`. (The engine's own `coordinator/scenarios/`
+   also holds suites against real repos, such as
+   `claude-playbooks-install`. Those are the engine's regression, run in
+   its private mirror, not a way to adopt.)
+2. **The subject checkout itself** — the working tree, staged by
+   `run.sh` as a plain copy under `subjects/<name>/` and bind-mounted
+   read-only into the coordinator; never baked into any image.
+3. **A trigger** — the kit's workflow, `gentar-arena.yml`, or for a
+   PUBLIC repo its mirror variant.
 4. **Maintenance** — scenarios updated in the same change as the
    behaviour they assert, and an engine pin bumped on purpose.
 
@@ -73,93 +76,6 @@ In return, and these are stable across engine versions within a major:
   along and redirect the run.
 - **A fresh bench per scenario.** The bench is the reset; a wedged run
   is discarded, never repaired.
-
-## The subject-side job (GitHub shape)
-
-```yaml
-# .github/workflows/gentar.yml in the SUBJECT repo
-name: gentar
-on:
-  pull_request:
-  workflow_dispatch:
-    inputs:
-      scenario:
-        description: scenario to run in the arena
-        default: my-suite
-jobs:
-  arena:
-    runs-on: ubuntu-latest
-    steps:
-      - name: dispatch gentar
-        env:
-          # Inputs and refs go through env, never into the command
-          # line — a branch name is attacker-influenced text.
-          SCENARIO: ${{ github.event.inputs.scenario || 'my-suite' }}
-          # The PR HEAD sha, not github.sha: on a pull_request event
-          # github.sha is the merge commit, so the arena would test
-          # something that exists in no branch.
-          SUBJECT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
-          TOKEN: ${{ secrets.GENTAR_DISPATCH_TOKEN }}
-        run: |
-          jq -n --arg s "$SCENARIO" --arg r "$SUBJECT_REF" \
-            '{ref:"main", inputs:{scenario:$s, subject_ref:$r}}' \
-          | curl -fsSL -X POST \
-              -H "Authorization: Bearer $TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/agent-realm/gentar/actions/workflows/gentar.yml/dispatches \
-              --data @-
-```
-
-Three inputs the arena's `workflow_dispatch` accepts: `scenario` (which
-suite), `subject_ref` (which commit of YOUR repo to check out), and
-`ref` (which gentar ref runs the arena — omitted above, so the arena's
-default branch runs it; pin it to a release tag or audited SHA if the
-engine version matters to you).
-
-`GENTAR_DISPATCH_TOKEN` is a PAT (or fine-grained token) with
-`actions:write` on the arena repo. The dispatch runs the requested
-scenario on the arena's self-hosted runner; the subject's own job then
-polls the resulting run, or simply fires and forgets — the arena's
-dashboard is the record. Sending the PR head sha as `subject_ref` is
-what makes the arena test exactly the code under review rather than
-whatever is on the subject's default branch.
-
-Note the asymmetry with the own-arena workflow: a dispatch tests the
-head sha of a PUSHED branch, so the change must be pushed first and an
-uncommitted fix cannot be tested this way. The own arena stages the
-working tree instead. Neither is wrong; they answer different
-questions.
-
-For **subject suites** (scenarios that mount the subject repo), the
-arena side also needs read access to the subject checkout:
-`GENTAR_SUBJECT_TOKEN` on the arena repo (a PAT with `repo:read` for
-the subject's repo). Without it, subject suites are skipped with a
-notice and only subjectless suites run.
-
-**The arena side is not self-service today.** Its dispatch job clones a
-fixed list of subject repos, so onboarding a new subject to a central
-arena means a pull request against that arena's workflow (adding the
-clone) and a `GENTAR_SUBJECT_TOKEN` that can read your repo — both
-requiring the arena operator. A subject whose scenarios live in its own
-`gentar/` dir also needs them passed to the coordinator, which the
-central job does not do for arbitrary repos.
-
-If you do not operate the arena and cannot get those changes merged,
-use the **own arena** mode below: it needs nothing from anybody, and
-the kit wires it end to end.
-
-## Trigger tiers
-
-These were the central arena's tiers. gentar's own suites now run them in
-the private mirror after merge
-([CI and releases](reference/ci-and-releases.md)), and a subject runs its
-own tiers in its own arena (the kit's run policy).
-
-| Tier | Fires | Suites |
-|---|---|---|
-| gate | was: every gentar PR / push, every subject dispatch | deterministic subjectless (smoke, bench-template-verify, otlp-selfreport, budget-sim, scripted pair) |
-| nightly | was: cron (arena repo) | subject suites behind `GENTAR_BUDGET_CAP`; `agent-smoke` when `ANTHROPIC_API_KEY` is set |
-| dispatch | was: manual / subject repo | one named scenario, arbitrary gentar ref |
 
 ## Credentials (agent-in-the-loop suites)
 
@@ -221,7 +137,7 @@ of change, and what each obliges:
 |---|---|
 | the subject's code, same behaviour | nothing — phase 1 of the run policy checks the PR, and the pass is the evidence |
 | what the subject DOES | update the scenarios in the SAME pull request; a scenario asserts reality, so stale reality fails honestly |
-| the ENGINE | bump `GENTAR_REF` deliberately: change the pin, run every suite, commit the bump on its own |
+| the ENGINE | bump deliberately: re-copy the kit's files from the new release tag (the pin comes with `run.sh`), run every suite, commit the bump on its own |
 
 The middle row is the one that decides whether an arena is worth
 having. A suite that still passes after a behaviour change either
@@ -234,9 +150,11 @@ ignore the arena.
 The engine row is why the kit pins a release TAG and not a branch.
 Tracking the engine's `main` means a subject's suites can change
 behaviour on a day nobody touched the subject; that has happened (a kit
-advertising a scenario feature the engine tip did not parse yet). Both
-modes have a pin: own-arena sets `GENTAR_REF` in `run.sh`, central
-dispatch passes the arena ref in the dispatch payload.
+advertising a scenario feature the engine tip did not parse yet). The
+pin is the `GENTAR_REF` default in the kit's `run.sh`, a kit file that
+`--check` holds byte-identical to the pinned engine's copy, so a bump is a
+re-copy of the kit, never an edit. `GENTAR_REF` in the environment (or the
+`GENTAR_REF` repository variable in CI) overrides it for a run.
 
 ### The fix loop
 
@@ -249,9 +167,9 @@ CI round trip per attempt.
 
 ## Own arena — a repo runs the stack itself
 
-gentar is compose-native; nothing about it belongs to the central
-instance. A repo that wants its own arena (own triggers, own
-conditions, reports on disk):
+gentar is compose-native; nothing about it belongs to one central
+instance. What the kit's `run.sh` does for a repo (own triggers, own
+conditions, reports on disk), by hand:
 
 1. Carry scenarios in the repo (e.g. `gentar/scenarios/*.toml`,
    `subject = "<repo-name>"`).
@@ -286,7 +204,9 @@ conditions, reports on disk):
    everything needed to act.
 
 The one shared resource is the **bench-host** (any Linux machine with
-`sbx`, reached over SSH; `GENTAR_BENCH_*` in `.env`). gentar ships no
+`sbx`, reached over SSH; `GENTAR_BENCH_*` in `.env`). When the arena runs
+on the bench host itself, local bench mode (`GENTAR_BENCH_HOST=local`)
+calls its `sbx` directly, with no SSH user and no key. gentar ships no
 bench-host and no default identifying one: `.env.example` carries
 placeholders, and a tier whose install-identity vars are unset is
 refused (exit 2) before any bench exists, naming the vars it needs.
@@ -320,3 +240,14 @@ file edit. Symptom when they collide: `port is already allocated`.
 [`subject-template/`](../subject-template/) is this shape as a copyable
 kit, with the adoption procedure in its
 [README](../subject-template/README.md).
+
+## Retired: the central arena
+
+Until 2026-10-12 a subject could also dispatch `workflow_dispatch` on
+`agent-realm/gentar` (with a `GENTAR_DISPATCH_TOKEN`), and gentar's own
+self-hosted runner ran the named suite against the subject's pushed head
+sha. **The central arena is retired**: gentar's public workflow has no
+bench job any more, so such a dispatch has nothing to run. gentar's own
+bench suites (the gate and nightly tiers) run in a private mirror, on
+gentar's own commits only ([CI and releases](reference/ci-and-releases.md)).
+The job's YAML is in this file's git history. Use the own arena.

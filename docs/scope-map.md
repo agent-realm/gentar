@@ -4,7 +4,10 @@
 > only GitHub-hosted jobs (unit tests, the release-tag check). The gate,
 > nightly and dispatch jobs and the `gentar-bench` runner label described
 > below moved to the private mirror `agent-realm/gentar-arena`, which runs
-> them after merge. The rest of the map stands. See
+> them after merge. Central mode is retired with them: no subject
+> dispatches to this repo any more, so read "central arena" below as
+> gentar's own regression of real repos in that mirror, and the own arena
+> as the only way to adopt. The rest of the map stands. See
 > [CI and releases](reference/ci-and-releases.md).
 
 What contains what in a gentar arena, and how many of each.

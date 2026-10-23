@@ -4,6 +4,9 @@
 name = "example-reads-its-service"
 subject = "example"
 pass_env = ["EXAMPLE_READ_KEY"]
+# Only the mirror holds the value, so phase 1's dry-run (GitHub-hosted, no
+# secrets) cannot run this suite: it says so, and --check accepts that.
+bench_only = "reads EXAMPLE_READ_KEY, a secret only the mirror holds"
 
 [oracle]
 steps = ['test -n "$EXAMPLE_READ_KEY"']   # present in the bench; never printed

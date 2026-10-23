@@ -15,7 +15,9 @@ gentar/scenarios/example-hello-oracle.toml
 
 These files are shaped like an adopted repo: copy `gentar/` from this
 directory into a repo that already has the kit (see
-[the adoption kit](../../subject-template/README.md)), then:
+[the adoption kit](../../subject-template/README.md)), delete the kit's
+template suite `gentar/scenarios/first-suite.toml` (see
+[trying an example](../README.md#trying-an-example)), then:
 
 ```bash
 gentar/dryrun.py            # replay locally in about a second, no bench
