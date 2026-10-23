@@ -296,7 +296,10 @@ plan and checks).
 `arena` keyword tag at its head commit. A tag push
 runs the workflow file of the *tagged* commit, even when that file is not
 on the default branch yet — which is how the first real adoption got a CI
-arena before merge.
+arena before merge. **That runs the commit's code, workflow file
+included, on your bench runner with the bench secrets** (ground-up review
+C4). Push the tag only on a commit whose diff you have read, and never on
+a commit from a fork: whoever wrote it gets your runner and its secrets.
 
 ### 8. Pin the engine
 
