@@ -246,9 +246,13 @@ class CleanupTest(unittest.TestCase):
         self.assertEqual(list(tmpdir.iterdir()), [])          # removed once it went quiet
 
     def test_a_busy_clone_does_not_admit_a_refused_commit(self):
-        r, out, _ = self.busy(self.srv.fork)
+        # and is removed: exit 1 alone would also pass with the old trap,
+        # whose failing rm exited 1 too
+        r, out, tmpdir = self.busy(self.srv.fork)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertEqual((r.stdout, out), ("", ""))
+        self.assertNotIn("left behind", r.stderr)
+        self.assertEqual(list(tmpdir.iterdir()), [])
 
     def test_a_clone_that_will_not_go_keeps_the_verdict(self):
         d = self.bindir(rm=FAKE_RM)
