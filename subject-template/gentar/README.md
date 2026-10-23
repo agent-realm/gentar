@@ -382,7 +382,10 @@ face. Decisions and reality assertions, never scripts.
 The arena workflow is the kit's, byte for byte — `--check` compares it —
 and does what the run policy says (above). Its `plan` and `checks` jobs
 run on GitHub-hosted runners; only the `bench` job needs a self-hosted
-runner labeled `arena` with Docker + reach to the bench-host.
+runner labeled `arena` with Docker + reach to the bench-host. A bench
+runner that carries another label (agentmux's is `agentmux-lab`) sets the
+repository variable `GENTAR_BENCH_LABEL` to it: the bench job runs there,
+and the runner guard below refuses that label too.
 
 **No GitHub-hosted minutes, or CI kept in-house?** Set the repository or
 organisation variable `GENTAR_CI_RUNNER` to a JSON runs-on value, e.g.
@@ -400,17 +403,34 @@ change with it set:
   code never reaches a self-hosted runner;
 - `[phase1] os` may only list `ubuntu-latest` (macOS checks need a hosted
   runner; `plan.py` refuses rather than quietly running Linux);
-- the value may not mention `arena` in any case, not even inside a longer
-  label: the checks run pull request code and the bench runner must never
-  get it. The workflow fails such a run before scheduling anything
-  (`ci-runner-refused`), because runner labels match regardless of case.
+- the value may not mention `arena` or `GENTAR_BENCH_LABEL`'s label in any
+  case, not even inside a longer label: the checks run pull request code
+  and the bench runner must never get it. The workflow fails such a run
+  before scheduling anything (`ci-runner-refused`), because runner labels
+  match regardless of case. A backslash is refused too: `runs-on` decodes
+  JSON escapes, so `"\u0061rena"` would name the bench runner past a check
+  of the raw text, and no label needs one;
+- the value must name a label only your CI runner carries. A job lands on
+  any runner that has **all** its labels, and every self-hosted runner has
+  the default ones (`self-hosted`, `linux`, `x64`, ...), the bench runner
+  included: `["self-hosted", "linux"]` could start the checks on the bench
+  runner. `plan.py` refuses a value made only of default labels. It runs
+  once `plan` is scheduled, since the workflow cannot inspect a list
+  before then, so it stops the checks and fails the run, but `plan` itself
+  may already have started there. That refusal guards against a
+  misconfiguration, not against a same-repository pull request, whose own
+  `plan.py` is what runs: keep the bench runner's labels to the defaults
+  plus its bench label, and give the CI runner one of its own.
+  `GENTAR_BENCH_LABEL` itself may not be a default label.
 
-The `bench` job is unaffected: it always runs on `arena`.
+The `bench` job is unaffected: it always runs on `arena`, or on
+`GENTAR_BENCH_LABEL`.
 GitHub-hosted runners cannot reach an internal bench-host. One-time
 setup, ~5 min on any always-on machine with Docker:
 
 GitHub → this repo → Settings → Actions → Runners → New self-hosted
-runner → follow the commands → when configuring, labels: `arena`.
+runner → follow the commands → when configuring, labels: `arena` (or the
+label you set in `GENTAR_BENCH_LABEL`).
 
 Secrets/vars the workflow reads:
 
@@ -437,6 +457,9 @@ Secrets/vars the workflow reads:
   run's `skipping … TYPESAFE_API_KEY is not set` lines before trusting it
 - `vars.GENTAR_CI_RUNNER` — run `plan` and `checks` on a self-hosted runner
   (above); a repository variable on GitHub Free
+- `vars.GENTAR_BENCH_LABEL` — the bench runner's label when it is not
+  `arena` (above): the bench job runs there, and `GENTAR_CI_RUNNER` may not
+  name it
 - `vars.GENTAR_FLOOR` — the floor suites, read only when there is no
   `gentar/policy.toml` (the 0.3.x behaviour)
 - `secrets.<NAME>` for each name in `[secrets] route` — your subject's own
