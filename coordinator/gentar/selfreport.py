@@ -22,8 +22,11 @@ CHECK = "otlp-join run_id"
 DEADLINE = 30                     # seconds for the span to be queryable
 POLL = 2
 
-# Run ids whose drop file has reached otelcol: the run's own best-effort
-# relay (in its `finally`) skips them, so a span is never sent twice.
+# Run ids whose drop file this module has SENT, whatever came of it: the
+# run's own best-effort relay (in its `finally`) skips them, so neither the
+# scrubbed export nor the collector gets a span twice. Marked before the
+# sends, not after a success: a POST that failed or timed out may still
+# have been accepted, and the export copy has left already (Codex on #99).
 RELAYED: set[str] = set()
 
 
@@ -36,6 +39,7 @@ def relay(bench, run_id: str, spans, cfg, subject: str, name: str) -> tuple[bool
     rc, out = bench.exec(run_id, f"cat \"{DROP}\" 2>/dev/null")
     if rc != 0 or not out.strip():
         return False, f"no self-report at {DROP}"
+    RELAYED.add(run_id)                              # attempted: never resent
     spans.otlp.relay(subject, run_id, out)           # the scrubbed export door
     try:
         req = urllib.request.Request(f"{cfg.otlp_endpoint}/v1/traces", data=out.encode(),
@@ -45,7 +49,6 @@ def relay(bench, run_id: str, spans, cfg, subject: str, name: str) -> tuple[bool
             resp.read()
     except Exception as exc:                          # noqa: BLE001
         return False, f"relay to {cfg.otlp_endpoint} failed: {exc}"
-    RELAYED.add(run_id)
     spans.emit(subject, run_id, name, "otlp.relay", "pass",
                attrs={"endpoint": cfg.otlp_endpoint},
                detail=f"relayed {len(out)} bytes of agent self-report")

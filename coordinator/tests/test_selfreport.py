@@ -97,7 +97,18 @@ class RelayTest(unittest.TestCase):
         ok, detail = selfreport.relay(Bench(), "r4", spans(), dead, "arena", "otlp")
         self.assertFalse(ok)
         self.assertIn("relay to http://127.0.0.1:1 failed", detail)
-        self.assertNotIn("r4", selfreport.RELAYED)
+
+    def test_a_failed_send_is_never_resent_by_the_runs_own_relay(self):
+        # Codex on #99: the scrubbed export left before the POST failed, and
+        # the run's `finally` relay sent it again
+        from gentar import coordinator
+        s = spans()
+        dead = SimpleNamespace(otlp_endpoint="http://127.0.0.1:1")
+        ok, _ = selfreport.relay(Bench(), "r6", s, dead, "arena", "otlp")
+        self.assertFalse(ok)
+        self.assertIn("r6", selfreport.RELAYED)
+        coordinator._relay_agent_spans(Bench(), "r6", s, dead, "arena", "otlp")
+        s.otlp.relay.assert_called_once_with("arena", "r6", BODY)
 
     def test_check_does_not_query_when_the_relay_failed(self):
         c = Client(1)
