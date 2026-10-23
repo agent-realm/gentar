@@ -27,6 +27,14 @@ Adopters pin a release tag, not a branch.
 Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what changed and why, the breaking schema change, upgrade for adopters, what is not live-proven, known limits, verification).
 
 ### Added
+- **`gentar/run.sh --review --since <ref>`**: what changed since a ref (the
+  adoption, say), from git objects only, deterministic and bench-free:
+  - the changed paths outside `gentar/`;
+  - the executables added, removed or changed;
+  - the suites that mention a changed path (re-read them);
+  - the changed paths no suite mentions.
+  It reports and never fails a build, and works with a broken policy.
+  Guide: `docs/guides/review-an-adaptation.md`.
 - **Failure snapshot** (engine): when a driver turn fails (or the final
   wait times out, or the danger gate or a goal pilot ends the run), the
   report gets the rendered last screen, the raw tail of the pty stream
@@ -69,6 +77,14 @@ Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what change
   `GENTAR_CI_RUNNER` and `GENTAR_FLOOR`; a test keeps it complete.
 
 ### Fixed
+- **A subject suite can no longer hide behind a builtin's name.** A suite
+  named `smoke` or `smoke-fail` used to run the engine's own self-test
+  instead, silently (review A5). It is now refused with a "rename it".
+- **File assertions reach the bench's shell literally.** Paths and
+  `contains` text were quoted with Python's `repr()`, which switches to
+  double quotes when the text holds a `'`, and then `$` and backticks
+  expanded in the bench's shell (review A9). They are now quoted with
+  `shlex.quote`. Only a leading `~` means the home directory.
 - **Commit-sha checks no longer depend on the locale.** `mirror.sh`,
   `release-gate.sh`, the mirror's `verify-ref.sh` and `bin/bench-reap`
   checked hex with the range `[0-9a-f]`. A shell that orders ranges by the
