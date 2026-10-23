@@ -466,6 +466,13 @@ cmd_ls() {
 # A live run's arena is left alone, as the kit's --down does.
 cmd_down() {
   local lrc=0
+  LOCK_PROJECT=${LOCK_PROJECT:-$(project_name)}
+  if [ -z "$LOCK_PROJECT" ]; then
+    # compose cannot name the project, so no run could have locked it
+    # either (a run takes the same lock): nothing to wait for
+    down_all; echo "arena: torn down"
+    return 0
+  fi
   arena_lock try || lrc=$?
   case "$lrc" in
     0) down_all; arena_unlock; echo "arena: torn down" ;;
