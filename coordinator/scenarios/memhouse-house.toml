@@ -20,11 +20,13 @@ template = "gentar-bench-v1"
 tokens = 50000   # accounting headroom for the nightly cap; oracle is no-LLM
 
 [oracle]
+# Each step keeps its own exit status: a `| tail` alone exited with tail's,
+# so a failed install or deploy passed (ground-up review A8, SC03).
 steps = [
-  'npm install -g "$WORKSPACE_DIR" 2>&1 | tail -3',
+  'out=$(npm install -g "$WORKSPACE_DIR" 2>&1); rc=$?; printf "%s\n" "$out" | tail -3; exit $rc',
   # Documented no-ClickHouse path: loopback house + install + wiring.
-  'memhouse deploy --local 2>&1 | tail -15',
-  'memhouse status 2>&1 | tail -10',
+  'out=$(memhouse deploy --local 2>&1); rc=$?; printf "%s\n" "$out" | tail -15; exit $rc',
+  'out=$(memhouse status 2>&1); rc=$?; printf "%s\n" "$out" | tail -10; exit $rc',
 ]
 
 [[verify.commands]]
@@ -35,27 +37,29 @@ contains = "env-wired"
 
 [[verify.commands]]
 # sql-count, live house: the three rooms exist in the house database.
+# curl -f: an HTTP error is a failure, and the count must be exactly 3. An
+# error body holding a "3" (a version string) used to pass (review SC03).
 command = '''set -a; . "$HOME/.memhouse/env"; set +a
 Q="SELECT count() FROM system.tables WHERE database='$MEMHOUSE_DB' AND name IN ('sessions','messages','tool_calls')"
-curl -s "$MEMHOUSE_URL/?default_format=TSV" -u "$MEMHOUSE_USER:$MEMHOUSE_PASSWORD" --data-binary "$Q"'''
-contains = "3"
+R=$(curl -sf "$MEMHOUSE_URL/?default_format=TSV" -u "$MEMHOUSE_USER:$MEMHOUSE_PASSWORD" --data-binary "$Q") && test "$R" = 3 && echo "rooms count=$R"'''
+contains = "rooms count=3"
 
 [[verify.commands]]
 # sql-count: attribution is server-side in every room — user_id is a
 # MATERIALIZED column, so no client can claim to be someone else.
 command = '''set -a; . "$HOME/.memhouse/env"; set +a
 Q="SELECT count() FROM system.columns WHERE database='$MEMHOUSE_DB' AND name='user_id' AND default_kind='MATERIALIZED' AND default_expression='currentUser()'"
-curl -s "$MEMHOUSE_URL/?default_format=TSV" -u "$MEMHOUSE_USER:$MEMHOUSE_PASSWORD" --data-binary "$Q"'''
-contains = "3"
+R=$(curl -sf "$MEMHOUSE_URL/?default_format=TSV" -u "$MEMHOUSE_USER:$MEMHOUSE_PASSWORD" --data-binary "$Q") && test "$R" = 3 && echo "stamped count=$R"'''
+contains = "stamped count=3"
 
 [[verify.commands]]
 # sql-count: the house answers as the OS user (whatever the bench runs
 # as — `agent` today) — the stamp fires for real.
 command = '''U=$(id -un); set -a; . "$HOME/.memhouse/env"; set +a
 Q="SELECT currentUser()"
-R=$(curl -s "$MEMHOUSE_URL/?default_format=TSV" -u "$MEMHOUSE_USER:$MEMHOUSE_PASSWORD" --data-binary "$Q")
+R=$(curl -sf "$MEMHOUSE_URL/?default_format=TSV" -u "$MEMHOUSE_USER:$MEMHOUSE_PASSWORD" --data-binary "$Q") &&
 test "$R" = "$U" && echo "stamp-live user=$R"'''
 contains = "stamp-live"
 
 [[verify.commands]]
-command = 'memhouse stats 2>&1 | tail -5'
+command = 'out=$(memhouse stats 2>&1); rc=$?; printf "%s\n" "$out" | tail -5; exit $rc'

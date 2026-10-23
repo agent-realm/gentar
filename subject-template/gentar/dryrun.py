@@ -357,6 +357,14 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
             want = f"  (wanted {c['contains']!r})" if "contains" in c else ""
             log.append(f"  verify {i} FAIL{want}\n    {c['command'][:180]}\n    {(r.stdout + r.stderr).strip()[:300] or '(no output)'}")
 
+    if getattr(sc, "self_report", False):
+        # [verify] self_report: the bench's OTLP span must reach the arena's
+        # ClickHouse and join the run's harness spans. Only the arena has
+        # either, so the suite is not verified here, whatever else passed.
+        unreplayed.append("self-report")
+        fails += 1
+        log.append("  self-report join: needs the arena's ClickHouse — NOT verified here")
+
     if not fails:
         verdict = "ALL PASS"
     elif unreplayed and fails == len(unreplayed):
@@ -364,8 +372,11 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
         # these. Say so instead of either lying (ALL PASS) or crying
         # wolf (FAILURES); the exit code is still nonzero, so CI and the
         # caller treat "unverified" as "not proven".
-        verdict = (f"UNVERIFIED ({', '.join(sorted(set(unreplayed)))} "
-                   "turns need the arena)")
+        kinds = sorted(set(unreplayed) - {"self-report"})
+        parts = [f"{', '.join(kinds)} turns need the arena"] if kinds else []
+        if "self-report" in unreplayed:
+            parts.append("the self-report join needs the arena")
+        verdict = f"UNVERIFIED ({'; '.join(parts)})"
     else:
         verdict = f"{fails} FAILURES"
     print(f"{path.name}: {verdict}")

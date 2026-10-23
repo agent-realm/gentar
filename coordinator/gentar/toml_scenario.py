@@ -100,7 +100,7 @@ _TABLES = {
     "oracle": {"steps"},
     "driver": {"command", "turns", "goal", "actions", "max_steps", "p_act",
                "every", "timeout"},
-    "verify": {"files", "commands", "judge"},
+    "verify": {"files", "commands", "judge", "self_report"},
     "judge": {"max_calls", "max_input_tokens", "lines"},
     "semantic": {"runs", "pass_rate_min"},
     "budget": {"tokens", "simulate_spend"},
@@ -448,6 +448,12 @@ class TomlScenario:
         self.commands = _array_of_tables(path, verify, "verify.commands")
         # Soft judgments of the final screen: reported, never the verdict.
         self.judge_checks = _array_of_tables(path, verify, "verify.judge")
+        # The bench's OTLP drop file must reach the arena's ClickHouse and
+        # join this run's harness spans on run_id: an assertion, checked by
+        # the coordinator (gentar.selfreport), not best-effort telemetry.
+        self.self_report = verify.get("self_report", False)
+        if not isinstance(self.self_report, bool):
+            raise ScenarioError(f"{path}: verify.self_report must be true or false")
 
         driver = doc.get("driver") or {}
         self.driver_command = driver.get("command")

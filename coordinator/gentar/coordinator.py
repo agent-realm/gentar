@@ -219,7 +219,13 @@ def _relay_agent_spans(bench: BenchHost, run_id: str, spans: Spans,
     like all telemetry: a missing file is normal (most scenarios don't
     self-report); a failed relay warns and moves on. It runs in the run's
     `finally`, so NOTHING here may raise: a bench that hangs (the read times
-    out) once escaped and skipped the scenario's end, report and teardown."""
+    out) once escaped and skipped the scenario's end, report and teardown.
+    A scenario with `[verify] self_report = true` has relayed it already, as
+    an assertion (gentar.selfreport): never twice."""
+    from gentar import selfreport
+    if run_id in selfreport.RELAYED:
+        selfreport.RELAYED.discard(run_id)
+        return
     try:
         rc, out = bench.exec(
             run_id, "cat \"$WORKSPACE_DIR/gentar-otlp.json\" 2>/dev/null")

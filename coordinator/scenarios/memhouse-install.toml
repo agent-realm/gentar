@@ -17,7 +17,7 @@ template = "gentar-bench-v1"   # node + npm present
 steps = [
   # Documented one-liner, pointed at the mounted tree. npm packs via the
   # package.json "files" allowlist, so workspace clutter never ships.
-  'npm install -g "$WORKSPACE_DIR" 2>&1 | tail -3',
+  'out=$(npm install -g "$WORKSPACE_DIR" 2>&1); rc=$?; printf "%s\n" "$out" | tail -3; exit $rc',
   'command -v memhouse && memhouse --version',
 ]
 
@@ -39,7 +39,9 @@ contains = "server-stamped"
 [[verify.commands]]
 # The house DDL is qualified and runnable anywhere (no USE) — README
 # promises "runs anywhere".
-command = 'memhouse install --print-sql | grep -q "^USE " && echo has-use || echo no-use'
+# The DDL must be produced first: a failing --print-sql used to read as
+# "no-use", a pass (ground-up review A8, SC03).
+command = 'sql=$(memhouse install --print-sql) || exit 1; printf "%s\n" "$sql" | grep -q "^USE " && echo has-use || echo no-use'
 contains = "no-use"
 
 [[verify.commands]]

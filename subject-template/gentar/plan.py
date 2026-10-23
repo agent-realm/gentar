@@ -767,7 +767,10 @@ def lint(policy, engine_root):
                             f"judged suites run in phase 2 only")
         if j.get("goal"):
             gdir = FIXTURES / name / "goal"
-            picks = {d.name: len(list(d.glob("*.txt"))) for d in gdir.glob("*") if d.is_dir()}
+            # an action counts only with a screen in it: an empty `done/`
+            # covered nothing (agy on #99)
+            picks = {d.name: n for d in gdir.glob("*")
+                     if d.is_dir() and (n := len(list(d.glob("*.txt"))))}
             if sum(picks.values()) < MIN_FIXTURES or "done" not in picks or len(picks) < 2:
                 problems.append(
                     f"{j['file']}: its goal pilot needs {MIN_FIXTURES}+ fixture screens under "

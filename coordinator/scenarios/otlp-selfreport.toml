@@ -5,7 +5,10 @@
 # step writes an OTLP/HTTP-JSON body to $WORKSPACE_DIR/gentar-otlp.json
 # (the documented drop point any agent adapter can use), and the
 # coordinator relays that file to otelcol on the compose network. The
-# harness↔agent JOIN is proven by one SQL on run_id (README phase-5).
+# harness↔agent JOIN is proven by one SQL on run_id: `self_report = true`
+# below makes the coordinator relay the file before the verdict and wait
+# for the span to join the run's harness spans in ClickHouse (ground-up
+# review A8: this suite used to check only that the file was non-empty).
 [scenario]
 name = "otlp-selfreport"
 
@@ -16,7 +19,9 @@ steps = [
     const c = require("crypto");
     const trace = c.createHash("sha256").update(r).digest("hex").slice(0, 32);
     const span = c.randomBytes(8).toString("hex");
-    const now = process.hrtime.bigint().toString();
+    // epoch nanoseconds: process.hrtime counts from an arbitrary point,
+    // which ClickHouse read as 1970, before the table TTL (review S2-1)
+    const now = (BigInt(Date.now()) * 1000000n).toString();
     const body = { resourceSpans: [{ resource: { attributes: [
         { key: "gentar.run_id", value: { stringValue: r } } ] },
       scopeSpans: [{ spans: [{ traceId: trace, spanId: span,
@@ -28,6 +33,9 @@ steps = [
     console.log("selfreport written for", r);
   '"""
 ]
+
+[verify]
+self_report = true
 
 [[verify.commands]]
 command = "test -s \"$WORKSPACE_DIR/gentar-otlp.json\" && echo selfreport-nonempty"
