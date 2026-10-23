@@ -373,6 +373,12 @@ class TomlScenario:
         self.data = sc.get("data", "")
         if not isinstance(self.data, str):
             raise ScenarioError(f"{path}: scenario.data must be a string (\"synthetic\")")
+        # A string here read as one name per CHARACTER (list("KEY") is
+        # K, E, Y): refused, as the kit refuses it (agy on #96).
+        for field in ("credentials", "pass_env"):
+            if not isinstance(sc.get(field, []), list):
+                raise ScenarioError(f"{path}: scenario.{field} must be a list, "
+                                    f"e.g. {field} = [\"NAME\"]")
         # The judge key is the COORDINATOR's; declaring it would forward it
         # into the bench, where the agent under test could read it.
         for field in ("credentials", "pass_env"):

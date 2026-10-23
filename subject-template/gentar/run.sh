@@ -100,23 +100,28 @@ fi
 HERE=$(cd "$(dirname "$0")" && pwd)          # <repo>/gentar
 REPO=$(dirname "$HERE")
 
-# The [scenario] table only — the one place the engine reads `subject`,
-# `credentials` and `pass_env`. Reading keys anywhere in the file let a
-# `subject` or `credentials` under another table (a review found both)
-# masquerade as the scenario's. A header is a WHOLE line holding only
-# `[name]` / `[[name]]`, so `[ -f x ]` inside a step never counts.
-scenario_table() {
-  awk '
-    # Inside a multi-line string (a step written as triple-quoted text), a
-    # line reading `[scenario]` is TEXT, not a header — without this, it
-    # re-entered the table and its `subject` was read.
-    function toggles(line, delim,   n) { n = gsub(delim, "", line); return n % 2 }
-    !inml && /^[[:space:]]*\[\[?[A-Za-z_][A-Za-z0-9_.-]*\]\]?[[:space:]]*(#.*)?$/ {
-      h = $0; gsub(/[][[:space:]]|#.*/, "", h); insc = (h == "scenario"); next
-    }
-    { if (insc) print
-      if (toggles($0, "\047\047\047")) inml = !inml
-      if (toggles($0, "\"\"\"")) inml = !inml }' "$1"
+# Every suite's facts come from `plan.py scenarios`, which reads the TOML
+# with a TOML parser. The shell's own reading (awk and grep) diverged from
+# the engine's (ground-up review A7): a step printing `goal=1` made a
+# suite judged, a comment holding triple quotes hid its [scenario] table,
+# and `credentials = []` read as a credential never set. One line per
+# suite, tab-separated: file stem, subject, judged (1/0), credential
+# groups (`;` between groups, a space between names), every forwarded
+# name. A suite that does not read, or whose `name` differs from its file
+# name, is refused (exit 2) by every mode that uses these facts.
+# --stage-engine, --check and --review use none: --check reports each
+# broken suite through lint and the dry-run instead.
+if [ "$STAGE_ONLY" = 1 ]; then         # quiet: --check, its caller, reports it
+  SCAN=$(python3 "$HERE/plan.py" scenarios 2>/dev/null) && SCAN_OK=1 || { SCAN_OK=0; SCAN=""; }
+elif SCAN=$(python3 "$HERE/plan.py" scenarios); then SCAN_OK=1; else SCAN_OK=0; SCAN=""; fi
+if [ "$SCAN_OK" = 0 ] && [ "$STAGE_ONLY$CHECK_ONLY$REVIEW_ONLY" = 000 ]; then
+  echo "the scenarios do not read (above); gentar/run.sh --check lists each problem" >&2
+  exit 2
+fi
+scan_field() {                # stem, field number -> that field, "" when absent
+  # ("" x) compares as strings: awk compares two numeric-looking values as
+  # numbers, and suites `01` and `1` got each other's facts (Codex on #96)
+  printf '%s\n' "$SCAN" | awk -F '\t' -v s="$1" -v n="$2" '($1 "") == (s "") { print $n; exit }'
 }
 
 # The subject name is read FROM THE SCENARIOS, which must declare it
@@ -131,19 +136,17 @@ scenario_table() {
 if [ -n "${GENTAR_SUBJECT:-}" ]; then
   SUBJECT=$GENTAR_SUBJECT
 else
-  # Either TOML string style: "basic" or 'literal'. Missing the second
-  # made a single-quoted subject read as NO subject.
-  declared=$(for f in "$HERE"/scenarios/*.toml; do
-      [ -f "$f" ] && scenario_table "$f" \
-        | sed -n "s/^[[:space:]]*subject[[:space:]]*=[[:space:]]*[\"']\([^\"']*\)[\"'].*/\1/p"
-    done | sort -u)
-  nscen=$(ls "$HERE"/scenarios/*.toml 2>/dev/null | wc -l | tr -d ' ')
+  declared=$(printf '%s\n' "$SCAN" | awk -F '\t' 'NF && $2 != "" { print $2 }' | sort -u)
+  nscen=$(printf '%s\n' "$SCAN" | grep -c . || true)
+  # --stage-engine, --check and --review with suites that do not read:
+  # they stage no subject, so the directory name stands in.
+  [ "$SCAN_OK" = 1 ] || nscen=0
   case "$(printf '%s\n' "$declared" | grep -c .)" in
     0) if [ "$nscen" -gt 0 ]; then
          # Scenarios exist but none declared a subject this could read. Never
          # fall back to the directory: in a worktree that is the branch name,
          # which is the bug this block exists to prevent.
-         echo "could not read subject = \"…\" from gentar/scenarios/*.toml" >&2
+         echo "no scenario declares subject = \"…\" in gentar/scenarios/*.toml" >&2
          echo "declare it in each scenario, or set GENTAR_SUBJECT" >&2
          exit 2
        fi
@@ -331,48 +334,24 @@ if [ "$DOWN_ONLY" = 1 ]; then
 fi
 
 # credentials = [...] -> one group per line, names space-separated. A
-# top-level string is a group of one; a nested list is ONE all-of group.
-# Mirrors the engine's satisfied_group() grammar exactly (cross-checked
-# against its parser on flat, nested, multi-line and commented shapes).
-# Both TOML string styles ("basic", 'literal'). awk, not python: this runs
-# on a stock CI runner.
+# top-level string is a group of one; a nested list is ONE all-of group
+# (the engine's satisfied_group() grammar, read by plan.py scenarios).
 credential_groups() {
-  scenario_table "$1" | awk '
-    /^[[:space:]]*#/ { next }
-    !inarr && /^[[:space:]]*credentials[[:space:]]*=/ { inarr = 1; buf = ""; sub(/^[^=]*=/, "") }
-    inarr {
-      line = $0; sub(/#.*/, "", line); buf = buf " " line
-      t = buf; o = gsub(/\[/, "", t); t = buf; c = gsub(/\]/, "", t)
-      if (o > 0 && o == c) { inarr = 0; emit(buf) }
-    }
-    function emit(b,   i, ch, depth, instr, cur, grp, q) {
-      depth = 0; instr = 0; cur = ""; grp = ""
-      for (i = 1; i <= length(b); i++) {
-        ch = substr(b, i, 1)
-        if (instr) {
-          if (ch == q) { instr = 0
-            if (depth == 1) print cur; else grp = grp (grp == "" ? "" : " ") cur
-          } else cur = cur ch
-          continue
-        }
-        if (ch == "\"" || ch == "\047") { instr = 1; q = ch; cur = ""; continue }
-        if (ch == "[") { depth++; if (depth == 2) grp = ""; continue }
-        if (ch == "]") { if (depth == 2 && grp != "") print grp; depth--; continue }
-      }
-    }'
+  scan_field "$(basename "$1" .toml)" 4 | tr ';' '\n' | grep . || true
 }
 
-# 0 when the suite declares no credentials or one group is fully set.
+# 0 when the suite declares no credentials (`credentials = []` included)
+# or one group is fully set.
 credentials_present() {
-  scenario_table "$1" | grep -q '^[[:space:]]*credentials[[:space:]]*=' || return 0
-  local g n full
+  local g n full groups
+  groups=$(credential_groups "$1")
+  [ -n "$groups" ] || return 0
   while IFS= read -r g; do
-    [ -n "$g" ] || continue
     full=1
     for n in $g; do [ -n "${!n:-}" ] || { full=0; break; }; done
     [ "$full" = 1 ] && return 0
   done <<EOF
-$(credential_groups "$1")
+$groups
 EOF
   return 1
 }
@@ -381,24 +360,8 @@ EOF
 # (what reaches the coordinator; see FORWARD below for why it is read from
 # the scenarios, and how).
 extract_env_names() {         # files... -> one env var name per line
-  for _f in "$@"; do scenario_table "$_f"; done | awk '
-    /^[[:space:]]*#/ { next }
-    /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
-    inarr {
-      # an inline comment declares nothing: `credentials = ["A"]  # was "B"`
-      # must not route B to this suite (agy on #79), as credential_groups
-      # already reads it
-      code = $0; sub(/#.*/, "", code); line = code
-      # either TOML quote style — a 'literal' name used to forward nothing,
-      # and the coordinator then refused credentials the caller had set
-      while (match(line, /["\047][A-Za-z_][A-Za-z0-9_]*["\047]/)) {
-        print substr(line, RSTART + 1, RLENGTH - 2)
-        line = substr(line, RSTART + RLENGTH)
-      }
-      depth += gsub(/\[/, "[", code) - gsub(/\]/, "]", code)
-      if (depth <= 0) inarr = 0
-    }
-  '
+  local _f
+  for _f in "$@"; do scan_field "$(basename "$_f" .toml)" 5 | tr ' ' '\n'; done | grep . || true
 }
 
 # 0 when the suite has a judged turn (a semantic expect).
@@ -410,11 +373,10 @@ is_pr_event() {
 }
 
 judged() {
-  # Deliberately broad: any non-comment line where `judge` or `goal` is a key
-  # segment — bare, quoted or dotted, in a key or a table header
-  # ([["verify"."judge"]], driver.goal = ...). Over-matching only skips a
-  # suite on a pull request; under-matching would run a judged one (Codex).
-  grep -Eq "^[^#]*(^|[^A-Za-z0-9_])[\"']?(judge|goal)[\"']?[[:space:]]*(=|\\])" "$1"
+  # The engine's rule (TomlScenario.uses_judge), read by plan.py scenarios:
+  # a judged turn, a goal pilot or a [[verify.judge]] check. A step that
+  # merely prints `goal=1` is not one (ground-up review A7, GB6).
+  [ "$(scan_field "$(basename "$1" .toml)" 3)" = 1 ]
 }
 # 0 when the suite has no judged turn, or the judge key is set. A judged
 # suite without it would only refuse (exit 2).
@@ -1055,13 +1017,9 @@ arena_start otelcol
 # schema, so a hardcoded ANTHROPIC_* allowlist silently drops
 # OPENAI_API_KEY or any subject's own knob — the coordinator then
 # refuses (exit 2) for a variable the caller did set, or quietly runs
-# without an optional one (PR #27 review). Parsed with awk rather than a
-# TOML library: this must work on a stock runner with no python
-# dependency. The two shapes the schema allows are
-# `credentials = ["A", ["B", "C"]]` (groups, possibly spanning lines)
-# and `pass_env = ["D"]`; tracking bracket depth reads both and stops at
-# the array's real end rather than at the first `]` on a later line.
-# Commented-out examples are skipped — a `#` line is not a declaration.
+# without an optional one (PR #27 review). Both shapes the schema allows,
+# `credentials = ["A", ["B", "C"]]` and `pass_env = ["D"]`, come from
+# plan.py scenarios, which parses the TOML (see the top of this file).
 #
 # GENTAR_BUDGET_CAP is the one fixed addition: it configures the budget
 # guard itself, so no scenario declares it.
