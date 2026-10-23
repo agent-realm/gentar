@@ -413,8 +413,11 @@ change with it set:
   runner. `plan.py` refuses a value made only of default labels. It runs
   once `plan` is scheduled, since the workflow cannot inspect a list
   before then, so it stops the checks and fails the run, but `plan` itself
-  may already have started there. Keep the bench runner's labels to the
-  defaults plus its bench label, and give the CI runner one of its own.
+  may already have started there. That refusal guards against a
+  misconfiguration, not against a same-repository pull request, whose own
+  `plan.py` is what runs: keep the bench runner's labels to the defaults
+  plus its bench label, and give the CI runner one of its own.
+  `GENTAR_BENCH_LABEL` itself may not be a default label.
 
 The `bench` job is unaffected: it always runs on `arena`, or on
 `GENTAR_BENCH_LABEL`.

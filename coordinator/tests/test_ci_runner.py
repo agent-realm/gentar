@@ -93,6 +93,15 @@ class CiRunnerTest(unittest.TestCase):
         with self.assertRaisesRegex(self.p.Refuse, "GENTAR_BENCH_LABEL must be one"):
             self.plan(SELF, GENTAR_BENCH_LABEL="a b")
 
+    def test_the_bench_label_is_checked_even_on_hosted_ci(self):
+        # agy on #98: it was read only when GENTAR_CI_RUNNER was set; the
+        # bench job runs on it either way
+        for bad in ("a b", "agentmux-lab ", "linux", "Self-Hosted", "x64"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse,
+                                                               "GENTAR_BENCH_LABEL must be one"):
+                self.plan(GENTAR_BENCH_LABEL=bad)
+        self.assertEqual(self.plan(GENTAR_BENCH_LABEL="agentmux-lab")["runner"], "github-hosted")
+
     def test_a_json_escape_is_refused(self):
         # runs-on decodes, the guard reads raw text: "\u0061rena" named the
         # bench runner past both (Codex on #98). No label needs an escape,

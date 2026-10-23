@@ -458,6 +458,15 @@ def ci_runner(env):
     in runs-on); this is the same value, checked where it can be tested.
     Never the bench runner: the checks run pull request code, and the
     `arena` label is where benches are driven from."""
+    # The bench label is checked whatever GENTAR_CI_RUNNER says: the bench
+    # job runs on it (agy on #98). Unstripped, as the workflow reads it, so
+    # a stray space is refused here instead of queueing on a label no
+    # runner has; never a default label, which every self-hosted runner
+    # carries, so the bench job and its secrets could land on any of them.
+    bench = env.get("GENTAR_BENCH_LABEL") or ""
+    if bench and (not NAME.fullmatch(bench) or bench.lower() in DEFAULT_RUNNER_LABELS):
+        raise Refuse(f"GENTAR_BENCH_LABEL must be one runner label of the bench runner's own, "
+                     f"not a default one ({', '.join(sorted(DEFAULT_RUNNER_LABELS))}): {bench!r}")
     raw = (env.get("GENTAR_CI_RUNNER") or "").strip()
     if not raw:
         return None
@@ -476,9 +485,6 @@ def ci_runner(env):
     if (not isinstance(labels, list) or not labels
             or not all(isinstance(x, str) and NAME.fullmatch(x) for x in labels)):
         raise Refuse(f"GENTAR_CI_RUNNER must be a runner label or a list of them: {raw!r}")
-    bench = (env.get("GENTAR_BENCH_LABEL") or "").strip()
-    if bench and not NAME.fullmatch(bench):
-        raise Refuse(f"GENTAR_BENCH_LABEL must be one runner label: {bench!r}")
     # Case-insensitive and by substring, exactly as the workflow's own
     # pre-scheduling guard (`contains(vars.GENTAR_CI_RUNNER, 'arena')`, and
     # the same for GENTAR_BENCH_LABEL): runner labels match regardless of
