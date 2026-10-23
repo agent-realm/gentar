@@ -21,6 +21,7 @@ job to do. Use the reference when you need every detail of one part.
 | [Run policy and releases](guides/run-policy-and-releases.md) | decide which suites run when, and gate a release on them |
 | [Measure a judge with fixtures](guides/measure-a-judge-with-fixtures.md) | know that a judged turn answers right before it gates anything |
 | [Debug a red run](guides/debug-a-red-run.md) | turn a failing or refused run into a fix |
+| [Review an adaptation](guides/review-an-adaptation.md) | find what the repo now does that no suite asserts |
 | [Pick a bench tier](guides/bench-tiers.md) | choose between `sbx`, `tart`, `osb` and `daytona` |
 
 ## Reference — everything about one part
