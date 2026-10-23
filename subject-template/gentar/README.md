@@ -14,13 +14,14 @@ can hand to an agent to fix what failed.
 | trigger | `.github/workflows/gentar-arena.yml` (the central arena's dispatch job is retired, 2026-10-12) | the kit's, unedited |
 | run policy | `policy.toml` — which suites run when (see "Run policy") | see file |
 | dry-run hooks | `hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | see file |
-| engine pin | `GENTAR_REF` in `run.sh` — a release tag, re-fetched every run | `v0.11.0` |
+| engine pin | the `GENTAR_REF` default in the kit's `run.sh` — a release tag, re-fetched every run; moved by re-copying the kit from a newer tag | `v0.11.0` |
 
 ## Quickstart (local)
 
 Prereqs: Docker, and network reach to a **bench-host** you provide: any
 Linux machine with [`sbx`](https://docs.docker.com/ai/sandboxes/)
-installed and logged in once, reachable over SSH.
+installed and logged in once, reachable over SSH. Or this machine itself,
+in local bench mode: `GENTAR_BENCH_HOST=local`, no user and no key.
 
 ```bash
 gentar/run.sh --stage-engine   # clone the pinned engine; no Docker, no bench
@@ -173,9 +174,11 @@ together.
   Splitting the code change and the scenario change across two PRs
   leaves main red in between, and a red main teaches people to ignore
   the arena.
-- **The engine changed** — nothing happens until someone bumps
-  `GENTAR_REF` in `run.sh`. That is a deliberate change: bump, run every
-  suite, commit the bump on its own with the outcome in the message.
+- **The engine changed** — nothing happens until someone bumps the pin:
+  re-copy the kit's files from the newer engine tag (the pin is the
+  `GENTAR_REF` default in `run.sh`, and `--check` fails on an edited kit
+  file). That is a deliberate change: bump, run every suite, commit the
+  bump on its own with the outcome in the message.
 - **The repo grew behaviour nothing asserts** — the case with no
   failure. Existing suites still pass, the board stays green, and
   coverage decays quietly. Nothing catches this by running; someone has
@@ -285,7 +288,7 @@ cannot do this: it cancels a pending run when a newer one queues.)
 Every terminal outcome writes `gentar/reports/report-<run_id>.md`
 stating what ran (every step, with output), what was asserted and what
 it actually saw, and a reproduce command (`gentar/run.sh <suite>` — the
-runner rewrites the engine's central-arena default on copy). On a
+runner rewrites the engine's bare compose command on copy). On a
 failure, that file is a work order:
 
 ```
@@ -294,7 +297,10 @@ Read gentar/reports/report-<id>.md, fix the repo, rerun
 ```
 
 The subject is the **working tree** (uncommitted changes included) — fix
-and rerun, no commit needed to test.
+and rerun, no commit needed to test. It is staged as the files git would
+ship: tracked, plus untracked files git does not ignore. A gitignored
+`.env`, `.npmrc` or build output never reaches the bench; a checkout with
+no `.git` of its own is copied whole.
 
 Exit `1` is a verdict: an assertion saw something other than the claim.
 Exit `2` is a refusal before any bench existed — a missing credential,
@@ -348,12 +354,16 @@ It is not a substitute for the arena. There is no sandbox, no template and no
 network policy, so it proves the shell and the assertions while the arena
 proves the isolation. Two kinds of suite it will not claim to have checked:
 those declaring `credentials` are skipped (they need a real agent and a real
-key), and those whose `[driver]` uses `pick` or `abort` turns, a judged
+key), and those whose `[driver]` uses `pick`, `key` or `abort` turns, a judged
 `expect`, or a `goal` come back `UNVERIFIED` with a nonzero exit — those need
 the real driver (or the judge), and a picker that never matched must not read
-as a pass. A goal pilot's driver is not even started, and its assertions are
-not run, since nothing was driven. `run.sh --check` accepts UNVERIFIED (it is
-not a defect the dry run can see); the arena is where these suites are proven.
+as a pass. The turns before the first `pick`, `key` or `abort` are replayed;
+the drive stops there, and neither the later turns nor the suite's assertions
+run, since they describe a drive that did not finish. A goal pilot's or a
+judged suite's driver is not even started, and its assertions are not run. A
+failing step, or a failing turn before the stop, is still a FAILURE.
+`run.sh --check` accepts UNVERIFIED (it is not a defect the dry run can see);
+the arena is where these suites are proven.
 
 Add a suite = add a TOML here. The schema is the engine's
 `coordinator/gentar/toml_scenario.py` — read the pinned copy under
@@ -398,10 +408,12 @@ runner → follow the commands → when configuring, labels: `arena`.
 Secrets/vars the workflow reads:
 
 - `secrets.BENCH_SSH_KEY` — key the coordinator uses to reach the bench-host
+  (not read in local bench mode)
 - `secrets.GENTAR_BENCH_HOST`, `secrets.GENTAR_BENCH_USER` — the bench-host itself; the
   engine ships none, so without these no suite can run (secrets, because a public
   repo's logs are public). `vars.GENTAR_BENCH_HOST` is read when the secret is
-  unset: `local` (local bench mode) is a mode word, not a host to hide
+  unset: `local` (local bench mode, the runner is the bench host) is a mode word,
+  not a host to hide, and then neither the user nor the key is needed
 - `secrets.GENTAR_CLONE_KEY` — read-only deploy key, only if the ENGINE repo is private
 - `vars.GENTAR_REPO_URL` — only to clone the engine from a fork or mirror
 - `vars.GENTAR_REF` — only to run an engine ref other than `run.sh`'s pin (a branch or release candidate being proven); delete it afterwards
@@ -423,8 +435,9 @@ Secrets/vars the workflow reads:
 - `secrets.<NAME>` for each name in `[secrets] route` — your subject's own
   secrets (below)
 
-The three bench values are required; the workflow refuses with a named error
-before staging anything if one is missing or still the placeholder. Everything
+The three bench values are required, except in local bench mode, which needs
+only `GENTAR_BENCH_HOST=local`; the workflow refuses with a named error before
+staging anything if one is missing or still the placeholder. Everything
 else is optional. Phase 2 is `gentar/run.sh --sweep`: suites whose credentials
 are absent are skipped and named, not run into a red refusal, and listed in
 `gentar/reports/sweep-skipped.txt` (empty when none was skipped; an arena

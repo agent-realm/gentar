@@ -63,7 +63,7 @@ determine by reading the repo; do not guess and do not silently default.
 |---|---|---|
 | 1 | **Subject name** | The repo's name — **not** necessarily its directory: in a git worktree the directory is named after the branch. Write it as `subject = "…"` in every scenario; `run.sh` reads it from there and refuses `REPLACE-ME`, a bad name, or scenarios that disagree. Safe to infer; state what you chose. |
 | 2 | **Trigger mode** | **Own arena**: the repo runs the stack itself, and needs a self-hosted runner with Docker and reach to a bench-host. The former **central dispatch** to `agent-realm/gentar` is retired (2026-10-12): gentar's public workflow has no bench job any more, so own arena is the only mode. **If own arena and the repo is PUBLIC, say this before copying the workflow:** its runner is self-hosted and persistent, and a pull request runs the PR's code on it. The kit's workflow runs only same-repository PRs, but a fork can add its own workflow aimed at that runner — so a public repo needs "Require approval for all external contributors" set, or no PR trigger at all. Let the pilot choose; do not recommend the trigger without the risk. **The kit's answer for a public repo is the arena mirror** ([`subject-template/mirror/`](subject-template/mirror/README.md)): no self-hosted runner on the public repo at all, phase 2 in a private mirror that pulls it, `arena/phase2` commit status back. |
-| 3 | **Bench tier** | `sbx` microVM is the default and right for nearly everything. `tart` only if the repo's install is macOS-specific; `osb` / `daytona` only if the pilot already runs those. Ask before choosing anything but the default. |
+| 3 | **Bench tier** | `sbx` microVM is the default and the only tier supported for 1.0. `tart` (macOS), `osb` and `daytona` are experimental, each with a known defect ([`docs/guides/bench-tiers.md`](docs/guides/bench-tiers.md)). Choose one only if the pilot asks for it after hearing that defect. |
 | 4 | **What the first suite asserts** | **This is the work.** Read the repo: its README's install instructions, its entry points, what it puts on disk. Propose concrete assertions — a binary that answers `--version`, a config file that appears, a service that responds — and confirm them with the pilot before writing. |
 | 5 | **Run policy** | Which suites run when, written once to `gentar/policy.toml` and then automated. The kit's shape: **phase 1** on every PR and default-branch push (bench-free checks on a GitHub-hosted runner, plus a floor of cheap suites on the bench for pushes), **phase 2** — the full regression — only on dispatch, the `arena` tag or a `v*-rc*` tag, and a release gated on a green phase 2 of its commit (`gentar/release-gate.sh` as the first job of the release workflow). Ask two things: **which suites form the floor**, and **whether a PR may run suites on the bench** (`[phase1] bench = "declared"`). The second puts PR code on the self-hosted runner — on a PUBLIC repo that is the pilot's security call; the kit's default is `"off"`. If the dry-run's `prepare()` needs a toolchain, declare it (`[phase1] setup = { go = "1.21" }`); to also run the checks on macOS userland, `[phase1] os = ["ubuntu-latest", "macos-latest"]`. A suite whose bench template supplies a tool the host lacks goes in `hooks.py`'s `TEMPLATES` — never stub the tool to make a dry-run pass. Show the pilot `gentar/run.sh --plan` for a PR, a main push and a release tag before committing. |
 | 6 | **Telemetry destination** | Where the arena sends every run's spans, besides its own ClickHouse (which dies with the stack): an OTLP/HTTP collector such as the organisation's ClickStack. Two settings, both or neither — `GENTAR_OTLP_EXPORT` (the collector's base URL, e.g. `http://collector.example.internal:4318`) and `GENTAR_OTLP_KEY` (its ingestion key, sent as the `authorization` header). Ask the pilot for the destination and for the key's **reference**; never ask for, paste or write the key itself. In CI both are repository **secrets**, set by whoever operates the collector; locally, lend the key per run (`with-secret GENTAR_OTLP_KEY=<ref> -- gentar/run.sh …`). Unset is a valid answer: nothing leaves the arena. One set without the other is refused (exit 2). What leaves is scrubbed exactly as the reports are — bench-host settings and declared credentials in every encoding, transcripts only by length, the agent as numbers — and a failed export never changes a verdict. |
@@ -98,8 +98,8 @@ does on a fresh machine is the entire point.
    once. No bench-host means no runs — say so rather than writing files that
    cannot work.
 2. **Copy the kit.** `subject-template/gentar/` → `<target>/gentar/`, and
-   the workflow if the pilot chose own-arena. Both scripts must stay
-   executable (mode 755).
+   the workflow (for a PUBLIC repo with the arena mirror, its public
+   variant). The scripts must stay executable (mode 755).
 3. **Name the subject** (decision 1) in `gentar/scenarios/*.toml`.
 4. **Stage the engine**: `gentar/run.sh --stage-engine`. Git only, no Docker.
    It clones this repo to `gentar/.arena` at the pinned tag and seeds
@@ -112,7 +112,10 @@ does on a fresh machine is the entire point.
 6. **Write the real suite** (decision 4), replacing `[oracle].steps` and the
    `[[verify.*]]` assertions.
 7. **Dry-run**: `gentar/dryrun.py` — replays steps and assertions locally in
-   about a second, no bench. Expect `ALL PASS`. Each suite gets its own fresh
+   about a second, no bench. Expect `ALL PASS`, except for a suite with a
+   `pick`, `key` or `abort` turn, a judged turn or a goal pilot: that one is
+   `UNVERIFIED` (a nonzero exit, which `--check` accepts), because only the
+   arena can drive it. Each suite gets its own fresh
    scratch home, and `prepare()` runs per suite — only for the suites with a
    step it stands in for (a `SKIP_STEP_SUBSTR` match; every suite when none
    is declared): put the subject's
@@ -130,7 +133,9 @@ does on a fresh machine is the entire point.
    `BENCH_SSH_KEY`, `GENTAR_BENCH_HOST`, `GENTAR_BENCH_USER` (secrets, not
    variables: a public repo's logs are public). The engine ships no
    bench-host, so without them every suite fails; the workflow refuses up
-   front instead. CI's own sweep is `gentar/run.sh --sweep` — every suite
+   front instead. The exception is local bench mode, a runner on the bench
+   host itself: `GENTAR_BENCH_HOST=local` as a repository variable, and none
+   of the three. CI's own sweep is `gentar/run.sh --sweep` — every suite
    whose credentials are present, the rest skipped by name — and it tears
    down with `gentar/run.sh --down`. Write `gentar/policy.toml` (decision 5)
    and run `gentar/run.sh --check`: it is what every PR will run (including
@@ -153,8 +158,9 @@ does on a fresh machine is the entire point.
   rather than to a release tag.
 - You cannot tell what the repo installs or how → ask, rather than writing a
   suite that asserts nothing real.
-- The pilot has not chosen a trigger mode → ask. Both are first-class and
-  they need different secrets.
+- The pilot has not chosen where phase 2 runs → ask: this repo's own
+  `arena` runner, or for a PUBLIC repo the arena mirror. They need
+  different runners and different secrets.
 
 ## Never
 
@@ -178,8 +184,10 @@ does on a fresh machine is the entire point.
 Adoption is a process, not a one-time copy. A change to what the repo *does*
 means its scenarios change in the same PR, because a scenario asserts
 reality and stale reality fails honestly. A change to the *engine* is a
-deliberate `GENTAR_REF` bump: bump it, run the suites, commit the bump on
-its own. `subject-template/gentar/README.md` has the full rule.
+deliberate bump: re-copy the kit's files from the new release tag (the
+pin, `GENTAR_REF`, is the default in the kit's `run.sh`), run the suites,
+commit the bump on its own. `subject-template/gentar/README.md` has the
+full rule.
 
 ## Running only what a change needs
 
@@ -270,7 +278,8 @@ agent:
    when several share a host.
 3. **Secrets, by reference only.** Pipe them: never print a value, never
    ask the pilot to paste one.
-   - `BENCH_SSH_KEY`, `GENTAR_BENCH_HOST`, `GENTAR_BENCH_USER`;
+   - `BENCH_SSH_KEY`, `GENTAR_BENCH_HOST`, `GENTAR_BENCH_USER`, except in
+     local bench mode, which needs none of them;
    - `GENTAR_CLONE_KEY` (a read-only deploy key) when the engine repo is
      private;
    - `GENTAR_OTLP_EXPORT` + `GENTAR_OTLP_KEY` for a telemetry destination;

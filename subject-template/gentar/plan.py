@@ -132,8 +132,9 @@ _LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)
 
 # The kit files --check compares byte for byte against the pinned engine's
 # copies. hooks.py, policy.toml and the scenarios are the subject's own.
-# OPTIONAL ones may be absent: a central-dispatch subject has no own-arena
-# workflow, and a repo that never releases needs no release gate.
+# OPTIONAL ones may be absent: a repo that runs its arena only by hand has
+# no workflow, a repo that never releases needs no release gate, and one
+# outside mirror mode no mirror.sh.
 KIT_FILES = {
     "gentar/run.sh": "subject-template/gentar/run.sh",
     "gentar/dryrun.py": "subject-template/gentar/dryrun.py",
@@ -607,8 +608,8 @@ def lint(policy, engine_root):
             continue                      # an older engine without this file
         if not a.exists():
             if mine in OPTIONAL_KIT_FILES:
-                print(f"note: {mine} not present (fine for a central-dispatch subject, "
-                      f"or one that does not gate releases)")
+                print(f"note: {mine} not present (fine for a repo without the kit's CI "
+                      f"workflow, a release gate or the arena mirror)")
             else:
                 problems.append(f"{mine}: missing (copy it from the kit)")
         elif a.read_bytes() != b.read_bytes():
@@ -669,6 +670,89 @@ def lint(policy, engine_root):
         print(f"note: {wf} is allowed to drift, so 'no pull_request job reaches "
               f"the self-hosted runner unless the plan says so' is NOT verified")
     return problems
+
+
+# Never staged, from git or not: gentar/.arena holds .env and the bench key,
+# gentar/reports holds old verdicts, and .git holds the job's auth header on
+# CI (stage-git builds a fresh one when the policy asks for history).
+STAGE_EXCLUDE = (".git", "gentar/.arena", "gentar/reports")
+
+
+def shipped_files(repo: str):
+    """What git would ship from `repo`, relative and sorted: tracked files
+    plus the untracked ones it does not ignore (`git ls-files --cached
+    --others --exclude-standard`). A submodule or nested repository is
+    listed by its own git, so its ignored files stay out too and its .git
+    never comes along; one with nothing checked out is an empty directory
+    (a trailing `/`). None when `repo` has no .git of its own: not a work
+    tree root, so it is staged whole, as before. Refuses when git cannot
+    list a repo that has a .git: falling back to the whole tree would ship
+    exactly the files this exists to keep out."""
+    import subprocess
+
+    if not os.path.lexists(os.path.join(repo, ".git")):
+        return None
+    # The repo's own config must not run anything here (core.fsmonitor is a
+    # program git starts for ls-files), and an outer GIT_DIR/GIT_WORK_TREE
+    # must not redirect git to another repository (agy on #92).
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
+                        "-C", repo, "ls-files", "-z", "--cached", "--others",
+                        "--exclude-standard"], capture_output=True, env=env)
+    if r.returncode != 0:
+        raise Refuse(f"stage-tree: git ls-files in {repo} failed: "
+                     f"{r.stderr.decode(errors='replace').strip()[:300]}")
+    out = []
+    # A path is listed once per merge stage while a conflict is open.
+    for rel in sorted({os.fsdecode(p).rstrip("/") for p in r.stdout.split(b"\0") if p}):
+        src = os.path.join(repo, rel)
+        if any(rel == x or rel.startswith(x + "/") for x in STAGE_EXCLUDE):
+            continue
+        # A tracked directory replaced by a symlink (not yet staged): git still
+        # lists the old children, which now resolve through the link. The
+        # link ships as a link; its "children" are not files of this repo
+        # (Codex on #92).
+        parts = rel.split("/")
+        if any(os.path.islink(os.path.join(repo, *parts[:i])) for i in range(1, len(parts))):
+            continue
+        if os.path.isdir(src) and not os.path.islink(src):
+            inner = shipped_files(src)
+            out += [f"{rel}/{p}" for p in inner] if inner else [rel + "/"]
+        elif os.path.lexists(src):                 # tracked but deleted on disk: gone
+            out.append(rel)
+    return out
+
+
+def stage_tree(repo: str, dest: str) -> str:
+    """Copy the subject's files from `repo` into `dest` (an empty directory):
+    in a git work tree, only what git would ship (shipped_files), so a
+    gitignored .env, .npmrc or build output never reaches a bench (C2).
+    Without a .git, the whole tree minus STAGE_EXCLUDE, by the same tar
+    pipe run.sh used before. Symlinks are copied as links, never followed.
+    Returns how it staged, for the log line."""
+    import subprocess
+
+    dest = os.path.abspath(dest)
+    files = shipped_files(repo)
+    if files is None:
+        pack = subprocess.Popen(["tar", *(f"--exclude=./{x}" for x in STAGE_EXCLUDE),
+                                 "-cf", "-", "."], cwd=repo, stdout=subprocess.PIPE)
+        unpack = subprocess.run(["tar", "-xf", "-", "-C", dest], stdin=pack.stdout)
+        pack.stdout.close()
+        if pack.wait() != 0 or unpack.returncode != 0:
+            raise Refuse(f"stage-tree: copying {repo} into {dest} failed")
+        return "the whole tree (not a git work tree)"
+    for rel in files:
+        src, dst = os.path.join(repo, rel), os.path.join(dest, rel)
+        if rel.endswith("/"):
+            os.makedirs(dst, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.islink(src):
+            os.symlink(os.readlink(src), dst)
+        elif os.path.isfile(src):
+            shutil.copy2(src, dst)
+    return f"{len(files)} file(s) git would ship (ignored files left out)"
 
 
 def stage_git(repo: str, dest: str) -> None:
@@ -830,6 +914,9 @@ def review(repo, since):
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else ""
     try:
+        if cmd == "stage-tree" and len(argv) == 4:   # needs no policy
+            print(f"staged: {stage_tree(argv[2], argv[3])}", file=sys.stderr)
+            return 0
         if cmd == "review" and len(argv) == 3:    # needs no policy: a broken
             print(review(HERE.parent, argv[2]))   # one must not hide the diff
             return 0
@@ -870,7 +957,7 @@ def main(argv):
         print(f"plan: {exc}", file=sys.stderr)
         return 2
     print("usage: gentar/plan.py plan | lint [engine-root] | gate-config | arena-config | "
-          "route | stage-git <repo> <dest> | review <ref>",
+          "route | stage-tree <repo> <dest> | stage-git <repo> <dest> | review <ref>",
           file=sys.stderr)
     return 2
 

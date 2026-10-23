@@ -162,7 +162,7 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
 </style>
 </head>
 <body>
-<p style="margin:16px;padding:10px 14px;border-left:4px solid #b26b00;background:#fff6e5;color:#3a2a00"><strong>Partly historical (2026-10-12).</strong> gentar's public <code>gentar.yml</code> now runs only GitHub-hosted jobs (unit tests, the release-tag check). The gate, nightly and dispatch jobs and the <code>gentar-bench</code> runner label described below moved to the private mirror <code>agent-realm/gentar-arena</code>, which runs them after merge. The rest of the map stands. See <a href="reference/ci-and-releases.md">CI and releases</a>.</p>
+<p style="margin:16px;padding:10px 14px;border-left:4px solid #b26b00;background:#fff6e5;color:#3a2a00"><strong>Partly historical (2026-10-12).</strong> gentar's public <code>gentar.yml</code> now runs only GitHub-hosted jobs (unit tests, the release-tag check). The gate, nightly and dispatch jobs and the <code>gentar-bench</code> runner label described below moved to the private mirror <code>agent-realm/gentar-arena</code>, which runs them after merge. Central mode is retired with them: no subject dispatches to this repo any more, so read &ldquo;central arena&rdquo; below as gentar's own regression of real repos in that mirror, and the own arena as the only way to adopt. The rest of the map stands. See <a href="reference/ci-and-releases.md">CI and releases</a>.</p>
 
 
 
@@ -185,7 +185,7 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
       <tbody>
         <tr><td class="ent">Who runs the stack</td><td>the gentar repo's CI</td><td>the subject repo's CI</td></tr>
         <tr><td class="ent">Where scenarios live</td><td><code>coordinator/scenarios/</code></td><td><code>gentar/scenarios/</code> in the subject</td></tr>
-        <tr><td class="ent">How the subject arrives</td><td>cloned into the arena's <code>subjects/</code></td><td>tarred from the working tree by <code>gentar/run.sh</code></td></tr>
+        <tr><td class="ent">How the subject arrives</td><td>cloned into the arena's <code>subjects/</code></td><td>copied from the working tree by <code>gentar/run.sh</code>: the files git would ship</td></tr>
         <tr><td class="ent">Workflow</td><td><code>.github/workflows/gentar.yml</code></td><td>the subject's own, e.g. <code>arena.yml</code></td></tr>
         <tr><td class="ent">Runner label</td><td><code>gentar-bench</code></td><td>the subject's choice, e.g. <code>arena</code></td></tr>
         <tr><td class="ent">Reference example</td><td><code>kommander-playbook</code>, <code>memhouse</code></td><td><code>claude-playbooks</code></td></tr>
@@ -622,7 +622,7 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
         <tr><td class="ent">arena</td><td>gentar itself — the harness. <em>aGENT ARena</em></td><td>the bench. <code>.arena/</code> and the own-arena <code>arena</code> runner label already use this word</td></tr>
         <tr><td class="ent">bench</td><td>the disposable machine one scenario runs in</td><td>the bench-host, which outlives every bench it makes</td></tr>
         <tr><td class="ent">bench-host</td><td>the box running sbx that hands benches out</td><td>the runner, which runs the engine and never hosts a bench — even when both are the same VM</td></tr>
-        <tr><td class="ent">subject</td><td>the component under test — mounted, never baked</td><td>the repo. The subject is a copy: cloned into <code>subjects/</code>, or tarred from a working tree</td></tr>
+        <tr><td class="ent">subject</td><td>the component under test — mounted, never baked</td><td>the repo. The subject is a copy: cloned into <code>subjects/</code>, or copied from a working tree (the files git would ship)</td></tr>
         <tr><td class="ent">scenario</td><td>a TOML stating <em>decisions</em>, not steps</td><td>a script. The driver renders decisions into instructions an agent executes</td></tr>
         <tr><td class="ent">verdict</td><td>pass or fail read from reality — files, processes, SQL, spans, TTY</td><td>the agent's self-report, which is evidence, not a verdict</td></tr>
         <tr><td class="ent">runner</td><td>a long-lived GitHub worker that claims one job at a time</td><td>a dispatcher. GitHub dispatches; the runner obeys</td></tr>

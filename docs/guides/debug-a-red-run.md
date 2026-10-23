@@ -70,7 +70,8 @@ after every run.
 | `judge guard: … does not declare [scenario] data = "synthetic"` | declare it, but only if nothing real is on screen |
 | `judge guard: … TYPESAFE_API_KEY is not set` | lend the key with `with-secret` |
 | `bench-host: … — refusing before any bench exists.` | the bench-host's own state, for example stored sbx secrets; see [Deploy an arena](deploy-an-arena.md) |
-| `subject guard: … — Refusing before any bench exists.` | a git config in the subject (`.git/config`, a submodule's, a worktree's) holds a credential: user info in an http(s) URL (a remote or an `insteadOf`), `http.extraheader` or `http.cookieFile`; or a `.git-credentials` file exists. The subject is copied into the bench with `.git`, so remove it: `git remote set-url origin <url without credentials>` and `git config --unset-all http.<url>.extraheader` |
+| `subject guard: … — Refusing before any bench exists.` | a git config in the subject (`.git/config`, a submodule's, a worktree's) holds a credential: user info in an http(s) URL (a remote or an `insteadOf`), `http.extraheader` or `http.cookieFile`; or a reflog (`.git/logs/**`) holds a credentialed URL; or a `.git-credentials` file exists. The subject is copied into the bench with `.git`, so remove it: `git remote set-url origin <url without credentials>`, `git config --unset-all http.<url>.extraheader`, and for a reflog `git reflog expire --expire=now --all` |
+| `subject guard: subject '<name>' is not one directory name …` or `… resolves to …, outside the subjects root` | `[scenario] subject` must be one directory name (letters, digits, dot, dash, underscore; not starting with a dot or a dash) whose directory is inside the subjects root. A symlink to a checkout elsewhere is refused: copy or clone it into `subjects/` |
 | `refusing <suite> — judged suites never run on a pull request` | expected: judged suites run in phase 2 |
 | `telemetry destination needs BOTH GENTAR_OTLP_EXPORT and GENTAR_OTLP_KEY` | set both or neither |
 | `arena: bench ssh key not found at …` | set `GENTAR_BENCH_KEY_FILE` to the key's path |
@@ -85,7 +86,7 @@ after every run.
 | `turn N: prompt '…' never appeared` | the screen changed. Compare the driver transcript with the pattern, or make the turn judged |
 | `judge never held yes … (a clear no …)` / `(undecided …)` | the question does not match the screen: measure it, see [Measure a judge with fixtures](measure-a-judge-with-fixtures.md) |
 | `goal: …` | see the goal pilot's failure list in [Tutorial 4](../tutorials/04-a-goal-pilot.md) |
-| `danger gate: …` | the software asked to run a destructive command. The driver refused, as designed |
+| `danger gate: …` | the software asked to run a command matching the danger pattern. The driver refused, as designed. The pattern is a short list: a green run does not mean nothing destructive was asked for ([the danger gate](../reference/pilot-simulator.md#the-danger-gate)) |
 
 ## When the bench stalls
 

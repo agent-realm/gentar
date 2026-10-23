@@ -2,9 +2,12 @@
 
 The engine's own suites, what each proves, and which need a subject or credentials.
 
-22 suites: 20 TOML files in `coordinator/scenarios/`, plus two Python
+24 suites: 22 TOML files in `coordinator/scenarios/`, plus two Python
 built-ins (`smoke`, `smoke-fail`). Every verdict comes from reality.
 List them live with `bin/arena ls`.
+
+The experimental tiers are not supported for 1.0
+([Pick a bench tier](../guides/bench-tiers.md)).
 
 Where a suite names another project, this is what it is: **kommander-playbook**
 is a Claude Code configuration playbook, **memhouse** is a ClickHouse-backed
@@ -14,9 +17,9 @@ memory service, **claude-playbooks** is the CLI that installs playbooks.
 |---|---|---|
 | `smoke` | sbx | bench lifecycle: create → exec `uname -a` → span → destroy |
 | `smoke-fail` | sbx | the verdict machinery itself: a sabotaged step must produce exit 1 and still tear the bench down |
-| `smoke-macos` | tart | Darwin arm64 + the pinned CLI on a Mac bench |
-| `smoke-osb` | osb | Linux container bench driven entirely over the OpenSandbox API |
-| `smoke-daytona` | daytona | cloud sandbox minted via SDK, driven over ssh with an expiring token |
+| `smoke-macos` | tart (experimental) | Darwin arm64 + the pinned CLI on a Mac bench |
+| `smoke-osb` | osb (experimental) | Linux container bench driven entirely over the OpenSandbox API |
+| `smoke-daytona` | daytona (experimental) | cloud sandbox minted via SDK, driven over ssh with an expiring token |
 | `bench-template-verify` | sbx | a bench from `gentar-bench-v1` carries the pinned agent CLI |
 | `otlp-selfreport` | sbx | software inside the bench can self-report OTLP spans that join harness spans on `run_id` in one SQL |
 | `budget-sim` | sbx | the budget guard refuses an over-cap run (exit 2) |
@@ -24,9 +27,11 @@ memory service, **claude-playbooks** is the CLI that installs playbooks.
 | `scripted-danger` | sbx | the danger gate fires before any approval |
 | `agent-smoke` | sbx | a real `claude-code` does a trivial task headlessly; provider-agnostic credential, refuses without one |
 | `agent-pty-smoke` | sbx | **pilot simulation**: a real `claude-code` TUI driven through first-run onboarding and a task; byte-exact file verdict |
+| `semantic-demo` | sbx | a judged `expect` on a synthetic TUI: the judge says no to a rename screen and holds a yes on the deletion prompt; reality decides. Needs `TYPESAFE_API_KEY` |
+| `goal-demo` | sbx | a goal pilot on a synthetic TUI: the judge drives to a deletion over a closed action set without touching the other project. Needs `TYPESAFE_API_KEY` |
 | `agent-profile-smoke` | sbx | a real agent running *under* a configuration install pinned to the newest release tag — the ref under test is never its own tool; triple reality verdict |
 | `claude-playbooks-install` | sbx | the documented CLI install path, verbatim, 9 reality assertions |
-| `claude-playbooks-install-macos` | tart | the same suite on a Mac bench — installers behave identically on darwin/arm64 |
+| `claude-playbooks-install-macos` | tart (experimental) | the same suite on a Mac bench — installers behave identically on darwin/arm64 |
 | `kommander-install` | sbx | the README's standalone install path: in-place install, launcher, data dirs, helper |
 | `kommander-update` | sbx | upgrade from an old release tag to the checkout's VERSION; data survives `reset --hard` |
 | `kommander-task-lock` | sbx | a lock guard's exit contract under a live PID matrix (0 acquired / 2 live / 3 stale) |

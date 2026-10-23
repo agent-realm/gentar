@@ -17,12 +17,13 @@ job to do. Use the reference when you need every detail of one part.
 | Guide | When you want to |
 |---|---|
 | [Deploy an arena](guides/deploy-an-arena.md) | stand up a bench-host, a self-hosted runner and the secrets CI needs |
+| [An arena for a public repository](guides/public-repo-arena.md) | run phase 2 of a PUBLIC repo in a private arena mirror, with no self-hosted runner on it |
 | [Send telemetry to ClickStack](guides/send-telemetry-to-clickstack.md) | keep every run as a trace outside the arena |
 | [Run policy and releases](guides/run-policy-and-releases.md) | decide which suites run when, and gate a release on them |
 | [Measure a judge with fixtures](guides/measure-a-judge-with-fixtures.md) | know that a judged turn answers right before it gates anything |
 | [Debug a red run](guides/debug-a-red-run.md) | turn a failing or refused run into a fix |
 | [Review an adaptation](guides/review-an-adaptation.md) | find what the repo now does that no suite asserts |
-| [Pick a bench tier](guides/bench-tiers.md) | choose between `sbx`, `tart`, `osb` and `daytona` |
+| [Pick a bench tier](guides/bench-tiers.md) | see why `sbx` is the 1.0 tier, and what keeps `tart`, `osb` and `daytona` experimental |
 
 ## Reference — everything about one part
 
@@ -62,8 +63,9 @@ release.
 - [`scope-map.md`](scope-map.md) (rendered: [`scope-map.html`](scope-map.html)) —
   what contains what, with every relation counted.
 - [`subject-integration.md`](subject-integration.md) — the contract
-  between a subject and an arena: the own arena (the central dispatch is
-  retired since 2026-10-12, kept there as the record).
+  between a subject and an arena: the own arena, on a self-hosted runner or
+  through the arena mirror for a public repo (the central dispatch, retired
+  since 2026-10-12, has a short record there).
 - [`buildplan-2026-08-18-v1.md`](buildplan-2026-08-18-v1.md) — the
   original build plan. It is **historical** and kept for the record;
   where it disagrees with the rest of the docs, the rest of the docs win.

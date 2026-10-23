@@ -16,7 +16,7 @@ from pathlib import Path
 
 from gentar.benchhost import BenchHost, make_bench
 from gentar.config import Config
-from gentar.oracle import run_oracle
+from gentar.oracle import run_oracle, subject_dir
 from gentar.provenance import run_attrs
 from gentar.report import RunReport
 from gentar.scenarios import REGISTRY, known_names
@@ -51,18 +51,39 @@ _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 def subject_credential_problems(subject_dir: str) -> list[str]:
     """Why this subject must not be copied into a bench: a credential in
-    its .git/config or a .git-credentials file. Names the file and the kind,
-    never the value. A worktree's `.git` pointer file is not a directory
-    and holds no config."""
+    its .git/config, a reflog or a .git-credentials file. Names the file
+    and the kind, never the value. A worktree's `.git` pointer file is not
+    a directory and holds no config."""
     out = []
     gitdir = os.path.join(subject_dir, ".git")
-    configs = []
+    configs, reflogs = [], []
     if os.path.isdir(gitdir):
         # Every git config the copy carries: the repo's, each submodule's
-        # (.git/modules/**/config) and each worktree's config.worktree.
+        # (.git/modules/**/config) and each worktree's config.worktree. And
+        # every reflog (logs/**, theirs too): `git pull <url with a token>`
+        # writes the URL, token included, into logs/HEAD (git 2.50 does).
         for root, dirs, files in os.walk(gitdir):
-            dirs[:] = [d for d in dirs if d not in ("objects", "lfs", "logs")]
+            if "logs" in os.path.relpath(root, gitdir).split(os.sep):
+                # inside a reflog tree `objects` or `lfs` is a branch
+                # namespace, never pruned (Codex on #92)
+                reflogs += [os.path.join(root, f) for f in files]
+            else:
+                dirs[:] = [d for d in dirs if d not in ("objects", "lfs")]
+                # FETCH_HEAD records the last fetch's URL too (agy on #92)
+                reflogs += [os.path.join(root, f) for f in files if f == "FETCH_HEAD"]
+            # by name, wherever it sits: a submodule named `logs` keeps its
+            # config checked as a config (agy on #92)
             configs += [os.path.join(root, f) for f in files if f in ("config", "config.worktree")]
+    for log in sorted(reflogs):
+        try:
+            with open(log, encoding="utf-8", errors="replace") as fh:
+                found = bool(_CRED_IN_URL.search(fh.read()))
+        except OSError as exc:
+            out.append(f"cannot read {log} to check it for credentials: {exc.strerror}")
+            continue
+        if found:
+            out.append(f"{log} has a credential in a URL (a reflog entry: a pull or "
+                       f"fetch from a credentialed URL)")
     for config in sorted(configs):
         try:
             with open(config, encoding="utf-8", errors="replace") as fh:
@@ -521,23 +542,32 @@ def _run(name: str, cfg: Config | None = None) -> int:
     # Bench tier: the scenario's `bench` key overrides the install default
     # (config bench_kind, "sbx"); builtins always use the default tier.
     # -- subject guard: no credential rides into a bench -----------------
+    # The subject name is scenario text, and the engine ships what it names:
+    # `../run/secrets` reached the coordinator's bench key (C3). It must be
+    # one directory inside the subjects root, symlinks resolved; an empty
+    # name is refused too (absent means subjectless, empty is a mistake).
     # The subject is copied whole, `.git` included. A token in its
-    # .git/config (a clone URL, actions/checkout's auth header) would reach
-    # a bench where agents run with skipped permissions (2026-10-02).
-    if scenario and scenario.subject:
-        why = subject_credential_problems(os.path.join(cfg.subjects_root, scenario.subject))
-        if why:
+    # .git/config (a clone URL, actions/checkout's auth header) or a reflog
+    # would reach a bench where agents run with skipped permissions (2026-10-02).
+    if scenario and scenario.subject is not None:
+        try:
+            why = subject_credential_problems(subject_dir(cfg, scenario.subject))
             msg = ("subject guard: " + "; ".join(why) + " — strip it (git remote set-url "
-                   "origin <url without credentials>; unset http.extraheader) before staging. "
-                   "Refusing before any bench exists.")
+                   "origin <url without credentials>; unset http.extraheader; git reflog "
+                   "expire --expire=now --all) before staging. Refusing before any bench "
+                   "exists.") if why else ""
+            detail = "run refused: credential in subject git metadata"
+        except ValueError as exc:
+            msg = f"subject guard: {exc} — refusing before any bench exists."
+            detail = "run refused: subject is not one directory inside the subjects root"
+        if msg:
             print(f"Error: {msg}")
             Spans(cfg).emit(ARENA_SUBJECT, "", name, "subject.refuse", "error",
-                            attrs={"subject": scenario.subject},
-                            detail="run refused: credential in subject git metadata")
+                            attrs={"subject": str(scenario.subject)}, detail=detail)
             report = RunReport(
                 scenario=name,
                 run_id=f"refused-{name}-{time.strftime('%Y%m%d-%H%M%S')}",
-                subject=scenario.subject,
+                subject=str(scenario.subject) or ARENA_SUBJECT,
                 reproduce=f"docker compose run --rm coordinator run {name}",
                 error=msg)
             report.mark("refuse", 2)

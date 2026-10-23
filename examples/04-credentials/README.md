@@ -20,8 +20,9 @@ is the verdict, never the agent's reply.
 ## Run it
 
 Copy `gentar/` into an adopted repo ([the adoption kit](../../subject-template/README.md)),
-set one group — in CI as repository **secrets**, locally lent for one run —
-and run:
+delete the kit's template suite `gentar/scenarios/first-suite.toml` (see
+[trying an example](../README.md#trying-an-example)), set one group — in CI
+as repository **secrets**, locally lent for one run — and run:
 
 ```bash
 with-secret ANTHROPIC_API_KEY=<your key reference> -- gentar/run.sh example-agent

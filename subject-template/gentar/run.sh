@@ -23,8 +23,10 @@
 #   GENTAR_CLICKHOUSE_HOST_PORT=8124 GENTAR_OTLP_HOST_PORT=14320 \
 #     gentar/run.sh first-suite
 #
-# The only thing to edit below is SUBJECT, if your repo's directory name
-# is not the subject name your scenarios declare.
+# Nothing below is yours to edit: this is a kit file, and --check fails
+# when it differs from the pinned engine's copy. The subject name comes
+# from your scenarios (GENTAR_SUBJECT overrides it), the engine pin is
+# GENTAR_REF, and the rest is policy.toml, hooks.py and the environment.
 set -euo pipefail
 
 # Subject secrets routed by name ([secrets] route in policy.toml) arrive in
@@ -159,6 +161,10 @@ case "$SUBJECT" in
     exit 2 ;;
   *[!A-Za-z0-9._-]*)
     echo "bad subject name: $SUBJECT (letters, digits, dot, dash, underscore)" >&2
+    exit 2 ;;
+  .*|-*)
+    # the engine refuses these too (C3): `..` would stage into subjects/..
+    echo "bad subject name: $SUBJECT (may not start with a dot or a dash)" >&2
     exit 2 ;;
 esac
 
@@ -542,8 +548,10 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # every adopter's suites can change behaviour on a day nobody touched
 # this repo. That already happened once — the kit advertised a scenario
 # feature the engine's tip did not parse yet, and adopters saw a load
-# error they had not caused. Bump this deliberately: change the default,
-# run your suites, commit the bump as its own change. `main` stays
+# error they had not caused. Adopters bump it deliberately by re-copying
+# the kit from a newer tag (this default comes with it), running their
+# suites, and committing the bump as its own change; the engine's release
+# moves the default. GENTAR_REF overrides it for one run, and `main` stays
 # available for anyone tracking the engine on purpose.
 REF=${GENTAR_REF:-v0.11.0}
 
@@ -712,9 +720,13 @@ if [ "$STAGE_ONLY" = 1 ]; then
 fi
 
 # Stage THIS checkout (working tree, uncommitted changes included) as
-# the subject. Plain copy: symlinks don't resolve through the bind.
+# the subject: the files git would ship, tracked plus untracked ones it
+# does not ignore, so a gitignored .env, .npmrc or build output never
+# rides into a bench (plan.py stage-tree). A checkout with no .git of its
+# own is copied whole, as before. Plain copy: symlinks are copied as
+# links, and don't resolve through the bind.
 #
-# Three exclusions, each for a reason:
+# Three exclusions either way, each for a reason:
 #   gentar/.arena    holds .env and the bench key — secrets must never
 #                    ride into a bench the subject's own agent can read
 #   gentar/reports   previous verdicts; dead weight
@@ -729,9 +741,7 @@ fi
 mkdir -p subjects out
 rm -rf "subjects/$SUBJECT"
 mkdir "subjects/$SUBJECT"
-(cd "$REPO" && tar \
-  --exclude=./.git --exclude=./gentar/.arena --exclude=./gentar/reports \
-  -cf - .) | tar -xf - -C "subjects/$SUBJECT"
+python3 "$HERE/plan.py" stage-tree "$REPO" "subjects/$SUBJECT"
 # History, when the policy asks for it ([stage] git = true): a fresh .git
 # built by a local clone, so no credential and no remote path come along.
 python3 "$HERE/plan.py" stage-git "$REPO" "subjects/$SUBJECT"

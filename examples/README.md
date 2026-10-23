@@ -18,5 +18,19 @@ has [the adoption kit](../subject-template/README.md).
 | 09 | [public-repo-mirror](09-public-repo-mirror/README.md) | `[arena] bench = "mirror"`, `[phase2] evidence`, `[secrets] route` | in the mirror | a routed secret |
 
 "Dry-run: no" means `gentar/dryrun.py` replays it locally without a bench.
-Suites with credentials are skipped by the dry-run; judged suites need the
-judge and a bench.
+Suites with credentials are skipped by the dry-run; judged suites come back
+`UNVERIFIED` from it, and need the judge and a bench.
+
+## Trying an example
+
+1. Copy the kit into a scratch repo
+   ([`subject-template/README.md`](../subject-template/README.md), step 1).
+2. Delete the kit's template suite, `gentar/scenarios/first-suite.toml`.
+3. Copy the example's `gentar/` over the kit's.
+
+Step 2 is not optional. Every scenario in a repo must declare the same
+`subject`, and `run.sh` refuses scenarios that disagree (exit 2) before it
+stages anything. The examples declare `subject = "example"`; the template
+suite declares `REPLACE-ME`, or your repo's name once you set it. To add an
+example to a repo with suites of its own, set its `subject` to yours
+instead.
