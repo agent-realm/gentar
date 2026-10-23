@@ -14,9 +14,10 @@ only the files git would ship.
 
 `<name>` is the scenario's `[scenario].subject`: one directory name
 (letters, digits, dot, dash, underscore; not starting with a dot or a
-dash), and the directory must resolve inside this root. A symlink out of
-it is refused before any bench exists, so `ln -s ~/DEV/<repo>` does not
-work (it never did inside the container: the target is not mounted).
+dash), and the directory must resolve inside this root. Not by symlink:
+only this directory is mounted, so inside the coordinator a link points at
+a host path that does not exist there, and a symlink out of this root is
+refused before any bench exists.
 
 Or point compose elsewhere: `GENTAR_SUBJECTS_DIR=~/DEV` gives the
 coordinator every checkout under it.

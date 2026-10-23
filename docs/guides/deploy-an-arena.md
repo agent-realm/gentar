@@ -47,7 +47,9 @@ Five things are each a step of their own:
   account the FIRST interactive sbx session shows that screen and waits
   for a key, so the first suite with a terminal fails with "prompt never
   appeared". The driver names this cause when it sees the screen;
-- the bench template;
+- the bench template, for suites that name `template = "gentar-bench-v1"`
+  (the agent suites): `ssh <bench-account>@<host> sh -s -- "$(cat bench-template/VERSION)" < bench-template/build.sh`,
+  in an announced window (section 5);
 - the runner (section 2);
 - the bench key in that account's `~/.ssh/authorized_keys` (step 2).
 
@@ -192,9 +194,9 @@ self-hosted one (section 3); that runner needs `git`, `python3` and
 
 | Name | Kind | Needed when |
 |---|---|---|
-| `BENCH_SSH_KEY` | secret | always: the key that reaches the bench-host |
-| `GENTAR_BENCH_HOST` | secret | always: the engine ships no bench-host |
-| `GENTAR_BENCH_USER` | secret | always: the account on it |
+| `BENCH_SSH_KEY` | secret | always, except in local bench mode: the key that reaches the bench-host |
+| `GENTAR_BENCH_HOST` | secret | always: the engine ships no bench-host. In local bench mode it is the plain repository **variable** `GENTAR_BENCH_HOST=local` instead |
+| `GENTAR_BENCH_USER` | secret | always, except in local bench mode: the account on it |
 | `GENTAR_CLONE_KEY` | secret | the **engine** repository is private: a read-only deploy key on it |
 | `GENTAR_REPO_URL` | variable | only to point at a fork or mirror of the engine |
 | `GENTAR_OTLP_EXPORT`, `GENTAR_OTLP_KEY` | secrets, both or neither | runs should reach a telemetry destination: see [Send telemetry to ClickStack](send-telemetry-to-clickstack.md) |
@@ -238,6 +240,7 @@ needs its own pair, set as repository variables, for example
 Open a pull request, push to the default branch, or push the `arena`
 keyword tag at a commit. The workflow's plan job says what it will run,
 and the bench job runs it. A missing bench-host secret makes the workflow
-refuse up front, naming the secret.
+refuse up front, naming the secret (in local bench mode it says
+`bench: local` and needs none).
 
 Next: [Run policy and releases](run-policy-and-releases.md).

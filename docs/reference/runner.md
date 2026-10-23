@@ -140,5 +140,7 @@ they are born inside the bench, provably not on the host. `memhouse-house`
 uses exactly that — it stands up a real ClickHouse inside the bench.
 
 Only the `sbx` tier is in the CI gate; the other three need hardware or
-an account the gate runner does not have. Their setup is in
-[the tier notes](bench-tiers.md) at the bottom.
+an account the gate runner does not have. `sbx` is also the only tier
+supported for 1.0: `tart`, `osb` and `daytona` are experimental, each with
+a known defect ([Pick a bench tier](../guides/bench-tiers.md)). Their
+setup is in [the tier notes](bench-tiers.md).

@@ -17,11 +17,17 @@ same way.
 What it is NOT: a bench. There is no sandbox, no template, no network policy,
 no real agent. It proves the shell and the assertions; the arena still proves
 the isolation. Suites declaring `credentials` are skipped -- they need a real
-agent and a real key. Suites whose [driver] uses `pick` or `abort` turns, a judged `expect`, or a
-goal pilot come back UNVERIFIED with a nonzero exit: those turns need the real driver, and a
-picker that never matched or a danger gate that never fired must not read as
-a pass. A suite with `bench_only = "<why>"` in [scenario] is UNVERIFIED too,
-with its reason, and is not run (GENTAR_DRYRUN_BENCH_ONLY=run runs it).
+agent and a real key. Suites whose [driver] uses `pick`, `key` or `abort`
+turns, a judged `expect`, or a goal pilot come back UNVERIFIED with a nonzero
+exit: those turns need the real driver, and a picker that never matched or a
+danger gate that never fired must not read as a pass. For `pick`, `key` and
+`abort`, the turns before the first such turn are replayed; the drive stops
+there, and neither the later turns nor the suite's assertions run. A suite
+with a judged `expect` or a goal pilot is not driven at all, so none of its
+turns is checked. A failing step, or a failing turn replayed before a `pick`,
+`key` or `abort`, is still a FAILURE. A suite with `bench_only = "<why>"` in
+[scenario] is UNVERIFIED too, with its reason, and is not run
+(GENTAR_DRYRUN_BENCH_ONLY=run runs it).
 
 The adaptations live in gentar/hooks.py (yours; this file is the kit's):
 
@@ -311,6 +317,14 @@ def run_one(path: Path, env: dict, home: str, workspace: str) -> int:
         verify_files, verify_commands = sc.files, sc.commands
         if sc.driver_command:
             fails += drive(sc, env, workspace, log, unreplayed)
+            if unreplayed:
+                # The drive stopped at a turn only the real driver can take,
+                # so the assertions describe the end of a drive that did not
+                # happen. Running them turned such a suite into FAILURES
+                # (ground-up review D3): not run, as for a goal pilot.
+                log.append("  assertions: not run — the drive stopped at a turn "
+                           "only the arena can take")
+                verify_files, verify_commands = [], []
 
     # File assertions go through the same shell as the steps, for the
     # same reason the engine runs them inside the bench: `test -e` and
@@ -418,17 +432,24 @@ def drive(sc, env, cwd, log, unreplayed) -> int:
             if not ok:
                 log.append(f"  turn {i} expect /{t['pattern']}/: pattern never appeared")
         else:
-            # `pick` (navigate a picker by ❯ cursor line) and `abort`
-            # (the danger gate) need the real driver. Counting them as
-            # passes printed ALL PASS for a suite whose picker label was
-            # absent or whose danger gate never fired — a harness lie in
-            # the dangerous direction (PR #27 review). Not replayed is
-            # not verified: the suite is reported UNVERIFIED and the
-            # dry-run does not claim success for it.
-            ok = False
+            # `pick` (navigate a picker by ❯ cursor line), `key` (raw key
+            # events) and `abort` (the danger gate) need the real driver.
+            # Counting them as passes printed ALL PASS for a suite whose
+            # picker label was absent or whose danger gate never fired — a
+            # harness lie in the dangerous direction (PR #27 review). Not
+            # replayed is not verified: the suite is reported UNVERIFIED
+            # and the dry-run does not claim success for it.
+            #
+            # The drive stops here. Every later turn would wait on a screen
+            # this turn was meant to produce, so it timed out and counted
+            # as a FAILURE the suite does not have (ground-up review D3).
             unreplayed.append(kind)
+            rest = len(sc.turns) - i - 1
             log.append(f"  turn {i}: type {kind!r} needs the real driver "
-                       f"— NOT verified here (run it in the arena)")
+                       f"— NOT verified here (run it in the arena)"
+                       + (f"; the {rest} turn(s) after it are not replayed" if rest else ""))
+            fails += 1
+            break
         if not ok:
             fails += 1
     # Drain what is left, but never wait forever: a driver still waiting for

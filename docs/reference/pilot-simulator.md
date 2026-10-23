@@ -57,13 +57,42 @@ shell's 130) is the expected end. A goal pilot's `done` does not wait for
 the program to exit, but if it already ended on its own, the same rule
 applies.
 
+## The danger gate
+
 The hard safety rule in the driver is the **danger gate**: if the agent
-provokes a prompt asking to run a command matching the destructive-command
-pattern, the driver aborts the run rather than approving it. That is not a
-documented intention: `scripted-danger` is a gate suite that fails unless
-the gate fires before any approval. It is proven after merge, by the gate
-tier in the private mirror ([CI and releases](ci-and-releases.md)), not on
-pull requests. A pull request runs only the hosted unit suite.
+provokes a prompt asking to run a command matching the danger pattern, the
+driver aborts the run (Esc, ctrl-c, ctrl-c) rather than approving it. It is
+a tripwire for a short list of commands, not a sandbox: the disposable
+bench is what contains a run. Exactly what it checks
+(`coordinator/gentar/gates.py`, `pty_driver.py`, `scripted.py`):
+
+- **The pattern is about ten commands:** `rm -rf /` on the root itself
+  (or `/*`), `mkfs.`, `dd … of=/dev/sd*`, `nvme*` or `vd*`, a redirect
+  onto such a device, the shell fork bomb, `shutdown `, `poweroff`,
+  `systemctl poweroff|reboot` and `iptables -F`. Everything else passes:
+  `rm -rf ~`, `rm -rf /home/user`, `rm -rf *`, a forced `git push`, a
+  dropped table.
+- **Regex `expect` and `abort` turns** check it only while an approval
+  prompt is on screen ("do you want to proceed", "do you want to make this
+  edit", "requires approval", "allow this command"). On any other approval
+  prompt the driver presses Enter: it approves.
+- **The expected pattern wins.** An `expect` turn returns as soon as its
+  pattern is on screen, before it looks for an approval prompt. A danger
+  prompt on the same screen as the expected text does not abort.
+- **A judged `expect`** checks it (approval prompt and pattern) on every
+  poll, and never presses anything.
+- **A goal pilot** aborts on a pattern match anywhere on the screen,
+  approval prompt or not: before every poll, before acting, and before a
+  `then = "enter"`.
+- **`answer`, `pick` and `key` turns do not check it.** What they type is
+  the scenario's own text.
+
+That is not a documented intention: `scripted-danger` is a gate suite that
+fails unless the gate fires before any approval. It is proven after merge,
+by the gate tier in the private mirror ([CI and releases](ci-and-releases.md)),
+not on pull requests. A pull request runs only the hosted unit suite.
+
+## Credentials
 
 **Credentials are injected at run time and never baked.** A scenario
 declares the environment variable *names* it needs. Entries are

@@ -25,7 +25,7 @@ workflow:
 | 2 | **Suites** | `gentar/scenarios/*.toml` — install *decisions* + reality assertions, never scripts | `first-suite.toml`, fully commented |
 | 3 | **Credentials** | `credentials = [names]` per suite — env var NAMES; entries are alternatives, a list entry is an all-of group; none = oracle suite | none (first-suite is credential-less) |
 | 4 | **Trigger** | `.github/workflows/gentar-arena.yml` (own arena, kept byte-identical to the kit; the central arena's dispatch job is retired) | own-arena workflow: PRs, push to main, tags, dispatch — what each runs is the run policy's |
-| 5 | **Engine pin** | `GENTAR_REF` in `run.sh` | `v0.10.0` — a release tag, bumped deliberately |
+| 5 | **Engine pin** | the `GENTAR_REF` default in the kit's `run.sh`; `GENTAR_REF` in the environment overrides it for a run | `v0.10.0` — a release tag, bumped deliberately by re-copying the kit from a newer tag |
 | 6 | **Run policy** | `gentar/policy.toml` — phase 1 on PRs and main pushes, phase 2 (full regression) on dispatch / `arena` / `v*-rc*`, releases gated by `gentar/release-gate.sh` | PRs bench-free (`bench = "off"`), empty floor, gate on |
 | 7 | **Dry-run hooks** | `gentar/hooks.py` — `prepare()`, `HIDE_FROM_PATH`, `SKIP_STEP_SUBSTR` | no-ops |
 | 8 | **Telemetry destination** | `GENTAR_OTLP_EXPORT` + `GENTAR_OTLP_KEY` — repository secrets in CI, the environment locally; both or neither | unset: nothing leaves the arena |
@@ -40,11 +40,13 @@ processes, command output — never "the agent said it worked".
   self-hosted CI runner). The arena itself is a compose stack.
 - **A bench-host of your own**: any Linux machine reachable over SSH
   with [`sbx`](https://docs.docker.com/ai/sandboxes/) installed and
-  logged in once. Benches are microVMs it spawns; they are not compose
-  services. The engine ships no default host — you name yours.
-  Other tiers exist (macOS VMs via tart, containers via OpenSandbox,
-  cloud sandboxes via Daytona) and are selected per scenario — the kit
-  defaults to sbx.
+  logged in once, or the machine running the arena itself in local bench
+  mode (`GENTAR_BENCH_HOST=local`). Benches are microVMs it spawns; they
+  are not compose services. The engine ships no default host — you name
+  yours. Other tiers exist (macOS VMs via tart, containers via
+  OpenSandbox, cloud sandboxes via Daytona), selected per scenario, but
+  they are experimental and not supported for 1.0
+  ([bench tiers](../docs/guides/bench-tiers.md)). The kit defaults to sbx.
 - **git** and **python 3.11+** for the local dry-run.
 
 You do not need an account, a token, or anything hosted. Nothing in this
@@ -65,16 +67,16 @@ cp -R subject-template/.github /path/to/your-repo/.github   # merge if you have 
 ```
 
 Observe: `your-repo/gentar/` contains `run.sh`, `dryrun.py`, `plan.py`,
-`release-gate.sh`, `policy.toml`, `hooks.py`,
+`release-gate.sh`, `mirror.sh`, `policy.toml`, `hooks.py`,
 `scenarios/first-suite.toml`, `.gitignore`, `README.md`, and
 `your-repo/.github/workflows/gentar-arena.yml` exists.
 
-Four of those are the kit's and stay **byte-identical** to the pinned
-engine's copies: `run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh`, plus
-the workflow. `gentar/run.sh --check` fails when one differs, so an engine
-bump is a re-copy, never a merge. Everything a repo adapts lives in files
-that are its own: `scenarios/`, `policy.toml`, `hooks.py`, and repository
-variables.
+Five of those are the kit's and stay **byte-identical** to the pinned
+engine's copies: `run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh` and
+`mirror.sh`, plus the workflow. `gentar/run.sh --check` fails when one
+differs, so an engine bump is a re-copy, never a merge. Everything a repo
+adapts lives in files that are its own: `scenarios/`, `policy.toml`,
+`hooks.py`, and repository variables.
 
 `gentar/.gitignore` keeps `reports/`, `.arena/` and `.env` out of git.
 Check it landed — those three carry run output, a whole engine checkout,
@@ -92,7 +94,7 @@ spell it as a directory.
 ### 2. Name the subject
 
 The subject name is the directory your checkout is staged under, and the
-`subject` column in telemetry. It must match in two places:
+`subject` column in telemetry. Every scenario declares it:
 
 ```bash
 cd /path/to/your-repo
@@ -100,9 +102,13 @@ sed -i.bak 's/REPLACE-ME/your-repo/' gentar/scenarios/first-suite.toml && rm gen
 grep subject gentar/scenarios/first-suite.toml
 ```
 
-`run.sh` derives the same name from your repo's directory basename, so
-if the directory is `your-repo`, you are done. Edit `SUBJECT` in
-`run.sh` only when the two must differ.
+`run.sh` reads the name from the scenarios, never from the directory
+(in a git worktree the directory is named after the branch). Every
+scenario must declare the same `subject`: `run.sh` refuses `REPLACE-ME`,
+a bad name, or scenarios that disagree, with exit 2 before anything is
+staged. Do not edit `run.sh` to change it: it is a kit file, and
+`--check` fails when it differs from the pinned copy. `GENTAR_SUBJECT`
+overrides the name for one run.
 
 Observe: `subject = "your-repo"` and no `REPLACE-ME` left:
 `grep -r REPLACE-ME gentar/` prints nothing.
@@ -133,6 +139,12 @@ export GENTAR_BENCH_KEY_FILE="$HOME/.ssh/id_ed25519"   # the key that reaches it
 Observe: `grep -E '^GENTAR_BENCH_(HOST|USER)' gentar/.arena/.env` names
 YOUR machine and account, with no `example` left in either.
 
+If the machine running the arena is the bench host itself, set
+`GENTAR_BENCH_HOST=local` instead: `sbx` is called directly, and neither
+`GENTAR_BENCH_USER` nor a key is needed. The user running the arena must
+be the one that ran `sbx login`
+([local bench mode](../docs/guides/deploy-an-arena.md)).
+
 The two failure modes if you skip this, so you can tell them apart:
 
 - **Left unset** (empty value) — the coordinator refuses before any
@@ -157,7 +169,9 @@ gentar/dryrun.py
 Replays every suite's steps, driver turns and assertions in a scratch
 HOME in about a second. No bench, no Docker, no network. A scenario is
 shell inside TOML, three levels of quoting deep, and this finds the
-missing quote before it costs a bench.
+missing quote before it costs a bench. A suite it cannot drive (a `pick`,
+`key` or `abort` turn, a judged turn, a goal pilot) comes back
+`UNVERIFIED`, never as a pass: only the arena proves it.
 
 Observe: `first-suite.toml: ALL PASS`, exit 0.
 
@@ -203,7 +217,8 @@ your content, not plumbing.
 
 ### 6. Write your first real suite
 
-Duplicate `first-suite.toml` and replace two things:
+Copy `first-suite.toml` to `gentar/scenarios/<your-suite>.toml` (a suite's
+name is its file name, unless it sets `name`) and replace two things:
 
 - `[oracle].steps` — what your repo *does*, as shell lines run inside
   the bench. State decisions (which channel, which mode, which flags),
@@ -228,10 +243,12 @@ gentar/run.sh <your-suite>
 Observe: `ALL PASS` then exit 0. A failing run writes a report — see
 [the fix loop](#the-fix-loop).
 
-### 7. Pick a trigger mode
+### 7. Wire CI
 
-Two modes, and they coexist. Both are first-class; the difference is who
-runs the arena.
+There is one mode, the own arena; what you choose is where its bench runs.
+A PUBLIC repo should register no self-hosted runner at all: use the arena
+mirror ([`mirror/README.md`](mirror/README.md)), which runs phase 2 in a
+private mirror. Everything else uses this repo's own runner:
 
 **Own arena** — the copied workflow. Your repo runs the compose stack
 itself, on your triggers, and reports land in your `gentar/reports/`.
@@ -245,15 +262,16 @@ Secrets and vars it reads:
 
 | Name | Kind | When you need it |
 |---|---|---|
-| `BENCH_SSH_KEY` | secret | always — the key the coordinator uses to reach the bench-host |
-| `GENTAR_BENCH_HOST` | secret | always — the engine ships no bench-host; unset, the workflow refuses before staging anything |
-| `GENTAR_BENCH_USER` | secret | always — the account on it |
+| `BENCH_SSH_KEY` | secret | always, except in local bench mode — the key the coordinator uses to reach the bench-host |
+| `GENTAR_BENCH_HOST` | secret | always — the engine ships no bench-host; unset, the workflow refuses before staging anything. In local bench mode (the runner is the bench host) it is the repository **variable** `GENTAR_BENCH_HOST=local` instead |
+| `GENTAR_BENCH_USER` | secret | always, except in local bench mode — the account on it |
 | `GENTAR_CLONE_KEY` | secret | only if the ENGINE repo is private (read-only deploy key on it) |
 | `GENTAR_REPO_URL` | var | only to point at a fork or mirror of the engine |
 | `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` | secret / var | only for agent-in-the-loop suites |
 
-The three bench-host values are **secrets rather than variables** because a
+The bench-host values are **secrets rather than variables** because a
 public repo's Actions logs are public: secrets are masked, variables print.
+`local` is a mode word, not a host to hide.
 Unset agent credentials simply leave those suites out of the sweep, with a
 line in the log saying which and why.
 
@@ -267,7 +285,7 @@ contributors".
 
 **Central arena: retired as of 2026-10-12.** gentar's public workflow has no
 bench job any more, so a dispatch job aimed at it has nothing to run. Use the
-own arena above. The record of how the central mode worked is in
+own arena above. A short record is in
 [`docs/subject-integration.md`](../docs/subject-integration.md).
 
 Observe it: open a pull request touching anything, and the arena workflow
@@ -289,7 +307,8 @@ not hypothetical — this kit once advertised a scenario feature the
 engine's tip did not parse yet, and adopters saw a load error they had
 not caused.
 
-Check what you are pinned to, and what exists:
+The pin is the `GENTAR_REF` default in the kit's `run.sh`. Check what you
+are pinned to, and what exists:
 
 ```bash
 grep -n '^REF=' gentar/run.sh                      # the pin in force
@@ -301,9 +320,13 @@ Observe: one `REF=${GENTAR_REF:-<tag>}` line, and the available release
 tags. An empty tag list means the engine has published none yet — pin a
 SHA instead, never a branch.
 
-To move, change the default in `run.sh`, run your suites, and commit the
-bump as its own change with the result in the message. `GENTAR_REF=main`
-stays available per-run for anyone tracking the engine deliberately.
+To move, re-copy the kit's files (`run.sh`, `dryrun.py`, `plan.py`,
+`release-gate.sh`, `mirror.sh` and the workflow) from the new tag: its
+`run.sh` carries the new pin. Never edit the default in your copy:
+`--check` fails on a kit file that differs from the pinned engine's.
+Run your suites, and commit the bump as its own change with the result in
+the message. `GENTAR_REF=main` (or a `GENTAR_REF` repository variable in
+CI) stays available per-run for anyone tracking the engine deliberately.
 
 ### 9. Commit
 
@@ -342,11 +365,11 @@ Dry-run it (step 4), run it once for real (step 5), and it ships with
 the feature.
 
 **The ENGINE changed.** Nothing happens until you say so — that is the
-point of pinning to a release tag. Bumping is a deliberate act: change
-the default in `run.sh`, run every suite, and commit the bump with the
-outcome in the message. If a suite fails on the new engine, the bump is
-the change under test and belongs in its own PR, never smuggled in with
-a feature.
+point of pinning to a release tag. Bumping is a deliberate act: re-copy
+the kit from the new tag (step 8), run every suite, and commit the bump
+with the outcome in the message. If a suite fails on the new engine, the
+bump is the change under test and belongs in its own PR, never smuggled
+in with a feature.
 
 ### The fix loop
 
@@ -410,6 +433,7 @@ subject-template/
     dryrun.py                      # bench-less replay (~1s)
     plan.py                        # the run policy's only reader
     release-gate.sh                # may this commit be released?
+    mirror.sh                      # phase 2 in the arena mirror (public repos)
     policy.toml                    # YOURS: which suites run when
     hooks.py                       # YOURS: dry-run hooks
     .gitignore                     # reports/ .arena/ .env

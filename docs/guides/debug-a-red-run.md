@@ -86,7 +86,7 @@ after every run.
 | `turn N: prompt '…' never appeared` | the screen changed. Compare the driver transcript with the pattern, or make the turn judged |
 | `judge never held yes … (a clear no …)` / `(undecided …)` | the question does not match the screen: measure it, see [Measure a judge with fixtures](measure-a-judge-with-fixtures.md) |
 | `goal: …` | see the goal pilot's failure list in [Tutorial 4](../tutorials/04-a-goal-pilot.md) |
-| `danger gate: …` | the software asked to run a destructive command. The driver refused, as designed |
+| `danger gate: …` | the software asked to run a command matching the danger pattern. The driver refused, as designed. The pattern is a short list: a green run does not mean nothing destructive was asked for ([the danger gate](../reference/pilot-simulator.md#the-danger-gate)) |
 
 ## When the bench stalls
 

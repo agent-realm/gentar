@@ -85,6 +85,51 @@ Adopters pin a release tag, not a branch.
   including `TYPESAFE_API_KEY` (unset: `--sweep` skips judged suites by
   name, so phase 2 can be green without them), the OTLP pair,
   `GENTAR_CI_RUNNER` and `GENTAR_FLOOR`; a test keeps it complete.
+- **The docs tell the truth** (ground-up review 2026-10-19, D3, C5, B4).
+  Corrected:
+  - **One mode.** `docs/subject-integration.md` and the kit READMEs still
+    offered the retired central dispatch as a first-class mode, with its
+    YAML. There is one mode, the own arena, on the repo's own runner or
+    through the arena mirror for a public repo; the dispatch keeps a short
+    record. `AGENTS.md` no longer says "both trigger modes are first-class".
+  - **Local bench mode needs no SSH secrets.** `BENCH_SSH_KEY` and
+    `GENTAR_BENCH_USER` were listed as always required (AGENTS.md, the kit
+    READMEs, the deploy guide, tutorial 2, the mirror README); with
+    `GENTAR_BENCH_HOST=local` neither is read.
+  - **The examples work when followed.** Copied over the kit, every
+    example was refused (`scenarios disagree on subject: example
+    REPLACE-ME`, exit 2): the kit's `first-suite.toml` stays behind. The
+    example READMEs now say to delete it (`examples/README.md`, *Trying an
+    example*). The template suite no longer sets `name`, so a copy under a
+    new file name is a new suite instead of a second `first-suite` that
+    `run.sh <your-suite>` cannot find. Example 09's suite reads a secret
+    only its mirror holds, so it declares `bench_only` and `--check` is
+    clean as its README says. Example 08 says that its `[check] docs`
+    needs a repo with the docs standard.
+  - **Never edit `run.sh`.** The kit README said to edit `SUBJECT` in
+    `run.sh`, and every doc said to bump the engine by changing the
+    `GENTAR_REF` default there; `run.sh` is a kit file `--check` holds
+    byte-identical. The subject comes from the scenarios (`GENTAR_SUBJECT`
+    overrides), and a bump is a re-copy of the kit from the new tag. The
+    kit file lists now include `mirror.sh`.
+  - **Symlinks do not survive the bind mount.** `subjects/README.md`
+    suggested `ln -s` a checkout in; inside the coordinator the link
+    points at a host path that is not mounted. Copy it.
+  - **The danger gate, as it is.** The README said it "aborts anything
+    destructive". It matches about ten command patterns (`rm -rf ~`
+    passes), regex `expect` and `abort` turns check it only at an approval
+    prompt and press Enter on any other, the expected pattern wins over a
+    danger match, and `answer`, `pick` and `key` turns are not checked.
+    The pilot-simulator reference has a section on it; a test holds the
+    listed commands to `gates.DANGER_RE`.
+  - **`sbx` is the 1.0 tier.** `tart` (workspace never created for a
+    subjectless suite), `osb` (gentar's pty bridge drops a session
+    silent for 30 s; credentialed driver scenarios refused) and `daytona` (a sandbox can
+    leak) are marked experimental wherever tiers are documented.
+  - The scenario inventory counted 20 TOML suites and left out
+    `semantic-demo` and `goal-demo`; a test now holds it to
+    `coordinator/scenarios/`. The docs index lists the public-repository
+    guide.
 
 ### Fixed
 - **A subject suite can no longer hide behind a builtin's name.** A suite
@@ -110,9 +155,22 @@ Adopters pin a release tag, not a branch.
 - **The subject guard reads `.git/logs` too.** `git pull <url with a
   token>` writes the URL, token included, into `.git/logs/HEAD` and the
   branch's reflog (git 2.50 still does), and the guard skipped every reflog
-  while the engine ships `.git` whole. A credential in a reflog of the
-  subject, a submodule or a worktree is now refused like one in a config,
-  naming the file, never the value (ground-up review C2).
+  while the engine ships `.git` whole. A credential in a reflog or in
+  `FETCH_HEAD`, of the subject, a submodule or a worktree, is now refused
+  like one in a config, naming the file, never the value (ground-up review
+  C2).
+- **The dry-run no longer turns a suite with a `pick`, `key` or `abort`
+  turn into FAILURES.** It kept driving past the turn it cannot take, so
+  the next turn timed out, then ran the suite's assertions against a drive
+  that never finished. It now replays the turns before the first such
+  turn, stops there, runs neither the later turns nor the assertions, and
+  reports the suite `UNVERIFIED` (a nonzero exit, which `run.sh --check`
+  accepts). A failing step, or a failing turn before the stop, is still a
+  FAILURE. Kit file: `gentar/dryrun.py` (ground-up review D3).
+- **`bench-template/build.sh` runs the way its header says.** Piped to the
+  bench-host (`sh -s`), it read `VERSION` from a directory that has none
+  and stopped there. The pin now travels as the first argument:
+  `ssh bench-host sh -s -- "$(cat bench-template/VERSION)" < bench-template/build.sh`.
 - **Commit-sha checks no longer depend on the locale.** `mirror.sh`,
   `release-gate.sh`, the mirror's `verify-ref.sh` and `bin/bench-reap`
   checked hex with the range `[0-9a-f]`. A shell that orders ranges by the

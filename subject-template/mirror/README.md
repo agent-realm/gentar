@@ -95,7 +95,8 @@ its `plan.py`, still reaches no secret the mirror did not offer.
      - the kit bench job's own: `GENTAR_BENCH_HOST`, `GENTAR_REF`,
        `ANTHROPIC_BASE_URL`, the model pins, the host ports.
    - Secrets, set by reference (`with-secret`, piped), never pasted:
-     - `BENCH_SSH_KEY`, `GENTAR_BENCH_USER`
+     - `BENCH_SSH_KEY`, `GENTAR_BENCH_USER` (neither in local bench mode,
+       `GENTAR_BENCH_HOST=local`: the mirror's runner on the bench host)
      - the provider keys the agent suites need
      - every name in `GENTAR_ROUTE_ALLOW`
      - optionally `GENTAR_STATUS_TOKEN`: a fine-grained token allowed to
