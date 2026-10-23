@@ -23,6 +23,14 @@ Adopters pin a release tag, not a branch.
 ## Unreleased
 
 ### Added
+- **`gentar/run.sh --review --since <ref>`**: what changed since a ref (the
+  adoption, say), from git objects only, deterministic and bench-free:
+  - the changed paths outside `gentar/`;
+  - the executables added, removed or changed;
+  - the suites that mention a changed path (re-read them);
+  - the changed paths no suite mentions.
+  It reports and never fails a build, and works with a broken policy.
+  Guide: `docs/guides/review-an-adaptation.md`.
 - **Failure snapshot** (engine): when a driver turn fails (or the final
   wait times out, or the danger gate or a goal pilot ends the run), the
   report gets the rendered last screen, the raw tail of the pty stream
@@ -79,6 +87,14 @@ Adopters pin a release tag, not a branch.
   `GENTAR_CI_RUNNER` and `GENTAR_FLOOR`; a test keeps it complete.
 
 ### Fixed
+- **A subject suite can no longer hide behind a builtin's name.** A suite
+  named `smoke` or `smoke-fail` used to run the engine's own self-test
+  instead, silently (review A5). It is now refused with a "rename it".
+- **File assertions reach the bench's shell literally.** Paths and
+  `contains` text were quoted with Python's `repr()`, which switches to
+  double quotes when the text holds a `'`, and then `$` and backticks
+  expanded in the bench's shell (review A9). They are now quoted with
+  `shlex.quote`. Only a leading `~` means the home directory.
 - **A subject name can no longer reach outside the subjects root.** The
   engine joined a scenario's `subject` onto the subjects root unchecked, so a
   direct run (`docker compose run --rm coordinator run <suite>`) of a

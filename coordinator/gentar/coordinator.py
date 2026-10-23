@@ -12,6 +12,7 @@ import os
 import re
 import shlex
 import time
+from pathlib import Path
 
 from gentar.benchhost import BenchHost, make_bench
 from gentar.config import Config
@@ -118,9 +119,31 @@ def _write_report(report: RunReport, cfg: Config) -> None:
 _SHADOW_NOTED: set[tuple[str, str, str]] = set()
 
 
+def _builtin_clash(name: str, cfg: Config) -> str:
+    """The scenarios dir holding a TOML suite with a builtin's name, or ""."""
+    for d in cfg.scenarios_dirs:
+        if (Path(d) / f"{name}.toml").is_file():
+            return str(d)
+        # File by file: one broken TOML must neither block the builtin nor
+        # hide a valid clash in a sibling file (Codex on #90).
+        for f in sorted(Path(d).glob("*.toml")):
+            try:
+                if TomlScenario(f).name == name:
+                    return str(d)
+            except Exception:       # a broken TOML is not this run's problem
+                continue
+    return ""
+
+
 def _resolve(name: str, cfg: Config) -> tuple:
     """-> (callable(bench, run_id, spans) -> summary, TomlScenario | None)"""
     if name in REGISTRY:
+        # A subject's own `smoke` used to run the engine's self-test instead,
+        # silently (review A5): refuse the name, never pick one quietly.
+        clash = _builtin_clash(name, cfg)
+        if clash:
+            raise RunError(f"scenario {name!r} in {clash} has the name of an engine "
+                           f"builtin ({', '.join(sorted(REGISTRY))}); rename it")
         return REGISTRY[name], None
     found = [(d, load_dir(d)) for d in cfg.scenarios_dirs]
     hits = [d for d, tomls in found if name in tomls]
