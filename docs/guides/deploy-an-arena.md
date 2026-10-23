@@ -164,13 +164,19 @@ GitHub-hosted runner cannot reach an internal bench-host.
 1. Pick any always-on machine with Docker and network reach to the
    bench-host. It can be the bench-host itself.
 2. In the repository: Settings → Actions → Runners → New self-hosted
-   runner, then add the label `arena`.
+   runner, then add the label `arena` (or another label, set as the
+   repository variable `GENTAR_BENCH_LABEL`).
 3. On a **public** repository, also set "Require approval for all
    external contributors". The kit never runs a fork's PR on the runner,
    but a fork can add its own workflow aimed at it.
 
 Several repositories can share one runner machine: register one runner
-per repository.
+per repository. Runners registered as one account share that account's
+Docker daemon, files and `/tmp` (the arena locks, bench workspaces, any
+key on disk): a job of any of those repositories can reach the others'
+arenas and secrets. That is one trust domain (ground-up review C4, SB04).
+Give each repository its own account when they should not trust each
+other.
 
 On a host built by `bin/bench-host-provision`, register the runner as the
 bench account. Put `DOCKER_HOST=unix:///run/user/<uid>/docker.sock` and

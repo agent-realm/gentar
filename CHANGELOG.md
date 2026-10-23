@@ -22,6 +22,28 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Security
+- **The bench runner's label is one variable** (ground-up review C4; found
+  by agentmux-lab). The kit's guard refused a `GENTAR_CI_RUNNER` naming
+  `arena`, the default bench label, but a repository whose bench runner
+  carries another label (`agentmux-lab`) was not protected: its CI runner
+  value could name the bench runner and run pull request code there. The
+  new repository variable `GENTAR_BENCH_LABEL` (default `arena`) is the
+  label the bench job runs on, and the guard refuses a `GENTAR_CI_RUNNER`
+  containing it as well as `arena`, before scheduling anything; so does
+  `plan.py`. Kit files changed: `.github/workflows/gentar-arena.yml`,
+  `gentar/plan.py`.
+- **`GENTAR_CI_RUNNER` must name a label of its own** (review SB03).
+  `["self-hosted", "linux"]` passed the guard, and every self-hosted
+  runner, the bench runner included, carries those labels. `plan.py` now
+  refuses a value made only of default runner labels. It runs once `plan`
+  is scheduled, so it stops the checks and fails the run loudly; the kit
+  README says why the CI runner needs a label the bench runner lacks.
+- Docs: pushing the `arena` tag on a pull request's commit runs that code
+  with the bench secrets, so only on a commit whose diff was read, never a
+  fork's (review GB4); runners registered as one account share its Docker
+  daemon and files, one trust domain (review SB04).
+
 ### Fixed
 - **The kit reads a suite's TOML with a TOML parser** (ground-up review
   A7). `gentar/run.sh` read scenarios with awk and grep, and its reading

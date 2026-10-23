@@ -68,6 +68,9 @@ SCENARIOS = HERE / "scenarios"
 POLICY = HERE / "policy.toml"
 NAME = re.compile(r"[A-Za-z0-9._-]+")
 ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")       # the engine's rule
+# Labels GitHub gives every self-hosted runner (lowercase; labels match
+# case-insensitively).
+DEFAULT_RUNNER_LABELS = {"self-hosted", "linux", "macos", "windows", "x64", "arm", "arm64"}
 
 PHASE2_TRIGGERS = ("dispatch", "arena", "rc")
 SETUP_TOOLS = ("go", "node", "python")
@@ -467,14 +470,29 @@ def ci_runner(env):
     if (not isinstance(labels, list) or not labels
             or not all(isinstance(x, str) and NAME.fullmatch(x) for x in labels)):
         raise Refuse(f"GENTAR_CI_RUNNER must be a runner label or a list of them: {raw!r}")
+    bench = (env.get("GENTAR_BENCH_LABEL") or "").strip()
+    if bench and not NAME.fullmatch(bench):
+        raise Refuse(f"GENTAR_BENCH_LABEL must be one runner label: {bench!r}")
     # Case-insensitive and by substring, exactly as the workflow's own
-    # pre-scheduling guard (`contains(vars.GENTAR_CI_RUNNER, 'arena')`):
-    # runner labels match regardless of case, so `Arena` IS the bench
-    # runner (Codex).
-    if "arena" in raw.lower():
-        raise Refuse("GENTAR_CI_RUNNER names the `arena` label (or a label containing "
-                     "'arena', in any case): the checks run pull request code and must "
-                     "never land on the bench runner")
+    # pre-scheduling guard (`contains(vars.GENTAR_CI_RUNNER, 'arena')`, and
+    # the same for GENTAR_BENCH_LABEL): runner labels match regardless of
+    # case, so `Arena` IS the bench runner (Codex). A bench runner labelled
+    # otherwise (agentmux's `agentmux-lab`) is caught by its own label.
+    for label in ["arena"] + ([bench] if bench else []):
+        if label.lower() in raw.lower():
+            raise Refuse(f"GENTAR_CI_RUNNER names the bench runner's label {label!r} (or a "
+                         f"label containing it, in any case): the checks run pull request "
+                         f"code and must never land on the bench runner")
+    # A job lands on any runner that carries ALL its labels. Default labels
+    # alone (`self-hosted`, `linux`, `x64`, ...) are carried by every
+    # self-hosted runner, the bench runner included (ground-up review C4,
+    # SB03): the CI runner must be picked by a label of its own. Checked
+    # here, after plan was scheduled, since the workflow cannot loop over a
+    # list; it still stops the checks, and fails the run loudly.
+    if all(x.lower() in DEFAULT_RUNNER_LABELS for x in labels):
+        raise Refuse(f"GENTAR_CI_RUNNER {raw} names only default runner labels, which "
+                     f"every self-hosted runner carries, the bench runner included: add a "
+                     f"label only your CI runner has, e.g. [\"self-hosted\", \"linux-ci\"]")
     return labels
 
 

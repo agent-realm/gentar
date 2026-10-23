@@ -9,7 +9,8 @@
 #   checks   GitHub-hosted. Phase 1's bench-free checks: dry-run of every
 #            suite, adaptation lint, kit drift. PR code runs here and
 #            nowhere else unless the plan says so.
-#   bench    self-hosted, label `arena` (Docker + reach to the bench-host).
+#   bench    self-hosted, label `arena`, or vars.GENTAR_BENCH_LABEL (Docker +
+#            reach to the bench-host).
 #            Named `arena / phase2` for the full regression — the job
 #            gentar/release-gate.sh looks for — or `arena / targeted`.
 #
@@ -56,32 +57,36 @@ permissions:
   contents: read
 
 jobs:
-  # A GENTAR_CI_RUNNER that mentions `arena` is refused BEFORE any job is
-  # scheduled on it: `runs-on` would otherwise start plan on the bench runner
-  # and run the PR's own plan.py there before plan.py could refuse (Codex).
-  # contains() is case-insensitive, as runner labels are, and tests the raw
-  # text, so `Arena`, `ARENA` and a padded " arena" are all caught. This job
-  # fails the run loudly; plan and checks are skipped.
+  # A GENTAR_CI_RUNNER that mentions the bench runner's label (`arena`, or
+  # GENTAR_BENCH_LABEL when the bench runner carries another; agentmux's is
+  # `agentmux-lab`) is refused BEFORE any job is scheduled on it: `runs-on`
+  # would otherwise start plan on the bench runner and run the PR's own
+  # plan.py there before plan.py could refuse (Codex). contains() is
+  # case-insensitive, as runner labels are, and tests the raw text, so
+  # `Arena`, `ARENA` and a padded " arena" are all caught. The same
+  # expression guards plan and checks below. This job fails the run loudly.
   ci-runner-refused:
-    if: ${{ contains(vars.GENTAR_CI_RUNNER, 'arena') }}
+    if: ${{ contains(vars.GENTAR_CI_RUNNER, 'arena') || (vars.GENTAR_BENCH_LABEL != '' && contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL)) }}
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo "::error::GENTAR_CI_RUNNER names the arena label (or a label containing 'arena'): the plan and checks run pull request code and must never be scheduled on the bench runner"
+          echo "::error::GENTAR_CI_RUNNER names the bench runner's label (arena, or GENTAR_BENCH_LABEL, or a label containing either): the plan and checks run pull request code and must never be scheduled on the bench runner"
           exit 2
 
   plan:
     # GitHub-hosted by default. GENTAR_CI_RUNNER (a repository or
     # organisation variable, JSON: ["self-hosted", "linux-ci"]) moves plan
     # and checks to a self-hosted runner, for an organisation without hosted
-    # minutes or one that keeps CI in-house. Never the `arena` runner:
-    # plan.py refuses that label. The bench job below is unaffected.
+    # minutes or one that keeps CI in-house. Never the bench runner: the
+    # guard refuses its label, and plan.py also refuses a value made only of
+    # default runner labels, which any self-hosted runner matches. The
+    # bench job below is unaffected.
     runs-on: ${{ vars.GENTAR_CI_RUNNER && fromJSON(vars.GENTAR_CI_RUNNER) || 'ubuntu-latest' }}
     # A fork's PR never reaches a self-hosted runner, not even to plan: with
     # GENTAR_CI_RUNNER set, plan (and so everything after it) is skipped for
     # it. Unset, forks keep the hosted checks as before.
     if: >-
-      ${{ !contains(vars.GENTAR_CI_RUNNER, 'arena') &&
+      ${{ !(contains(vars.GENTAR_CI_RUNNER, 'arena') || (vars.GENTAR_BENCH_LABEL != '' && contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL))) &&
       (!vars.GENTAR_CI_RUNNER || github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository) }}
     outputs:
@@ -123,10 +128,11 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GENTAR_FLOOR: ${{ vars.GENTAR_FLOOR }}   # only read without a policy.toml
           GENTAR_CI_RUNNER: ${{ vars.GENTAR_CI_RUNNER }}   # validated, and logged as runner=
+          GENTAR_BENCH_LABEL: ${{ vars.GENTAR_BENCH_LABEL }}   # the bench runner's label
 
   checks:
     needs: plan
-    if: needs.plan.outputs.checks == 'true' && !contains(vars.GENTAR_CI_RUNNER, 'arena')
+    if: needs.plan.outputs.checks == 'true' && !(contains(vars.GENTAR_CI_RUNNER, 'arena') || (vars.GENTAR_BENCH_LABEL != '' && contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL)))
     # [phase1] os: GitHub-hosted runners only (plan.py refuses anything
     # else). On macOS this is the dry-run on macOS userland — bash 3.2, BSD
     # tools — not a macOS bench; that is gentar's tart tier. With
@@ -219,7 +225,9 @@ jobs:
       needs.plan.outputs.bench != 'none' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: [self-hosted, arena]
+    # `arena` unless GENTAR_BENCH_LABEL names the label your bench runner
+    # carries: one value for this and for the guard above.
+    runs-on: [self-hosted, "${{ vars.GENTAR_BENCH_LABEL || 'arena' }}"]
     env:
       # Names every bench sandbox this job creates, so teardown removes the
       # ones a CANCELLED job strands and nothing else on the shared
