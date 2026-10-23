@@ -23,6 +23,14 @@ Adopters pin a release tag, not a branch.
 ## Unreleased
 
 ### Added
+- **`gentar/run.sh --review --since <ref>`**: what changed since a ref (the
+  adoption, say), from git objects only, deterministic and bench-free:
+  - the changed paths outside `gentar/`;
+  - the executables added, removed or changed;
+  - the suites that mention a changed path (re-read them);
+  - the changed paths no suite mentions.
+  It reports and never fails a build, and works with a broken policy.
+  Guide: `docs/guides/review-an-adaptation.md`.
 - **Failure snapshot** (engine): when a driver turn fails (or the final
   wait times out, or the danger gate or a goal pilot ends the run), the
   report gets the rendered last screen, the raw tail of the pty stream
