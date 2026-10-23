@@ -5,10 +5,10 @@
 # and [[verify]] with what your repo actually does.
 
 [scenario]
-# name = "first-suite"        # defaults to the filename stem: leave it
+# name = "first-suite"        # defaults to the filename stem, and the
+                              # kit refuses any other value: leave it
                               # unset, so a copy of this file under a new
-                              # name is a new suite, not a second
-                              # "first-suite" hiding this one
+                              # name is a new suite
 subject = "REPLACE-ME"        # your repo's name — the subjects-root dir
                               # name run.sh stages, and the telemetry
                               # `subject` column. run.sh reads it from

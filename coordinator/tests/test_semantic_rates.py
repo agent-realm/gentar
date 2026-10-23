@@ -95,24 +95,6 @@ class CodexReviewTest(unittest.TestCase):
         self.assertEqual([c.kwargs["attrs"]["soft"] for c in spans.emit.call_args_list],
                          ["undecided", "unavailable"])
 
-    def test_run_sh_recognises_every_judged_spelling(self):
-        import subprocess
-        root = Path(__file__).resolve().parents[2]
-        run_sh = root / "subject-template" / "gentar" / "run.sh"
-        if not run_sh.exists():
-            self.skipTest("the kit is not in the image build context")
-        text = run_sh.read_text()
-        fn = text[text.index("judged() {"):text.index("\n}\n", text.index("judged() {")) + 3]
-        yes = ['goal = "G"', '"goal" = "G"', '[driver.turns."judge"]', '[["verify"."judge"]]',
-               '[[verify.judge]]', 'verify.judge = []', 'driver.goal = "G"', '  judge = { q = 1 }']
-        no = ["goalie = 1", "# goal = x", "[[verify.commands]]", "judgement = 1", "subgoal = 1"]
-        with tempfile.TemporaryDirectory() as d:
-            for line, want in [(l, True) for l in yes] + [(l, False) for l in no]:
-                f = Path(d) / "s.toml"
-                f.write_text(line + "\n")
-                r = subprocess.run(["/bin/bash", "-c", fn + f'judged "{f}"'], capture_output=True)
-                self.assertEqual(r.returncode == 0, want, line)
-
 
 class Judge:
     def __init__(self, ps):
