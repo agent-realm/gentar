@@ -553,7 +553,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # suites, and committing the bump as its own change; the engine's release
 # moves the default. GENTAR_REF overrides it for one run, and `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.10.0}
+REF=${GENTAR_REF:-v0.11.0}
 
 # --review: has this repo outgrown its suites?
 #
