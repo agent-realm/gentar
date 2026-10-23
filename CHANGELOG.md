@@ -36,7 +36,8 @@ Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what change
   It reports and never fails a build, and works with a broken policy.
   Guide: `docs/guides/review-an-adaptation.md`.
 - **Failure snapshot** (engine): when a driver turn fails (or the final
-  wait times out, or the danger gate or a goal pilot ends the run), the
+  wait times out, the danger gate or a goal pilot ends the run, or the
+  program's exit status fails it), the
   report gets the rendered last screen, the raw tail of the pty stream
   with escapes visible, the bench's process tree, and the output of a new
   optional `[on_failure] commands` table, captured before the session is
