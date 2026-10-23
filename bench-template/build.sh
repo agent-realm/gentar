@@ -6,12 +6,30 @@
 # bench-template-verify scenario asserts the same version from inside
 # benches created from the template.
 #
-#   ssh bench-host 'sh -s' < bench-template/build.sh
+#   ssh bench-host sh -s -- "$(cat bench-template/VERSION)" < bench-template/build.sh
+#
+# Piped like that, the script cannot read VERSION from the bench-host
+# (it is not there), so the pin travels as the first argument. Run from a
+# copy of this directory, `sh build.sh` reads ./VERSION instead.
+#
+# A template save blocks the sbx daemon for the whole host while it runs:
+# announce a window with no arena run in flight first.
 set -e
 
 TAG=gentar-bench-v1
-VERSION=$(cat VERSION)
-WS=/tmp/gentar-template-build
+if [ -n "${1:-}" ]; then
+  VERSION=$1
+elif [ -f VERSION ]; then
+  VERSION=$(cat VERSION)
+else
+  echo "no agent version: pass it as the first argument (sh -s -- \"\$(cat bench-template/VERSION)\")," >&2
+  echo "or run from a copy of bench-template/ that holds VERSION" >&2
+  exit 2
+fi
+case "$VERSION" in
+  ''|*[!0-9A-Za-z.-]*) echo "bad agent version: $VERSION" >&2; exit 2 ;;
+esac
+WS=${GENTAR_TEMPLATE_WS:-/tmp/gentar-template-build}   # the builder's workspace
 
 command -v sbx >/dev/null || { echo "sbx not installed"; exit 1; }
 
