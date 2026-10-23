@@ -23,6 +23,14 @@ Adopters pin a release tag, not a branch.
 ## Unreleased
 
 ### Added
+- **`gentar/run.sh --review --since <ref>`**: what changed since a ref (the
+  adoption, say), from git objects only, deterministic and bench-free:
+  - the changed paths outside `gentar/`;
+  - the executables added, removed or changed;
+  - the suites that mention a changed path (re-read them);
+  - the changed paths no suite mentions.
+  It reports and never fails a build, and works with a broken policy.
+  Guide: `docs/guides/review-an-adaptation.md`.
 - **Failure snapshot** (engine): when a driver turn fails (or the final
   wait times out, or the danger gate or a goal pilot ends the run), the
   report gets the rendered last screen, the raw tail of the pty stream
@@ -50,6 +58,20 @@ Adopters pin a release tag, not a branch.
   loaded on 0.10.x or earlier is refused from this release, so it ships in a minor
   version (0.11.0). Every scenario in gentar, its examples, and the known adopters'
   repositories loads unchanged.
+- **The kit stages only the files git would ship.** `gentar/run.sh` copied
+  the whole working tree into `subjects/<name>/`, so a gitignored `.env`,
+  `.npmrc`, `.netrc` or build output on a developer's machine rode into the
+  bench, where the subject's own agent can read it (ground-up review C2).
+  For a checkout with a `.git` of its own, the kit now stages tracked files
+  plus the untracked ones git does not ignore (`git ls-files --cached
+  --others --exclude-standard`, in the new `plan.py stage-tree`); a
+  submodule or nested repository goes through its own git, without its
+  `.git`, and a checkout git cannot list is refused rather than copied
+  whole. A checkout with no `.git` is still copied whole. The dry-run stages
+  its workspace the same way, so a suite that reads an ignored local file
+  fails there too, as it would in CI's clean checkout. `.git` handling and
+  `[stage] git = true` are unchanged. Kit files changed (`gentar/run.sh`,
+  `plan.py`, `dryrun.py`): subjects pick it up at their next kit re-copy.
 
 ### Docs
 - `GENTAR_CI_RUNNER`: on GitHub Free, an organisation variable reaches
@@ -110,6 +132,32 @@ Adopters pin a release tag, not a branch.
     guide.
 
 ### Fixed
+- **A subject suite can no longer hide behind a builtin's name.** A suite
+  named `smoke` or `smoke-fail` used to run the engine's own self-test
+  instead, silently (review A5). It is now refused with a "rename it".
+- **File assertions reach the bench's shell literally.** Paths and
+  `contains` text were quoted with Python's `repr()`, which switches to
+  double quotes when the text holds a `'`, and then `$` and backticks
+  expanded in the bench's shell (review A9). They are now quoted with
+  `shlex.quote`. Only a leading `~` means the home directory.
+- **A subject name can no longer reach outside the subjects root.** The
+  engine joined a scenario's `subject` onto the subjects root unchecked, so a
+  direct run (`docker compose run --rm coordinator run <suite>`) of a
+  scenario with `subject = "../run/secrets"` shipped the coordinator's bench
+  key into the bench. The kit's `run.sh` name check stopped it there; the
+  engine did not (ground-up review C3). The engine now refuses (exit 2, a
+  report, before any bench) a subject that is not one directory name
+  (letters, digits, dot, dash, underscore; not starting with a dot or a
+  dash; not empty), or whose directory, symlinks resolved, is outside the
+  subjects root. That also refuses a subject symlinked to a checkout
+  elsewhere, which `subjects/README.md` used to suggest; it never resolved
+  inside the coordinator container, where the target is not mounted.
+- **The subject guard reads `.git/logs` too.** `git pull <url with a
+  token>` writes the URL, token included, into `.git/logs/HEAD` and the
+  branch's reflog (git 2.50 still does), and the guard skipped every reflog
+  while the engine ships `.git` whole. A credential in a reflog of the
+  subject, a submodule or a worktree is now refused like one in a config,
+  naming the file, never the value (ground-up review C2).
 - **The dry-run no longer turns a suite with a `pick`, `key` or `abort`
   turn into FAILURES.** It kept driving past the turn it cannot take, so
   the next turn timed out, then ran the suite's assertions against a drive

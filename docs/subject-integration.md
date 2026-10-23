@@ -42,8 +42,12 @@ your code changes".
    `claude-playbooks-install`. Those are the engine's regression, run in
    its private mirror, not a way to adopt.)
 2. **The subject checkout itself** — the working tree, staged by
-   `run.sh` as a plain copy under `subjects/<name>/` and bind-mounted
-   read-only into the coordinator; never baked into any image.
+   `run.sh` under `subjects/<name>/` (the files git would ship) and
+   bind-mounted read-only into the coordinator; never baked into any
+   image. `<name>` is the scenario's `subject`: one directory name
+   (letters, digits, dot, dash, underscore; not starting with a dot or a
+   dash) whose directory, symlinks resolved, is inside the subjects root.
+   See [What reaches the bench](#what-reaches-the-bench).
 3. **A trigger** — the kit's workflow, `gentar-arena.yml`, or for a
    PUBLIC repo its mirror variant.
 4. **Maintenance** — scenarios updated in the same change as the
@@ -64,7 +68,8 @@ In return, and these are stable across engine versions within a major:
   actually saw, the verdict, and a reproduce command. A failing report
   is actionable by a reader who did not watch the run.
 - **Refusal before spend.** A missing credential, an unknown scenario
-  name, or a declared budget above the cap exits 2 before any bench is
+  name, a declared budget above the cap, or a subject name that is not
+  one directory inside the subjects root exits 2 before any bench is
   created.
 - **Subjects mount, never bake.** The checkout is staged at run time;
   no image built by the engine ever contains it.
@@ -76,6 +81,40 @@ In return, and these are stable across engine versions within a major:
   along and redirect the run.
 - **A fresh bench per scenario.** The bench is the reset; a wedged run
   is discarded, never repaired.
+
+## What reaches the bench
+
+The engine ships `subjects/<name>/` into the bench workspace as it
+stands, `.git` included when there is one. Before any bench exists it
+refuses (exit 2):
+
+- a `subject` that is not one directory name (`../x`, `a/b`, `..`,
+  `.hidden`, `-x`, an empty string), or whose directory resolves outside
+  the subjects root (a symlink out of it). A name like `../run/secrets`
+  would otherwise ship the coordinator's own bench key;
+- a subject whose `.git` holds a credential: in a config (user info in a
+  remote or `insteadOf` URL, `http.extraheader`, `http.cookieFile`), in a
+  reflog (`.git/logs/**`, where `git pull <url with a token>` writes the
+  token), or in a credential store (`.git-credentials`,
+  `.git/credentials`).
+
+The engine does not filter files: what is in the directory is what the
+bench gets. The stager decides:
+
+- **The kit's `gentar/run.sh`**, for a checkout that is a git work tree
+  (it has a `.git` of its own), stages the files git would ship: tracked
+  files plus the untracked ones git does not ignore (`git ls-files
+  --cached --others --exclude-standard`), and never `.git`,
+  `gentar/.arena` or `gentar/reports`. A gitignored `.env`, `.npmrc`,
+  `.netrc` or build output stays on your machine. A submodule or nested
+  repository is listed by its own git, without its `.git`. If git cannot
+  list a checkout that has a `.git`, staging refuses rather than copy
+  everything. The dry-run stages its workspace the same way.
+- **A checkout with no `.git` of its own** (an exported tarball, say) is
+  copied whole, minus those three, as before: nothing tells the kit what
+  to leave out, so keep secrets out of it.
+- **A direct engine run** ships whatever is in `subjects/<name>/`: stage
+  a fresh clone there, not a working tree with local files in it.
 
 ## Credentials (agent-in-the-loop suites)
 
@@ -122,8 +161,8 @@ The contract:
   Subjects mount, arenas run.
 - Verdicts come from reality: files, commands, processes — never from
   "the agent said it worked".
-- The subject is the WORKING TREE, uncommitted changes included. A fix
-  loop needs no commit to test.
+- The subject is the WORKING TREE, uncommitted changes included, minus
+  what git ignores. A fix loop needs no commit to test.
 - The bench-host is shared. A subject's suites clean up after
   themselves; nothing removes another arena's sandboxes or kills
   processes wholesale there.
@@ -174,8 +213,9 @@ conditions, reports on disk), by hand:
 1. Carry scenarios in the repo (e.g. `gentar/scenarios/*.toml`,
    `subject = "<repo-name>"`).
 2. In CI (or locally): clone gentar, stage this checkout under
-   `subjects/<repo-name>/` (plain copy — no symlinks, they don't
-   resolve through the bind), then:
+   `subjects/<repo-name>/` (a copy of the files git would ship, as
+   [below](#what-reaches-the-bench) — no symlink to the checkout, it
+   does not resolve through the bind and is refused), then:
 
    ```bash
    GENTAR_SUBJECTS_DIR="$PWD/subjects" \

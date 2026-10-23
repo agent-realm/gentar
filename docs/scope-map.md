@@ -40,7 +40,7 @@ use either or both.
 |---|---|---|
 | Who runs the stack | this repo's CI | the subject repo's CI |
 | Where scenarios live | `coordinator/scenarios/` here | `gentar/scenarios/` in the subject |
-| How the subject arrives | cloned into this arena's `subjects/` | tarred from the working tree by `gentar/run.sh` |
+| How the subject arrives | cloned into this arena's `subjects/` | copied from the working tree by `gentar/run.sh`: the files git would ship |
 | Workflow | [`.github/workflows/gentar.yml`](../.github/workflows/gentar.yml) | the subject's own, e.g. `arena.yml` |
 | Runner label | `gentar-bench` | the subject's choice, e.g. `arena` |
 | Reference example | `kommander-playbook`, `memhouse` | `claude-playbooks` |
@@ -344,7 +344,7 @@ them collides with something already in the tree.
 | **arena** | gentar itself — the harness. *aGENT ARena* | the bench. `.arena/` and the own-arena `arena` runner label already use this word |
 | **bench** | the disposable machine one scenario runs in | the bench-host, which outlives every bench it makes |
 | **bench-host** | the box running sbx that hands benches out | the runner, which runs the engine and never hosts a bench — even when both are the same VM |
-| **subject** | the component under test — mounted, never baked | the repo. The subject is a copy: cloned into `subjects/`, or tarred from a working tree |
+| **subject** | the component under test — mounted, never baked | the repo. The subject is a copy: cloned into `subjects/`, or copied from a working tree (the files git would ship) |
 | **scenario** | a TOML stating *decisions*, not steps | a script. The driver renders decisions into the instruction an agent executes |
 | **verdict** | pass or fail read from reality — files, processes, SQL, spans, TTY | the agent's self-report, which is evidence, not a verdict |
 | **runner** | a long-lived GitHub worker that claims one job at a time | a dispatcher. GitHub dispatches; the runner obeys |

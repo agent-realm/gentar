@@ -185,19 +185,23 @@ together.
   to look.
 
 ```bash
-gentar/run.sh --review     # no engine, no Docker, no bench
+gentar/run.sh --review                  # no engine, no Docker, no bench
+gentar/run.sh --review --since v1.4.0   # diff from a ref of your choosing
 ```
 
-It lists what the repo ships that no suite mentions, and the diff since
-the scenarios last changed. It **reports and stops** — never fails,
-never writes. A gap is a question, not a defect: some of those should
-have a suite and some never will, and deciding which needs someone who
-has read the repo. Worth running when a feature lands, or periodically.
+It lists what the repo ships that no suite mentions, then a
+deterministic diff since the scenarios last changed (or since the ref):
+changed paths, executables added, removed or changed, the suites that
+mention a changed path, and the changed paths no suite mentions. It
+**reports and stops** — never fails, never writes. A gap is a question,
+not a defect: some of those should have a suite and some never will, and
+deciding which needs someone who has read the repo. Worth running when a
+feature lands, or periodically.
 
-Its blind spot, stated so you do not trust it too far: it compares
-shipped executables and scripts against names the suites mention, so a
-**behaviour change inside a file a suite already names** does not show
-up. The diff is there for that.
+What it does not see, stated so you do not trust it too far: uncommitted
+work (it reads git objects at the ref and HEAD), and `--help` output
+(that needs the binaries run, which belongs on a bench). A shallow CI
+checkout has no history to diff: use `fetch-depth: 0`.
 
 ## Run policy — which suites run when
 
@@ -293,7 +297,10 @@ Read gentar/reports/report-<id>.md, fix the repo, rerun
 ```
 
 The subject is the **working tree** (uncommitted changes included) — fix
-and rerun, no commit needed to test.
+and rerun, no commit needed to test. It is staged as the files git would
+ship: tracked, plus untracked files git does not ignore. A gitignored
+`.env`, `.npmrc` or build output never reaches the bench; a checkout with
+no `.git` of its own is copied whole.
 
 Exit `1` is a verdict: an assertion saw something other than the claim.
 Exit `2` is a refusal before any bench existed — a missing credential,

@@ -65,13 +65,20 @@ done
 # needs Docker or a bench.
 STAGE_ONLY=0
 REVIEW_ONLY=0
+REVIEW_SINCE=""
 DOWN_ONLY=0
 SWEEP=0
 CHECK_ONLY=0
 ROUTE_ONLY=0
 case "${1:-}" in
   --stage-engine) STAGE_ONLY=1; shift ;;
-  --review)       REVIEW_ONLY=1; shift ;;
+  --review)       REVIEW_ONLY=1; shift
+                  # --since <ref>: diff from there instead of from the commit
+                  # that last changed a scenario (the adoption, usually).
+                  if [ "${1:-}" = --since ]; then
+                    [ -n "${2:-}" ] || { echo "--since needs a ref" >&2; exit 2; }
+                    REVIEW_SINCE=$2; shift 2
+                  fi ;;
   --down)         DOWN_ONLY=1; shift ;;
   --sweep)        SWEEP=1; shift ;;
   --check)        CHECK_ONLY=1; shift ;;
@@ -82,7 +89,7 @@ esac
 if [ "$STAGE_ONLY$REVIEW_ONLY$DOWN_ONLY$SWEEP$CHECK_ONLY$ROUTE_ONLY" = 000000 ]; then
   # A usage error is a refusal: exit 2. (`${1:?…}` exits 1 or 127.)
   if [ $# -lt 1 ]; then
-    echo "usage: gentar/run.sh [--stage-engine|--review|--sweep|--down|--check|--route|--plan] <scenario> [more scenarios...]" >&2
+    echo "usage: gentar/run.sh [--stage-engine|--review [--since <ref>]|--sweep|--down|--check|--route|--plan] <scenario> [more scenarios...]" >&2
     exit 2
   fi
   SCENARIO=$1
@@ -154,6 +161,10 @@ case "$SUBJECT" in
     exit 2 ;;
   *[!A-Za-z0-9._-]*)
     echo "bad subject name: $SUBJECT (letters, digits, dot, dash, underscore)" >&2
+    exit 2 ;;
+  .*|-*)
+    # the engine refuses these too (C3): `..` would stage into subjects/..
+    echo "bad subject name: $SUBJECT (may not start with a dot or a dash)" >&2
     exit 2 ;;
 esac
 
@@ -421,7 +432,12 @@ judge_ready() {
 # developer's shell, a runner's own environment) goes the same one way, to
 # the suites declaring it, and never in FORWARD to all (agy on #79).
 ROUTE_NAMES=()
-routes=$(python3 "$HERE/plan.py" route) || exit 2
+# --review runs no suite, so it needs no route, and a broken policy must
+# not hide its diff (it reports; it never fails a build).
+routes=""
+if [ "$REVIEW_ONLY" != 1 ]; then
+  routes=$(python3 "$HERE/plan.py" route) || exit 2
+fi
 _i=0
 for _n in $routes; do
   _i=$((_i + 1))
@@ -573,13 +589,13 @@ if [ "$REVIEW_ONLY" = 1 ]; then
   # `bin/tool`, and comparing those whole against a basename never
   # matches — the first version of this check reported install.sh as
   # unasserted for a suite whose very first step runs it.
-  mentions=$(cat $sc | grep -vE '^[[:space:]]*#' \
+  mentions=$(cat $sc | { grep -vE '^[[:space:]]*#' || true; } \
     | tr -c 'A-Za-z0-9_.-' '\n' | sort -u)
 
   echo "suites:"
   for f in $sc; do
     printf '  %-28s %s asserted\n' "$(basename "$f")" \
-      "$(grep -c '^\[\[verify' "$f" 2>/dev/null || echo 0)"
+      "$(grep -c '^\[\[verify' "$f" 2>/dev/null || true)"   # -c prints 0 itself
   done
   echo
 
@@ -595,7 +611,9 @@ if [ "$REVIEW_ONLY" = 1 ]; then
   # "this is run, not imported", in any language.
   cands=$( { git ls-files -s 2>/dev/null | awk '$1 == "100755" { print $4 }' || true
              git ls-files 2>/dev/null | grep -E '^bin/' || true
-           } | grep -vE '^(gentar|test|tests|\.github)/' | sort -u)
+           } | { grep -vE '^(gentar|test|tests|\.github)/' || true; } | sort -u)
+  # (|| true: a library-only repo ships no executable, grep then exits 1,
+  # and pipefail made --review die here instead of reporting.)
 
   gaps=0
   for c in $cands; do
@@ -619,17 +637,22 @@ if [ "$REVIEW_ONLY" = 1 ]; then
     echo "should have a suite, some never will. Deciding which is the work, and"
     echo "it needs someone who has read the repo. Start from the diff:"
   fi
+  echo
   # The commit that last touched a SCENARIO FILE, not the gentar dir:
   # staging the runner or a report would otherwise read as "the suites
   # were just updated" and the suggested diff would come back empty,
   # which is exactly the reassuring-but-wrong answer this check exists
   # to avoid.
-  since=$(git log -1 --format='%h %ad' --date=short -- "$HERE"/scenarios/'*.toml' 2>/dev/null || true)
-  if [ -n "$since" ]; then
-    printf '  scenarios last changed at %s\n' "$since"
-    printf '  git diff %s..HEAD -- . ":(exclude)gentar"\n' "${since%% *}"
+  # The diff itself is plan.py's (review): testable, and deterministic --
+  # git objects at the ref and HEAD, never the working tree.
+  since=${REVIEW_SINCE:-$(git log -1 --format='%H' -- "$HERE"/scenarios/'*.toml' 2>/dev/null || true)}
+  if [ -z "$since" ]; then
+    echo "  scenarios are not committed yet — nothing to diff from (or pass --since <ref>)"
+    exit 0
   fi
-  exit 0
+  [ -n "$REVIEW_SINCE" ] || echo "  (from the commit that last changed a scenario; --since <ref> for another)"
+  python3 "$HERE/plan.py" review "$since" | sed 's/^./  &/'
+  exit "${PIPESTATUS[0]}"
 fi
 
 # Refs are branch/tag/SHA only — reject anything hostile before it
@@ -697,9 +720,13 @@ if [ "$STAGE_ONLY" = 1 ]; then
 fi
 
 # Stage THIS checkout (working tree, uncommitted changes included) as
-# the subject. Plain copy: symlinks don't resolve through the bind.
+# the subject: the files git would ship, tracked plus untracked ones it
+# does not ignore, so a gitignored .env, .npmrc or build output never
+# rides into a bench (plan.py stage-tree). A checkout with no .git of its
+# own is copied whole, as before. Plain copy: symlinks are copied as
+# links, and don't resolve through the bind.
 #
-# Three exclusions, each for a reason:
+# Three exclusions either way, each for a reason:
 #   gentar/.arena    holds .env and the bench key — secrets must never
 #                    ride into a bench the subject's own agent can read
 #   gentar/reports   previous verdicts; dead weight
@@ -714,9 +741,7 @@ fi
 mkdir -p subjects out
 rm -rf "subjects/$SUBJECT"
 mkdir "subjects/$SUBJECT"
-(cd "$REPO" && tar \
-  --exclude=./.git --exclude=./gentar/.arena --exclude=./gentar/reports \
-  -cf - .) | tar -xf - -C "subjects/$SUBJECT"
+python3 "$HERE/plan.py" stage-tree "$REPO" "subjects/$SUBJECT"
 # History, when the policy asks for it ([stage] git = true): a fresh .git
 # built by a local clone, so no credential and no remote path come along.
 python3 "$HERE/plan.py" stage-git "$REPO" "subjects/$SUBJECT"

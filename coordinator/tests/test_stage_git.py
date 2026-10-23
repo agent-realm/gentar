@@ -97,7 +97,7 @@ class StageGitTest(unittest.TestCase):
 
     def test_run_sh_calls_it_after_the_copy(self):
         run = (ROOT / "subject-template" / "gentar" / "run.sh").read_text()
-        copy = run.index('-cf - .) | tar -xf - -C "subjects/$SUBJECT"')
+        copy = run.index('plan.py" stage-tree "$REPO" "subjects/$SUBJECT"')
         call = run.index('plan.py" stage-git "$REPO" "subjects/$SUBJECT"')
         self.assertGreater(call, copy)
 

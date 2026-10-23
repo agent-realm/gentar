@@ -404,7 +404,9 @@ is a usage error to fix in the invocation, never a red test.
   kit exists to prevent.
 - **Working tree is the subject** — uncommitted changes included. That
   is what makes the fix loop cheap, and it means a run tests what is on
-  disk, not what is committed.
+  disk, not what is committed. Only the files git would ship are staged
+  (tracked, plus untracked files git does not ignore), so a gitignored
+  `.env` or build output stays on your machine, as it would in CI.
 - **A fresh checkout is not a fresh engine.** `run.sh` re-fetches
   `GENTAR_REF` *and rebuilds the coordinator image* every run. The
   compose service is `build: ./coordinator`, so without the rebuild

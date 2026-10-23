@@ -162,23 +162,23 @@ def stage_subject(workspace: str) -> None:
     workspace, so $WORKSPACE_DIR contains the checkout at its root and
     steps can write alongside it without dirtying anything real. The
     same must hold here or a suite that passes locally and fails in the
-    bench (or worse, the reverse) is a harness lie. .git, the engine
-    clone and old reports stay out — dead weight on the bench too.
+    bench (or worse, the reverse) is a harness lie. So the copy is
+    run.sh's own, `plan.py stage-tree`: in a git work tree only the files
+    git would ship (a gitignored .env is not on the bench either), and
+    never .git, the engine clone or old reports.
 
     The workspace is a directory UNDER the home, never the home itself
     (the bench's is `<home>/gentar-workspaces/<run>`). Collapsing the
     two made a repo file named `.config/tool` satisfy a `~/.config/tool`
     assertion before any step created it (PR #27 review).
     """
-    def skip(directory, contents):
-        d = Path(directory)
-        if d == REPO:
-            return [".git"]
-        if d == REPO / "gentar":
-            return [c for c in contents if c in (".arena", "reports")]
-        return []
-    shutil.copytree(REPO, workspace, dirs_exist_ok=True, symlinks=True,
-                    ignore=skip)
+    r = subprocess.run([sys.executable, str(_here / "plan.py"), "stage-tree",
+                        str(REPO), workspace], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE, text=True)
+    if r.returncode != 0:
+        print(f"dryrun: refusing: the subject could not be staged\n{r.stderr.strip()}",
+              file=sys.stderr)
+        sys.exit(2)                             # a refusal, as run.sh's would be
 
 
 

@@ -6,6 +6,7 @@ Vocabulary: file-exists · file-contains · cmd-exit · cmd-contains.
 (sql-count and text-in-transcript join in phases 3/5.)
 """
 
+import shlex
 from dataclasses import dataclass
 
 from gentar.benchhost import BenchHost
@@ -26,14 +27,21 @@ def check_files(bench: BenchHost, sandbox: str, home: str,
                 files: list[dict]) -> list[AssertResult]:
     results = []
     for f in files:
-        path = f["path"].replace("~", home, 1)
+        path = f["path"]
+        # only a leading ~ is the home directory, as in a shell
+        if path == "~" or path.startswith("~/"):
+            path = home + path[1:]
         contains = f.get("contains")
+        # shlex.quote, never repr(): repr switches to double quotes when the
+        # text holds a ', and then $ and backticks expand in the bench's
+        # shell (review A9)
         if contains is None:
-            rc, _ = _sh(bench, sandbox, f"test -e {path!r}")
+            rc, _ = _sh(bench, sandbox, f"test -e {shlex.quote(path)}")
             results.append(AssertResult(
                 f"file-exists {path}", rc == 0, "" if rc == 0 else "missing"))
         else:
-            rc, out = _sh(bench, sandbox, f"grep -F -- {contains!r} {path!r}")
+            rc, out = _sh(bench, sandbox,
+                          f"grep -F -- {shlex.quote(contains)} {shlex.quote(path)}")
             results.append(AssertResult(
                 f"file-contains {path}", rc == 0,
                 "" if rc == 0 else f"pattern {contains!r} not found"))
