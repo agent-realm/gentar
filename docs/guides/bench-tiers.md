@@ -19,7 +19,7 @@ has a known defect that keeps it out of 1.0:
 | Tier | Bench | Known defect |
 |---|---|---|
 | `tart` | a macOS VM cloned from a template on Apple hardware | the bench's workspace is created only when a subject is pushed into it, so a subjectless suite's steps get a `$WORKSPACE_DIR` that does not exist |
-| `osb` | a plain container under an OpenSandbox server, driven over HTTP and WebSocket | the server ends a pty session that has been quiet for 30 seconds, so a driver turn that waits longer loses its terminal; and a driver scenario that forwards env (`credentials` or `pass_env`) is refused (exit 2), because this tier types its pty command |
+| `osb` | a plain container under an OpenSandbox server, driven over HTTP and WebSocket | gentar's local pty bridge gives up on a session that sends nothing for 30 seconds, so a driver turn that waits longer on a silent screen loses its terminal; and a driver scenario that forwards env (`credentials` or `pass_env`) is refused (exit 2), because this tier types its pty command |
 | `daytona` | a Daytona cloud sandbox | a sandbox whose ssh token cannot be minted after Daytona created it is never deleted: teardown knows only sandboxes that got their token |
 
 Use one only when the suite truly needs it and you accept its defect.

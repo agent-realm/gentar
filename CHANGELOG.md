@@ -101,8 +101,8 @@ Adopters pin a release tag, not a branch.
     The pilot-simulator reference has a section on it; a test holds the
     listed commands to `gates.DANGER_RE`.
   - **`sbx` is the 1.0 tier.** `tart` (workspace never created for a
-    subjectless suite), `osb` (a quiet pty session ends after 30 s;
-    credentialed driver scenarios refused) and `daytona` (a sandbox can
+    subjectless suite), `osb` (gentar's pty bridge drops a session
+    silent for 30 s; credentialed driver scenarios refused) and `daytona` (a sandbox can
     leak) are marked experimental wherever tiers are documented.
   - The scenario inventory counted 20 TOML suites and left out
     `semantic-demo` and `goal-demo`; a test now holds it to

@@ -11,7 +11,9 @@ the claim and the code move together:
   second `first-suite` hiding the first;
 - the scenario inventory lists every suite the engine ships;
 - the danger gate catches what the pilot-simulator reference says it
-  catches, and lets through what it says it lets through.
+  catches, and lets through what it says it lets through;
+- the osb tier's 30-second cutoff is gentar's own pty bridge, and the docs
+  say so instead of blaming the OpenSandbox server (Codex on #93).
 """
 
 import os
@@ -155,6 +157,20 @@ class DangerGateClaimsTest(unittest.TestCase):
         readme = (ROOT / "README.md").read_text()
         self.assertNotIn("aborts\n  anything destructive", readme)
         self.assertIn("`rm -rf ~` passes it", readme)
+
+
+@unittest.skipUnless(DOCS.exists(), "docs/ is not in the image build context")
+class OsbQuietSessionTest(unittest.TestCase):
+
+    def test_the_cutoff_is_the_bridge_s_and_the_docs_say_so(self):
+        bridge = (ROOT / "coordinator" / "gentar" / "osb_pty_bridge.py").read_text()
+        [secs] = re.findall(r"ws\.recv\(timeout=(\d+)\)", bridge)
+        for doc in (DOCS / "reference" / "bench-tiers.md", DOCS / "guides" / "bench-tiers.md"):
+            with self.subTest(doc=doc.name, dir=doc.parent.name):
+                text = " ".join(doc.read_text().split())
+                self.assertIn("pty bridge", text)
+                self.assertIn(f"sends nothing for {secs} seconds", text)
+                self.assertNotRegex(text, r"server ends a pty session")
 
 
 if __name__ == "__main__":

@@ -20,10 +20,12 @@ the isolation. Suites declaring `credentials` are skipped -- they need a real
 agent and a real key. Suites whose [driver] uses `pick`, `key` or `abort`
 turns, a judged `expect`, or a goal pilot come back UNVERIFIED with a nonzero
 exit: those turns need the real driver, and a picker that never matched or a
-danger gate that never fired must not read as a pass. The turns before the
-first such turn are replayed; the drive stops there, and neither the later
-turns nor the suite's assertions run. A failing step, or a failing turn
-before that point, is still a FAILURE. A suite with `bench_only = "<why>"` in
+danger gate that never fired must not read as a pass. For `pick`, `key` and
+`abort`, the turns before the first such turn are replayed; the drive stops
+there, and neither the later turns nor the suite's assertions run. A suite
+with a judged `expect` or a goal pilot is not driven at all, so none of its
+turns is checked. A failing step, or a failing turn replayed before a `pick`,
+`key` or `abort`, is still a FAILURE. A suite with `bench_only = "<why>"` in
 [scenario] is UNVERIFIED too, with its reason, and is not run
 (GENTAR_DRYRUN_BENCH_ONLY=run runs it).
 

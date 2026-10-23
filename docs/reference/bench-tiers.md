@@ -39,8 +39,11 @@ rebuilds are manual: boot the template VM, provision it, `tart stop`.
 
 ## `osb` — OpenSandbox containers
 
-**Experimental.** The server ends a pty session that has been quiet for
-30 seconds. A driver scenario that forwards env (`credentials` or
+**Experimental.** gentar's local pty bridge (`osb_pty_bridge.py`) gives
+up on a session that sends nothing for 30 seconds: it closes the WebSocket
+and exits 1, so a driver turn that waits longer on a silent screen loses
+its terminal. Whether the OpenSandbox server would end such a session too
+is not established. A driver scenario that forwards env (`credentials` or
 `pass_env`) is refused (exit 2) before any bench exists: this tier types
 its pty command, so the values would be echoed into the transcript.
 
