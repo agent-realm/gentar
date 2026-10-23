@@ -14,8 +14,12 @@
 # "latest release"; a checkout whose VERSION outruns its own tags fails
 # honestly ("Version … not found") until the tag exists.
 #
-# Proven on the way: tag listing, clean-tree gate, data/ survives the
-# reset --hard, settings.json preserved, migrations run.
+# Proven on the way: tag listing, the clean-tree gate, and that a seeded
+# task, todo and customised settings.json survive the reset --hard exactly.
+# The suite used to seed nothing and check only that data/tasks and
+# data/todos existed, so an update that emptied them still passed (ground-up
+# review A8, SC07). Migrations run as part of the update; no migrated record
+# is asserted.
 
 [scenario]
 name = "kommander-update"
@@ -28,6 +32,11 @@ steps = [
   # + a real checkout for update.sh's clean-tree gate).
   'git clone -q "$WORKSPACE_DIR" "$HOME/kp-old" && git -C "$HOME/kp-old" checkout -q v3.4.0',
   'cd "$HOME/kp-old" && ./install.sh --name k',
+  # What the update must keep, each carrying this run id: a task, a todo,
+  # and a key added to settings.json (after its leading `{`, refused if the
+  # file does not start with one). The id goes to a file the checks read:
+  # verify commands get no run id in their env.
+  'cd "$HOME/kp-old" && S="$GENTAR_RUN_ID" && test -n "$S" && printf "%s" "$S" > "$HOME/gentar-seed.id" && mkdir -p data/tasks/gentar-seed data/todos && printf "seed %s\n" "$S" > data/tasks/gentar-seed/TASK.md && printf "todo %s\n" "$S" > data/todos/gentar-seed.md && test "$(head -c1 settings.json)" = "{" && { printf "{\"gentarSeed\": \"%s\"," "$S"; tail -c +2 settings.json; } > settings.json.tmp && mv settings.json.tmp settings.json && grep -q "\"gentarSeed\": \"$S\"" settings.json',
   # The upgrade under test — target floats from the subject checkout.
   'cd "$HOME/kp-old" && ./update.sh --version "$(cat "$WORKSPACE_DIR/VERSION")"',
 ]
@@ -38,8 +47,9 @@ command = 'test "$(cat "$HOME/kp-old/VERSION")" = "$(cat "$WORKSPACE_DIR/VERSION
 contains = "version-bumped"
 
 [[verify.commands]]
-# Runtime data outlives the reset --hard (update.sh's core promise).
-command = 'test -d "$HOME/kp-old/data/tasks" && test -d "$HOME/kp-old/data/todos" && echo data-survived'
+# Runtime data outlives the reset --hard (update.sh's core promise): the
+# seeded task and todo byte for byte, and settings.json still customised.
+command = 'S=$(cat "$HOME/gentar-seed.id") && test -n "$S" && test "$(cat "$HOME/kp-old/data/tasks/gentar-seed/TASK.md")" = "seed $S" && test "$(cat "$HOME/kp-old/data/todos/gentar-seed.md")" = "todo $S" && grep -q "\"gentarSeed\": \"$S\"" "$HOME/kp-old/settings.json" && echo data-survived'
 contains = "data-survived"
 
 [[verify.commands]]

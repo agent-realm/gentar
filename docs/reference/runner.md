@@ -47,6 +47,15 @@ weaker check that still passes. Turns are checked per type, so `send` on an
 `expect` turn is refused too, and `[verify.files]` with single brackets is
 refused in favour of `[[verify.files]]`.
 
+**Self-report, proven.** Software inside a bench can write an OTLP/HTTP-JSON
+body to `$WORKSPACE_DIR/gentar-otlp.json`; the coordinator relays it to the
+arena's collector, best-effort. A suite whose point is that path sets
+`[verify] self_report = true`: the relay then happens before the verdict,
+and the run fails unless the span lands in ClickHouse and joins the run's
+harness spans on `gentar.run_id` within 30 seconds (one assertion,
+`otlp-join run_id`). `otlp-selfreport` is that suite. The kit's dry-run has
+no ClickHouse, so such a suite reads UNVERIFIED there.
+
 **Exit code is the verdict**, and it is the whole contract:
 
 | Code | Meaning |

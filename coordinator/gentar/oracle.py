@@ -162,7 +162,8 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
                             env={"GENTAR_RUN_ID": run_id, **run_env(scenario)},
                             report=report,
                             judge=judge, state=final)
-        if not scenario.files and not scenario.commands and not scenario.judge_checks:
+        if (not scenario.files and not scenario.commands and not scenario.judge_checks
+                and not getattr(scenario, "self_report", False)):
             return summary
 
     # 4. Verdicts from reality.
@@ -172,6 +173,11 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
         check_files(bench, run_id, home, scenario.files)
         + check_commands(bench, run_id, scenario.commands)
     )
+    if getattr(scenario, "self_report", False):
+        # after the steps wrote the drop file: relay it now and wait for
+        # the span to be queryable (gentar.selfreport)
+        from gentar.selfreport import check
+        results.append(check(bench, run_id, spans, cfg, subject, name))
     failed = 0
     for r in results:
         if not r.ok:

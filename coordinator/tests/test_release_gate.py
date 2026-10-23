@@ -43,11 +43,15 @@ def iso(days_ago):
     return t.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-@unittest.skipUnless(GATE.exists() and shutil.which("jq"),
-                     "needs the kit (not in the image build context) and jq")
+@unittest.skipUnless(GATE.exists(), "needs the kit (not in the image build context)")
 class ReleaseGateTest(unittest.TestCase):
 
     def setUp(self):
+        # The fake gh evaluates the gate's --jq filters with jq. Without it
+        # these tests used to SKIP, and a checkout run passed with none of
+        # them run (ground-up review A8, GC-8): say so instead.
+        self.assertIsNotNone(shutil.which("jq"), "jq is required to run the release-gate "
+                             "tests (the fake gh evaluates the gate's --jq filters with it)")
         self.tmp = Path(tempfile.mkdtemp())
         g = self.tmp / "gentar"
         g.mkdir()

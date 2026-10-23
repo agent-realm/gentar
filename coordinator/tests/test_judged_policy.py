@@ -7,6 +7,7 @@ without 3+ yes and 3+ no fixture screens per judged turn.
 """
 
 import importlib.util
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -140,25 +141,76 @@ class JudgedPolicyTest(unittest.TestCase):
 
 
 class EngineScenariosTest(unittest.TestCase):
-    """The engine's own judged scenarios obey the same rules."""
+    """The engine's own judged scenarios obey the same rules.
 
-    def test_engine_judged_scenarios_are_measured_and_off_the_gate(self):
+    The gate assertion used to search `ALL=` in gentar's own workflow, which
+    no longer has one, so it searched an empty string and passed whatever the
+    gate held; and goal pilots, which have no scripted turns, had their
+    fixtures checked by nobody (ground-up review A8, SC08)."""
+
+    CI_DOC = ROOT / "docs" / "reference" / "ci-and-releases.md"
+    # GENTAR_MIRROR_CHECKOUT points at a gentar-arena checkout elsewhere
+    # (a worktree's parent is not the constellation root).
+    MIRROR = (Path(os.environ.get("GENTAR_MIRROR_CHECKOUT") or ROOT.parent / "gentar-arena")
+              / ".github" / "workflows" / "arena.yml")
+
+    def setUp(self):
         from gentar.toml_scenario import load_dir
-        scen = ROOT / "coordinator" / "scenarios"
-        if not scen.exists():
-            self.skipTest("scenarios/ is not in the image build context")
-        wf = (ROOT / ".github" / "workflows" / "gentar.yml")
-        gate = wf.read_text() if wf.exists() else ""
-        for s in load_dir(scen).values():
-            if not s.uses_judge:
-                continue
-            self.assertEqual(s.data, "synthetic", s.name)
-            self.assertNotIn(f'"{s.name}"', gate.split("ALL=")[1].split("\n")[0] if "ALL=" in gate else "")
+        self.scen = ROOT / "coordinator" / "scenarios"
+        if not self.scen.exists() or not self.CI_DOC.exists():
+            self.skipTest("scenarios/ and docs/ are not in the image build context")
+        self.judged = {n: s for n, s in load_dir(self.scen).items() if s.uses_judge}
+
+    def documented_gate(self):
+        """The gate tier's suites, from the CI reference's table row."""
+        import re
+        rows = [l for l in self.CI_DOC.read_text().splitlines()
+                if l.startswith("| mirror, `gate` tier |")]
+        self.assertEqual(len(rows), 1, "the CI reference has no single `gate` tier row")
+        names = re.findall(r"`([a-z0-9][a-z0-9-]*)`", rows[0].split("|")[3])
+        self.assertGreaterEqual(len(names), 1, rows[0])
+        return names
+
+    def test_judged_suites_are_synthetic_and_off_the_gate(self):
+        gate = self.documented_gate()
+        self.assertGreaterEqual(len(self.judged), 1)          # semantic-demo, goal-demo
+        for name, s in self.judged.items():
+            with self.subTest(suite=name):
+                self.assertEqual(s.data, "synthetic")
+                self.assertNotIn(name, gate)
+
+    def test_the_documented_gate_is_the_mirrors(self):
+        # The mirror is a private repository: checked when its checkout sits
+        # beside this one, and said to be unverified otherwise, never passed.
+        import json, re
+        if not self.MIRROR.exists():
+            self.skipTest(f"no gentar-arena checkout at {self.MIRROR.parents[2]} (set "
+                          f"GENTAR_MIRROR_CHECKOUT): the mirror's gate list is unverified here")
+        m = re.search(r"GATE='(\[[^']*\])'", self.MIRROR.read_text())
+        self.assertIsNotNone(m, "no GATE='[...]' list in the mirror's arena.yml")
+        self.assertEqual(json.loads(m.group(1)), self.documented_gate())
+
+    def test_judged_turns_and_goal_pilots_have_their_fixtures(self):
+        fixtures = self.scen / "judge-fixtures"
+        checked = 0
+        for name, s in self.judged.items():
             for i, t in enumerate(s.turns):
                 if "judge" in t:
                     for label in ("yes", "no"):
-                        n = len(list((scen / "judge-fixtures" / s.name / str(i) / label).glob("*.txt")))
-                        self.assertGreaterEqual(n, 3, f"{s.name} turn {i} {label}")
+                        with self.subTest(suite=name, turn=i, label=label):
+                            n = len(list((fixtures / name / str(i) / label).glob("*.txt")))
+                            self.assertGreaterEqual(n, 3)
+                    checked += 1
+            if s.goal:
+                # plan.py's rule: 3+ screens over 2+ actions, `done` among them
+                picks = {d.name: len(list(d.glob("*.txt")))
+                         for d in (fixtures / name / "goal").glob("*") if d.is_dir()}
+                with self.subTest(suite=name, goal=True):
+                    self.assertGreaterEqual(sum(picks.values()), 3, picks)
+                    self.assertIn("done", picks)
+                    self.assertGreaterEqual(len(picks), 2, picks)
+                checked += 1
+        self.assertGreaterEqual(checked, 2)        # a judged turn and a goal pilot
 
 
 if __name__ == "__main__":

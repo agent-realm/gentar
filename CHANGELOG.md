@@ -22,6 +22,37 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Fixed (gate and nightly suites that could not fail; ground-up review A8)
+- **`otlp-selfreport` proves delivery, not a file** (SC05, S2-1). It checked
+  only that the bench's OTLP drop file was non-empty: a collector that
+  rejected the body, or a span ClickHouse never kept, still passed. Its span
+  also carried `process.hrtime` as its timestamp, which ClickHouse read as
+  1970, outside the table's TTL. New scenario key `[verify] self_report =
+  true`: the coordinator relays the drop file before the verdict and fails
+  the run unless the span joins the run's harness spans on `run_id` in
+  ClickHouse within 30 s (assertion `otlp-join run_id`). The span now has
+  an epoch timestamp. Other suites keep best-effort telemetry, and a run's
+  file is never relayed twice. The kit's dry-run reports such a suite
+  UNVERIFIED (kit file changed: `gentar/dryrun.py`).
+- **`memhouse-house` and `memhouse-install` fail on errors** (SC03). The
+  count checks accepted any HTTP error body holding a "3" (a version
+  string); they now use `curl -f` and compare the count exactly. Steps and
+  the `stats` check piped into `tail` and exited with its status; they now
+  keep the producer's. A failing `memhouse install --print-sql` read as
+  "no-use", a pass; it now fails.
+- **`kommander-update` can detect data loss** (SC07). It seeded nothing and
+  checked only that `data/tasks` and `data/todos` existed. It now seeds a
+  task, a todo and a `settings.json` key carrying the run id before the
+  update, and checks each afterwards, exactly.
+- **The judged-policy test checks something** (SC08). It searched an `ALL=`
+  line that gentar's workflow no longer has, so it searched an empty string.
+  It now reads the gate tier's suites from `docs/reference/ci-and-releases.md`
+  (failing when the row is missing), cross-checks the mirror's `GATE` list
+  when a gentar-arena checkout is present (`GENTAR_MIRROR_CHECKOUT`, else a
+  named skip), and checks goal-pilot fixtures, which nothing checked.
+- **The release-gate tests no longer skip without `jq`** (GC-8): a missing
+  `jq` now fails them, so a checkout run cannot pass with none of them run.
+
 ### Fixed
 - **The kit reads a suite's TOML with a TOML parser** (ground-up review
   A7). `gentar/run.sh` read scenarios with awk and grep, and its reading
