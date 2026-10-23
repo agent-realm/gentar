@@ -271,6 +271,13 @@ arena_unlock() {
 # A fork's pull request gets no secrets, so a private engine cannot be
 # cloned there: that is a NAMED skip, never a silent pass.
 if [ "$CHECK_ONLY" = 1 ]; then
+  # One snapshot for the whole check: the host lock is held from staging
+  # through lint and the dry-run, which read the engine --stage-engine
+  # fetched; released, a run could move it in between (agy on #97). The
+  # child --stage-engine sees its parent holds it and does not wait on it.
+  arena_lock wait || exit 2
+  trap arena_unlock EXIT
+  export GENTAR_LOCK_HOLDER_PID=$$
   if ! "$HERE/$(basename "$0")" --stage-engine; then
     if [ "${GENTAR_FORK_PR:-false}" = true ]; then
       echo "::notice::gentar check SKIPPED: the engine could not be staged from a fork's pull request (no secrets reach forks); a maintainer's run checks it"
@@ -651,12 +658,17 @@ fi
 # Taken later, a run waiting behind another fetched a new engine and
 # replaced the staged subject while the other was still running suites
 # from both (ground-up review B3, SB05). One invocation, one snapshot.
-# --stage-engine (and so --check) waits for a running arena too. Released
-# on exit; the arena's teardown trap takes this over once there is one.
-arena_lock wait || exit 2
-trap arena_unlock EXIT
-trap 'arena_unlock; exit 130' INT
-trap 'arena_unlock; exit 143' TERM
+# --stage-engine and --check wait for a running arena too (--check holds
+# the lock itself, for its whole run). Released on exit; the arena's
+# teardown trap takes this over once there is one.
+if [ -n "${GENTAR_LOCK_HOLDER_PID:-}" ] && [ "$GENTAR_LOCK_HOLDER_PID" = "$PPID" ]; then
+  :      # started by the --check that holds it (above): waiting would deadlock
+else
+  arena_lock wait || exit 2
+  trap arena_unlock EXIT
+  trap 'arena_unlock; exit 130' INT
+  trap 'arena_unlock; exit 143' TERM
+fi
 
 if [ ! -d "$ARENA" ]; then
   git clone -q "$CLONE_URL" "$ARENA"

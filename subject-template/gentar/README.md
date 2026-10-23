@@ -286,7 +286,8 @@ share a compose project and ports, so `run.sh` takes a host lock and a
 later run **waits**, printing who holds it. It waits before it stages
 anything: the engine checkout and `subjects/<name>` a running arena reads
 stay as that run staged them, so one invocation tests one snapshot.
-`--stage-engine`, and so `--check`, waits for a running arena too. (A
+`--stage-engine` and `--check` wait for a running arena too, and `--check`
+holds the lock until its lint and dry-run are done. (A
 GitHub concurrency group cannot do this: it cancels a pending run when a
 newer one queues.)
 

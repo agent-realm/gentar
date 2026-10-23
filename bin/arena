@@ -470,8 +470,10 @@ cmd_down() {
   case "$lrc" in
     0) down_all; arena_unlock; echo "arena: torn down" ;;
     1) echo "arena: project $LOCK_PROJECT is in use by another run ($(_lock_holder || true)); left alone" ;;
-    *) echo "arena: no lock to check (above); tearing down regardless" >&2
-       down_all; echo "arena: torn down" ;;
+    *) # the lock could not be checked: a live run may own this arena, so
+       # leave it, as the kit's --down does (agy on #97)
+       echo "arena: not torn down: its lock could not be checked (above)" >&2
+       exit 2 ;;
   esac
 }
 

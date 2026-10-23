@@ -131,6 +131,34 @@ class KitTakesTheLockBeforeStagingTest(unittest.TestCase):
     def test_stage_engine_waits_too(self):
         self.waits_then_goes("--stage-engine")
 
+    def test_check_waits_too(self):
+        self.waits_then_goes("--check")
+
+    def test_check_takes_the_lock_before_its_child_and_marks_itself(self):
+        # the hold through lint and the dry-run, which a test without an
+        # engine cannot reach: --check locks first, then starts the child
+        text = (KIT / "run.sh").read_text()
+        block = text[text.index('if [ "$CHECK_ONLY" = 1 ]; then'):]
+        block = block[:block.index("\nfi\n")]
+        lock = block.index("arena_lock wait || exit 2")
+        self.assertLess(lock, block.index("export GENTAR_LOCK_HOLDER_PID=$$"))
+        self.assertLess(block.index("export GENTAR_LOCK_HOLDER_PID=$$"),
+                        block.index('"$HERE/$(basename "$0")" --stage-engine'))
+
+    def test_check_holds_the_lock_and_its_own_child_does_not_wait_on_it(self):
+        # agy on #97: --check now holds the lock through lint and the
+        # dry-run; its child --stage-engine must not wait on its parent
+        self.holder.release()
+        p = self.start("--check")
+        try:
+            p.wait(timeout=60)                 # a deadlock would hang here
+        except subprocess.TimeoutExpired:
+            self.fail("--check deadlocked on its own --stage-engine: " + self.err.read_text())
+        self.assertNotEqual(p.returncode, 0)                  # no engine to clone
+        self.assertNotIn("waiting", self.err.read_text())
+        self.assertIn("no-engine", self.err.read_text())
+        self.assertTrue(self.holder.free(), "left the lock held after exiting")
+
 
 def lock_functions():
     src = ARENA.read_text()
@@ -194,6 +222,19 @@ class BinArenaLockTest(unittest.TestCase):
         down = src[i:src.index("\n}\n", i) + 3]
         r = self.sh('down_all() { echo DOWN_ALL; }\n' + down + "cmd_down")
         self.assertIn("left alone", r.stdout, r.stderr)
+        self.assertNotIn("DOWN_ALL", r.stdout)
+
+    def test_down_leaves_the_arena_when_the_lock_cannot_be_checked(self):
+        # agy on #97: it used to tear down regardless
+        shutil.rmtree(self.tmp / "gentar-locks")
+        (self.tmp / "elsewhere").mkdir()
+        (self.tmp / "gentar-locks").symlink_to(self.tmp / "elsewhere")
+        src = ARENA.read_text()
+        i = src.index("cmd_down() {")
+        down = src[i:src.index("\n}\n", i) + 3]
+        r = self.sh('down_all() { echo DOWN_ALL; }\n' + down + "cmd_down")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not torn down", r.stderr)
         self.assertNotIn("DOWN_ALL", r.stdout)
 
     def test_every_command_that_tears_down_locks_first(self):
