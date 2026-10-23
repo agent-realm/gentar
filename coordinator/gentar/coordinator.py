@@ -62,11 +62,17 @@ def subject_credential_problems(subject_dir: str) -> list[str]:
         # every reflog (logs/**, theirs too): `git pull <url with a token>`
         # writes the URL, token included, into logs/HEAD (git 2.50 does).
         for root, dirs, files in os.walk(gitdir):
-            dirs[:] = [d for d in dirs if d not in ("objects", "lfs")]
             if "logs" in os.path.relpath(root, gitdir).split(os.sep):
+                # inside a reflog tree `objects` or `lfs` is a branch
+                # namespace, never pruned (Codex on #92)
                 reflogs += [os.path.join(root, f) for f in files]
             else:
-                configs += [os.path.join(root, f) for f in files if f in ("config", "config.worktree")]
+                dirs[:] = [d for d in dirs if d not in ("objects", "lfs")]
+                # FETCH_HEAD records the last fetch's URL too (agy on #92)
+                reflogs += [os.path.join(root, f) for f in files if f == "FETCH_HEAD"]
+            # by name, wherever it sits: a submodule named `logs` keeps its
+            # config checked as a config (agy on #92)
+            configs += [os.path.join(root, f) for f in files if f in ("config", "config.worktree")]
     for log in sorted(reflogs):
         try:
             with open(log, encoding="utf-8", errors="replace") as fh:

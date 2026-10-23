@@ -372,5 +372,85 @@ class KitNameCheckTest(unittest.TestCase):
                 self.assertFalse((tmp / "repo" / "subjects").exists() and any((tmp / "repo" / "subjects").iterdir()))
 
 
+class SecondLookTest(unittest.TestCase):
+    """agy and Codex on #92."""
+
+    def test_a_branch_namespace_named_like_a_store_is_still_scanned(self):
+        for rel in ("logs/refs/heads/lfs/main", "logs/refs/heads/objects/main"):
+            with self.subTest(rel=rel):
+                why = coord.subject_credential_problems(str(_git_subject({rel: PULL})))
+                self.assertTrue(any(rel in w for w in why), why)
+
+    def test_fetch_head_is_scanned(self):
+        fetch = f"{'1' * 40}\t\tbranch 'main' of https://u:{SECRET}@github.com/o/r\n"
+        why = coord.subject_credential_problems(str(_git_subject({"FETCH_HEAD": fetch})))
+        self.assertTrue(any("FETCH_HEAD" in w for w in why), why)
+        self.assertNotIn(SECRET, " ".join(why))
+
+    def test_a_submodule_named_logs_keeps_its_config_checked(self):
+        d = _git_subject({"modules/logs/config":
+                          f"[http]\n\textraheader = AUTHORIZATION: bearer {SECRET}\n"})
+        why = coord.subject_credential_problems(str(d))
+        self.assertTrue(any("modules/logs/config" in w for w in why), why)
+
+    def test_a_subject_with_no_directory_is_refused(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, True)
+        cfg = mock.Mock(subjects_root=str(root))
+        with self.assertRaisesRegex(ValueError, "no directory"):
+            oracle.subject_dir(cfg, "absent")
+
+
+@unittest.skipUnless(PLAN.exists() and shutil.which("git"), "the kit (or git) is not here")
+class StageTreeSecondLookTest(unittest.TestCase):
+
+    def setUp(self):
+        self.p = load_plan()
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.r = self.tmp / "repo"
+        self.r.mkdir()
+        git(self.r, "init", "-q", "-b", "main")
+        (self.r / "cfg").mkdir()
+        (self.r / "cfg" / "token").write_text("x\n")
+        (self.r / "a.txt").write_text("a\n")
+        git(self.r, "add", ".")
+        git(self.r, "commit", "-qm", "one")
+
+    def test_a_directory_replaced_by_a_symlink_stages_as_the_link(self):
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "token").write_text("y\n")
+        shutil.rmtree(self.r / "cfg")
+        (self.r / "cfg").symlink_to(elsewhere)          # not staged in git
+        dest = self.tmp / "staged"
+        dest.mkdir()
+        self.p.stage_tree(str(self.r), str(dest))       # no SameFileError
+        self.assertTrue((dest / "cfg").is_symlink())
+        self.assertTrue((dest / "a.txt").is_file())
+
+    def test_the_repos_own_config_runs_nothing(self):
+        canary = self.tmp / "canary"
+        hook = self.tmp / "fsmon.sh"
+        hook.write_text(f"#!/bin/sh\ntouch {canary}\n")
+        hook.chmod(0o755)
+        git(self.r, "config", "core.fsmonitor", str(hook))
+        self.p.shipped_files(str(self.r))
+        self.assertFalse(canary.exists())
+
+    def test_an_outer_git_dir_does_not_redirect_it(self):
+        other = self.tmp / "other"
+        other.mkdir()
+        git(other, "init", "-q", "-b", "main")
+        (other / "outer.txt").write_text("o\n")
+        git(other, "add", ".")
+        git(other, "commit", "-qm", "o")
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git"),
+                                          "GIT_WORK_TREE": str(other)}):
+            files = self.p.shipped_files(str(self.r))
+        self.assertIn("a.txt", files)
+        self.assertNotIn("outer.txt", files)
+
+
 if __name__ == "__main__":
     unittest.main()

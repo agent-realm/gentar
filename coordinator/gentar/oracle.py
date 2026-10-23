@@ -37,6 +37,9 @@ def subject_dir(cfg: Config, name) -> str:
     if path == root or os.path.commonpath([root, path]) != root:
         raise ValueError(f"subject {name!r} resolves to {path}, outside the subjects "
                          f"root {root} (a symlink out of it)")
+    if not os.path.isdir(path):
+        # refused before any bench is spent, not at the push (agy on #92)
+        raise ValueError(f"subject {name!r} has no directory at {path} (not staged)")
     return path
 
 

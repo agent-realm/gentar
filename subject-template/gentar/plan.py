@@ -690,8 +690,13 @@ def shipped_files(repo: str):
 
     if not os.path.lexists(os.path.join(repo, ".git")):
         return None
-    r = subprocess.run(["git", "-C", repo, "ls-files", "-z", "--cached", "--others",
-                        "--exclude-standard"], capture_output=True)
+    # The repo's own config must not run anything here (core.fsmonitor is a
+    # program git starts for ls-files), and an outer GIT_DIR/GIT_WORK_TREE
+    # must not redirect git to another repository (agy on #92).
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    r = subprocess.run(["git", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
+                        "-C", repo, "ls-files", "-z", "--cached", "--others",
+                        "--exclude-standard"], capture_output=True, env=env)
     if r.returncode != 0:
         raise Refuse(f"stage-tree: git ls-files in {repo} failed: "
                      f"{r.stderr.decode(errors='replace').strip()[:300]}")
@@ -700,6 +705,13 @@ def shipped_files(repo: str):
     for rel in sorted({os.fsdecode(p).rstrip("/") for p in r.stdout.split(b"\0") if p}):
         src = os.path.join(repo, rel)
         if any(rel == x or rel.startswith(x + "/") for x in STAGE_EXCLUDE):
+            continue
+        # A tracked directory replaced by a symlink (not yet staged): git still
+        # lists the old children, which now resolve through the link. The
+        # link ships as a link; its "children" are not files of this repo
+        # (Codex on #92).
+        parts = rel.split("/")
+        if any(os.path.islink(os.path.join(repo, *parts[:i])) for i in range(1, len(parts))):
             continue
         if os.path.isdir(src) and not os.path.islink(src):
             inner = shipped_files(src)
