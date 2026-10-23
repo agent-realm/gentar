@@ -231,8 +231,15 @@ needs its own pair, set as repository variables, for example
 
 - **Per subject:** `run.sh` takes a lock named after the subject, so a
   second run of the same repository **waits**, and prints who holds the
-  lock. Locks live under `/tmp/gentar-locks`, or under
-  `$GENTAR_LOCK_DIR/gentar-locks` if you set `GENTAR_LOCK_DIR`.
+  lock. It waits before staging the engine or the subject, so a running
+  arena's files never change under it. Locks live under
+  `/tmp/gentar-locks`, or under `$GENTAR_LOCK_DIR/gentar-locks` if you set
+  `GENTAR_LOCK_DIR`.
+- **Per compose project, for gentar's own `bin/arena`:** `run`,
+  `dashboard` and `ls` take the same kind of lock, named after the compose
+  project, so two calls in one checkout no longer tear each other down;
+  `bin/arena down` leaves a live run's arena alone, and refuses (exit 2)
+  when it cannot check the lock.
 - **Not per host:** runs of *different* subjects on one bench-host can
   overlap. That is fine for a bench each; size the host for it.
 - **Template builds need a window.** An sbx `template save` blocks the sbx

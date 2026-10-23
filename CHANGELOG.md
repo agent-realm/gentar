@@ -78,6 +78,22 @@ Adopters pin a release tag, not a branch.
   python on the host) with the comment bug fixed: a comment line no longer
   flips its multi-line-string state, and an inline comment declares
   nothing, as in the kit.
+- **A waiting run no longer changes a running one's files** (ground-up
+  review B3, SB05). `gentar/run.sh` fetched the engine into
+  `gentar/.arena` and replaced `subjects/<subject>` before it took the host
+  lock, so a run queued behind another swapped both under the suites the
+  other was still running: one invocation could test two snapshots. The
+  lock is now taken before the first of those writes. `--stage-engine` and
+  `--check` wait for a running arena of the subject too; `--check` holds
+  the lock through its lint and dry-run, which read the engine it staged.
+  Kit file changed: `gentar/run.sh`.
+- **Two `bin/arena run` calls in one checkout no longer tear each other
+  down** (review B3, S2-2). They shared a compose project, and the second's
+  teardown stopped the first's coordinator. `run`, `dashboard` and `ls`
+  now take a host lock named after the compose project before they build
+  (flock where available, else a lock directory, as the kit's), and
+  `bin/arena down` leaves a live run's arena alone, refusing (exit 2) when
+  it cannot check the lock.
 
 ### Changed
 - `gentar/run.sh --down` reads the scenarios with `plan.py` too, so it
