@@ -237,7 +237,10 @@ Those suites run, plus the floor. Declared, not inferred — a rule that
 reads the diff fails by silently *excluding* the suite that mattered. A
 suite name is letters, digits, dot, dash, underscore; anything else is
 refused with exit 2 before a bench is spent, since a PR body is text a
-stranger can write. Set the **floor** to the cheap deterministic suites:
+stranger can write. A suite *is* its file name: `scenarios/auth-flow.toml`
+is `auth-flow`, and a `[scenario] name` that says otherwise is refused
+(exit 2), because the kit selects, sweeps and guards suites by file name.
+Set the **floor** to the cheap deterministic suites:
 they run whatever a PR declares, so a narrow pick never costs the guard
 rails.
 

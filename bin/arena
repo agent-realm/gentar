@@ -127,8 +127,8 @@ compose() {
 # compose file does not name, and these names are arbitrary per scenario
 # (`credentials` / `pass_env` in the schema), so they cannot be a fixed
 # list in docker-compose.yml — they are read FROM the scenarios about to
-# run and passed with -e. The kit's run.sh does the same; same awk, for
-# the same reason (a stock runner has no python).
+# run and passed with -e. awk, so this needs no python on the host (the
+# kit's run.sh reads the same fields with plan.py, a TOML parser).
 #
 # Values never appear here: -e NAME passes the name and lets Docker read
 # the value from the environment, so nothing lands in argv or a log.
@@ -147,6 +147,10 @@ scenario_table() {
       h = $0; gsub(/[][[:space:]]|#.*/, "", h); insc = (h == "scenario"); next
     }
     { if (insc) print
+      # a comment line is never the start or end of a string: one that
+      # mentions triple quotes used to flip the state and hide the table
+      # (ground-up review A7, GB7)
+      if (!inml && $0 ~ /^[[:space:]]*#/) next
       if (toggles($0, "\047\047\047")) inml = !inml
       if (toggles($0, "\"\"\"")) inml = !inml }' "$1"
 }
@@ -156,14 +160,15 @@ extract_env_names() {         # scenario files... -> one name per line
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*(credentials|pass_env)[[:space:]]*=/ { inarr = 1; depth = 0 }
     inarr {
-      line = $0
+      # an inline comment declares nothing (as in run.sh of the kit)
+      code = $0; sub(/#.*/, "", code); line = code
       # either TOML quote style — a 'literal' name used to forward nothing,
       # and the coordinator then refused credentials the caller had set
       while (match(line, /["\047][A-Za-z_][A-Za-z0-9_]*["\047]/)) {
         print substr(line, RSTART + 1, RLENGTH - 2)
         line = substr(line, RSTART + RLENGTH)
       }
-      depth += gsub(/\[/, "[") - gsub(/\]/, "]")
+      depth += gsub(/\[/, "[", code) - gsub(/\]/, "]", code)
       if (depth <= 0) inarr = 0
     }
   '

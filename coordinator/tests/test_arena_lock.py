@@ -15,6 +15,7 @@ mkdir lock otherwise (stock macOS).
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,7 +59,10 @@ class ArenaLockTest(unittest.TestCase):
             self.holder.wait()
 
     def path(self):
-        return f"{self.bindir}:/usr/bin:/bin:/usr/sbin:/sbin"
+        # run.sh reads the scenarios with plan.py, which needs python 3.11+
+        # or tomli (A7): the interpreter running these tests has one.
+        py = os.path.dirname(sys.executable)
+        return f"{self.bindir}:{py}:/usr/bin:/bin:/usr/sbin:/sbin"
 
     @property
     def flock(self):

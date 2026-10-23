@@ -67,6 +67,7 @@ HERE = Path(__file__).resolve().parent            # <repo>/gentar
 SCENARIOS = HERE / "scenarios"
 POLICY = HERE / "policy.toml"
 NAME = re.compile(r"[A-Za-z0-9._-]+")
+ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")       # the engine's rule
 
 PHASE2_TRIGGERS = ("dispatch", "arena", "rc")
 SETUP_TOOLS = ("go", "node", "python")
@@ -319,25 +320,102 @@ FIXTURES = HERE / "judge-fixtures"
 MIN_FIXTURES = 3
 
 
-def judged_suites():
+def _judged_parts(data):
+    """The engine's TomlScenario.uses_judge, on the parsed TOML: a judged
+    turn, a goal pilot, or a soft [[verify.judge]] check. One rule for
+    plan, lint and run.sh (`scenarios`); a test holds it to the engine's."""
+    driver = data.get("driver") or {}
+    turns = driver.get("turns") or []
+    idx = [i for i, t in enumerate(turns) if isinstance(t, dict) and "judge" in t]
+    goal = bool(driver.get("goal"))
+    soft = bool((data.get("verify") or {}).get("judge"))
+    return idx, goal, soft
+
+
+def _identity(f, data):
+    """A suite is its file name, everywhere. The engine names a suite by
+    `[scenario] name` (the file name when absent), but run.sh sweeps,
+    forwards and guards by file name and plan selects by it: a `name` that
+    differed broke the sweep and let `run.sh <name>` pass the pull request
+    guard under a name with no file (ground-up review A7, GB2)."""
+    if not NAME.fullmatch(f.stem):
+        raise Refuse(f"{f.name}: a suite file name is letters, digits, dot, dash, "
+                     f"underscore")
+    sc = data.get("scenario", {})
+    if not isinstance(sc, dict):
+        raise Refuse(f"{f.name}: [scenario] must be a table")
+    name = sc.get("name", f.stem)
+    if name != f.stem:
+        raise Refuse(f"{f.name}: [scenario] name = {name!r} differs from the file name; "
+                     f"the kit runs a suite by its file name, so remove `name` or rename "
+                     f"the file to {name}.toml")
+    return sc
+
+
+def judged_suites(strict=True):
     """Suites with a judged (semantic) turn: they send screens to a judge,
-    so they never run in phase 1 and need fixtures (AGENTS.md decision 7)."""
+    so they never run in phase 1 and need fixtures (AGENTS.md decision 7).
+    Not strict (lint), a suite with no clear identity is skipped here: lint
+    lists it among its problems."""
     out = {}
     for f in sorted(SCENARIOS.glob("*.toml")):
         try:
             data = tomllib.loads(f.read_text())
         except tomllib.TOMLDecodeError:
             continue
-        driver = data.get("driver") or {}
-        turns = driver.get("turns") or []
-        idx = [i for i, t in enumerate(turns) if isinstance(t, dict) and "judge" in t]
-        goal = bool(driver.get("goal"))
-        soft = bool((data.get("verify") or {}).get("judge"))
+        try:
+            sc = _identity(f, data)
+        except Refuse:
+            if strict:
+                raise
+            continue
+        idx, goal, soft = _judged_parts(data)
         if idx or goal or soft:
-            name = (data.get("scenario") or {}).get("name", f.stem)
-            out[name] = {"turns": idx, "goal": goal,
-                         "data": (data.get("scenario") or {}).get("data", ""), "file": f.name}
+            out[f.stem] = {"turns": idx, "goal": goal, "data": sc.get("data", ""),
+                           "file": f.name}
     return out
+
+
+def scenario_facts(directory=None):
+    """What run.sh needs from each suite, read with a TOML parser.
+
+    run.sh read these with awk and grep, and diverged from the engine
+    (ground-up review A7): a step printing `goal=1` made a suite judged, a
+    comment holding triple quotes hid the [scenario] table, and
+    `credentials = []` read as a credential never set. A suite that does
+    not parse, or that the engine would refuse for these fields, is
+    refused here, before anything runs."""
+    facts = []
+    for f in sorted((directory or SCENARIOS).glob("*.toml")):
+        try:
+            data = tomllib.loads(f.read_text())
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+            raise Refuse(f"{f.name}: not valid TOML: {exc}")
+        sc = _identity(f, data)
+        subject = sc.get("subject", "")
+        if not isinstance(subject, str) or (subject and not NAME.fullmatch(subject)):
+            raise Refuse(f"{f.name}: bad subject name: {subject!r} (letters, digits, dot, "
+                         f"dash, underscore)")
+        creds = sc.get("credentials", [])
+        env = sc.get("pass_env", [])
+        if not isinstance(creds, list) or not isinstance(env, list):
+            raise Refuse(f"{f.name}: scenario.credentials and scenario.pass_env are lists")
+        groups = []
+        for i, entry in enumerate(creds):
+            names = entry if isinstance(entry, list) else [entry]
+            if not names or any(not isinstance(n, str) or not ENV_NAME.fullmatch(n)
+                                for n in names):
+                raise Refuse(f"{f.name}: scenario.credentials[{i}] must be an env var name "
+                             f"or a flat list of them (a group that travels together)")
+            groups.append(names)
+        for i, n in enumerate(env):
+            if not isinstance(n, str) or not ENV_NAME.fullmatch(n):
+                raise Refuse(f"{f.name}: scenario.pass_env[{i}] must be an env var name")
+        idx, goal, soft = _judged_parts(data)
+        forwarded = list(dict.fromkeys([n for g in groups for n in g] + env))
+        facts.append({"stem": f.stem, "subject": subject, "judged": bool(idx or goal or soft),
+                      "groups": groups, "forwarded": forwarded})
+    return facts
 
 
 def _no_judged(names):
@@ -590,6 +668,11 @@ def lint(policy, engine_root):
         except tomllib.TOMLDecodeError as exc:
             problems.append(f"{f.name}: not valid TOML: {exc}")
             continue
+        try:
+            _identity(f, data)
+        except Refuse as exc:                 # listed with the rest, not alone
+            problems.append(str(exc))
+            continue
         creds = (data.get("scenario") or {}).get("credentials") or []
         flat = [c for c in creds if isinstance(c, str)]
         if len(flat) > 1 and any(PAIRISH.match(c) for c in flat):
@@ -622,7 +705,7 @@ def lint(policy, engine_root):
                     f"(or list it in [check] allow_drift, and own the difference)")
     # 3. judged suites: synthetic data declared, phase 2 only, fixtures to
     #    measure them with (bin/judge-eval in the engine).
-    judged = judged_suites()
+    judged = judged_suites(strict=False)
     floor = set((policy or {}).get("phase1", {}).get("floor", []))
     for name, j in sorted(judged.items()):
         if j["data"] != "synthetic":
@@ -920,6 +1003,15 @@ def main(argv):
         if cmd == "review" and len(argv) == 3:    # needs no policy: a broken
             print(review(HERE.parent, argv[2]))   # one must not hide the diff
             return 0
+        if cmd == "scenarios" and len(argv) == 2:   # run.sh's view of the suites
+            # One tab-separated line per suite: file stem, subject, judged
+            # (1/0), credential groups (`;` between groups, a space between
+            # names), every name forwarded (credentials, then pass_env).
+            for x in scenario_facts():
+                print("\t".join([x["stem"], x["subject"], "1" if x["judged"] else "0",
+                                 ";".join(" ".join(g) for g in x["groups"]),
+                                 " ".join(x["forwarded"])]))
+            return 0
         policy = load_policy()
         if cmd == "plan":
             emit(plan(os.environ, policy))
@@ -957,7 +1049,8 @@ def main(argv):
         print(f"plan: {exc}", file=sys.stderr)
         return 2
     print("usage: gentar/plan.py plan | lint [engine-root] | gate-config | arena-config | "
-          "route | stage-tree <repo> <dest> | stage-git <repo> <dest> | review <ref>",
+          "route | scenarios | stage-tree <repo> <dest> | stage-git <repo> <dest> | "
+          "review <ref>",
           file=sys.stderr)
     return 2
 

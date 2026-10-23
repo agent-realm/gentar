@@ -22,6 +22,39 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Fixed
+- **The kit reads a suite's TOML with a TOML parser** (ground-up review
+  A7). `gentar/run.sh` read scenarios with awk and grep, and its reading
+  diverged from the engine's: a deterministic step that prints `goal=1`
+  made a suite judged, so a sweep skipped it without the judge key; a
+  comment mentioning triple quotes hid the `[scenario]` table, so its
+  subject and credentials went unread; `credentials = []` read as a
+  credential never set, so a sweep skipped a suite that needs none. Now
+  `plan.py scenarios` reads every suite with tomllib (subject, judged by
+  the engine's rule, credential groups, forwarded names), and run.sh asks
+  it. A test holds that reading to the engine's `TomlScenario` on every
+  scenario in the repo and on each judged spelling. Kit files changed:
+  `gentar/run.sh`, `gentar/plan.py`.
+- **A suite is its file name.** A `[scenario] name` other than the file
+  name broke the sweep (the engine resolves the declared name, run.sh
+  passed the file's) and let `run.sh <name>` pass the pull request guard
+  under a name with no file (review GB2). The kit now refuses it (exit 2);
+  so do `plan.py`'s plan and lint. No scenario in gentar, its examples or
+  the known adopters' checkouts declares such a name. A suite file name
+  outside letters, digits, dot, dash and underscore is refused too.
+- `bin/arena`, gentar's own runner, keeps its awk reader (it needs no
+  python on the host) with the comment bug fixed: a comment line no longer
+  flips its multi-line-string state, and an inline comment declares
+  nothing, as in the kit.
+
+### Changed
+- `gentar/run.sh --down` reads the scenarios with `plan.py` too, so it
+  needs what every other mode already needed: python 3.11+, or tomli. A
+  suite that does not parse is refused (exit 2) by every mode that uses
+  suite facts; `--stage-engine`, `--check` and `--review` use none and go
+  on, and `--check` reports each broken suite through lint and the
+  dry-run.
+
 ## 0.11.0 — 2026-10-23
 
 Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what changed and why, the breaking schema change, upgrade for adopters, what is not live-proven, known limits, verification).
