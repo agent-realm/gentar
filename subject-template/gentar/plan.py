@@ -771,7 +771,21 @@ def review(repo, since):
         else:
             changes.append((st, recs[i + 1], None))
             i += 2
-    ours = [c for c in changes if not c[1].startswith("gentar/")]
+    # Outside gentar/ only. A move ACROSS the boundary keeps its outside
+    # side: a subject file moved into gentar/ is gone from the subject, and
+    # a suite naming it must be re-read (Codex on #53).
+    ours = []
+    for st, path, frm in changes:
+        in_new = path.startswith("gentar/")
+        in_old = frm is not None and frm.startswith("gentar/")
+        if frm is None or (not in_new and not in_old):
+            if not in_new:
+                ours.append((st, path, frm))
+        elif in_new and not in_old:
+            if st == "R":
+                ours.append(("D", frm, None))
+        elif not in_new and in_old:
+            ours.append(("A", path, None))
     was, now = _executables(repo, old), _executables(repo, new)
     # The suites as committed at HEAD, like the diff: an uncommitted edit to a
     # scenario must not move a changed path into "covered" (Codex).

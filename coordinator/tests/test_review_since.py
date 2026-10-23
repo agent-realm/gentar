@@ -93,6 +93,22 @@ class ReviewSinceTest(unittest.TestCase):
         self.assertNotIn("bin/tool", unmentioned)
         self.assertIn("--help output", out)                    # says what it does not do
 
+    def test_a_move_into_gentar_keeps_its_outside_side(self):
+        # `git mv lib.py gentar/lib.py`: lib.py is gone from the subject
+        # (Codex on #53); a move out of gentar/ is an addition outside
+        r = self.repo
+        (r / "gentar" / "scenarios" / "first-suite.toml").write_text(SUITE + "# lib.py\n")
+        git(r, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "mention")
+        base = git(r, "rev-parse", "HEAD")
+        git(r, "mv", "lib.py", "gentar/lib.py")
+        git(r, "mv", "gentar/README.md", "README-kit.md")
+        git(r, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "move")
+        out = self.review("--since", base).stdout
+        self.assertIn("changed paths outside gentar/: 2", out)
+        self.assertIn("D  lib.py", out)
+        self.assertIn("A  README-kit.md", out)
+        self.assertNotIn("gentar/lib.py", out.split("suites that mention")[0])
+
     def test_since_an_explicit_ref(self):
         r = self.review("--since", "HEAD")
         self.assertEqual(r.returncode, 0, r.stderr)
