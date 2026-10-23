@@ -218,6 +218,14 @@ class RunShReadsWithTheParserTest(unittest.TestCase):
         self.assertEqual(listed, "hidden\tno credential group of it is fully set\n")
         self.assertIn("sweep: empty prints", r.stderr)
 
+    def test_numeric_looking_stems_keep_their_own_facts(self):
+        # Codex on #96: awk's `==` compared 01 and 1 as numbers
+        r, listed = self.sweep(**{"01": BASE + '[oracle]\nsteps = ["true"]\n',
+                                  "1": SPELLINGS["judged-turn"][1]})
+        self.assertIsNotNone(listed, r.stderr)
+        self.assertEqual(listed, "1\tit has judged turns and TYPESAFE_API_KEY is not set\n")
+        self.assertIn("sweep: 01\n", r.stderr + "\n")
+
     def test_a_name_other_than_the_file_name_refuses_the_run(self):
         r, _ = self.sweep(foo='[scenario]\nname = "bar"\nsubject = "x"\n[oracle]\nsteps = ["true"]\n')
         self.assertEqual(r.returncode, 2, r.stderr)

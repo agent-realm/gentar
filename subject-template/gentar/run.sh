@@ -119,7 +119,9 @@ if [ "$SCAN_OK" = 0 ] && [ "$STAGE_ONLY$CHECK_ONLY$REVIEW_ONLY" = 000 ]; then
   exit 2
 fi
 scan_field() {                # stem, field number -> that field, "" when absent
-  printf '%s\n' "$SCAN" | awk -F '\t' -v s="$1" -v n="$2" '$1 == s { print $n; exit }'
+  # ("" x) compares as strings: awk compares two numeric-looking values as
+  # numbers, and suites `01` and `1` got each other's facts (Codex on #96)
+  printf '%s\n' "$SCAN" | awk -F '\t' -v s="$1" -v n="$2" '($1 "") == (s "") { print $n; exit }'
 }
 
 # The subject name is read FROM THE SCENARIOS, which must declare it
