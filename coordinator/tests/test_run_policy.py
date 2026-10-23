@@ -304,7 +304,9 @@ class WorkflowInvariantTest(unittest.TestCase):
         jobs = self.jobs()
         literal = [j for j, t in jobs.items() if re.search(r"runs-on: \[self-hosted", t)]
         self.assertEqual(literal, ["bench"])
-        self.assertEqual([j for j, t in jobs.items() if "arena]" in t and "runs-on" in t], ["bench"])
+        self.assertEqual([j for j, t in jobs.items()
+                          if "runs-on: [self-hosted, \"${{ vars.GENTAR_BENCH_LABEL || 'arena' }}\"]" in t],
+                         ["bench"])
         bench = jobs["bench"]
         self.assertIn("needs: plan", bench)
         self.assertIn("needs.plan.outputs.bench != 'none'", bench)

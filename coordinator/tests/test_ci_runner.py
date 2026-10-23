@@ -80,6 +80,47 @@ class CiRunnerTest(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse, "arena"):
                 self.plan(bad)
 
+    def test_a_bench_runner_with_its_own_label_is_never_named(self):
+        # agentmux's bench runner carries `agentmux-lab`, not `arena`
+        for bad in ('["self-hosted", "agentmux-lab"]', '["self-hosted", "AgentMux-Lab"]',
+                    '"agentmux-lab-ci"'):
+            with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse, "agentmux-lab"):
+                self.plan(bad, GENTAR_BENCH_LABEL="agentmux-lab")
+        with self.assertRaisesRegex(self.p.Refuse, "'arena'"):     # arena stays refused
+            self.plan('["self-hosted", "arena"]', GENTAR_BENCH_LABEL="agentmux-lab")
+        self.assertEqual(self.plan(SELF, GENTAR_BENCH_LABEL="agentmux-lab")["runner"],
+                         '["self-hosted", "linux-ci"]')
+        with self.assertRaisesRegex(self.p.Refuse, "GENTAR_BENCH_LABEL must be one"):
+            self.plan(SELF, GENTAR_BENCH_LABEL="a b")
+
+    def test_the_bench_label_is_checked_even_on_hosted_ci(self):
+        # agy on #98: it was read only when GENTAR_CI_RUNNER was set; the
+        # bench job runs on it either way
+        for bad in ("a b", "agentmux-lab ", "linux", "Self-Hosted", "x64"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse,
+                                                               "GENTAR_BENCH_LABEL must be one"):
+                self.plan(GENTAR_BENCH_LABEL=bad)
+        self.assertEqual(self.plan(GENTAR_BENCH_LABEL="agentmux-lab")["runner"], "github-hosted")
+
+    def test_a_json_escape_is_refused(self):
+        # runs-on decodes, the guard reads raw text: "\u0061rena" named the
+        # bench runner past both (Codex on #98). No label needs an escape,
+        # so any backslash is refused, even in a harmless label.
+        for bad in ('["self-hosted", "agentmux\\u002dlab"]', '"\\u0061rena"',
+                    '["self-hosted", "linux\\u002dci"]'):
+            with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse, "JSON escape"):
+                self.plan(bad, GENTAR_BENCH_LABEL="agentmux-lab")
+
+    def test_default_labels_alone_are_refused(self):
+        # every self-hosted runner carries them, the bench runner included (SB03)
+        for bad in ('["self-hosted", "linux"]', '"self-hosted"', '["self-hosted", "Linux", "X64"]',
+                    '["linux", "arm64"]'):
+            with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse, "default runner labels"):
+                self.plan(bad)
+        for good in (SELF, '["self-hosted", "linux", "ci-box"]', '"ubuntu-24.04"'):
+            with self.subTest(good=good):
+                self.plan(good)
+
     def test_macos_checks_with_a_self_hosted_runner_are_refused(self):
         pol = self.policy(POLICY + 'os = ["ubuntu-latest", "macos-latest"]\n')
         with self.assertRaisesRegex(self.p.Refuse, "macos-latest"):
@@ -121,20 +162,26 @@ class WorkflowTest(unittest.TestCase):
                       " || matrix.os }}", self.job("checks"))
         self.assertIn("GENTAR_CI_RUNNER: ${{ vars.GENTAR_CI_RUNNER }}", self.job("plan"))
 
-    def test_an_arena_label_is_refused_before_any_job_is_scheduled(self):
+    GUARD = ("contains(vars.GENTAR_CI_RUNNER, 'arena') || contains(vars.GENTAR_CI_RUNNER, '\\') || "
+             "(vars.GENTAR_BENCH_LABEL != '' && contains(vars.GENTAR_CI_RUNNER, vars.GENTAR_BENCH_LABEL))")
+
+    def test_the_bench_label_is_refused_before_any_job_is_scheduled(self):
         # runs-on would start plan ON the bench runner, running the PR's
-        # plan.py there before plan.py could refuse (Codex)
-        guard = "contains(vars.GENTAR_CI_RUNNER, 'arena')"
+        # plan.py there before plan.py could refuse (Codex). `arena`, and the
+        # label GENTAR_BENCH_LABEL names (agentmux-lab), in all three places.
+        # The `!= ''` matters: contains(x, '') is true for every x. The
+        # backslash: runs-on decodes JSON escapes this raw check cannot see.
         refused = self.job("ci-runner-refused")
-        self.assertIn(f"if: ${{{{ {guard} }}}}", refused)
+        self.assertIn(f"if: ${{{{ {self.GUARD} }}}}", refused)
         self.assertIn("exit 2", refused)
         self.assertNotIn("GENTAR_CI_RUNNER)", refused.split("runs-on:")[1].split("\n")[0])
-        self.assertIn(f"!{guard}", self.job("plan"))
-        self.assertIn(f"!{guard}", self.job("checks"))
+        self.assertIn(f"!({self.GUARD})", self.job("plan"))
+        self.assertIn(f"!({self.GUARD})", self.job("checks"))
+        self.assertIn("GENTAR_BENCH_LABEL: ${{ vars.GENTAR_BENCH_LABEL }}", self.job("plan"))
 
-    def test_the_bench_stays_on_arena(self):
+    def test_the_bench_runs_on_arena_or_the_bench_label(self):
         bench = self.job("bench")
-        self.assertIn("runs-on: [self-hosted, arena]", bench)
+        self.assertIn("runs-on: [self-hosted, \"${{ vars.GENTAR_BENCH_LABEL || 'arena' }}\"]", bench)
         self.assertNotIn("GENTAR_CI_RUNNER", bench)
 
     def test_plan_is_skipped_for_a_fork_when_self_hosted(self):

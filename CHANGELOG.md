@@ -22,6 +22,33 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+### Security
+- **The bench runner's label is one variable** (ground-up review C4; found
+  by agentmux-lab). The kit's guard refused a `GENTAR_CI_RUNNER` naming
+  `arena`, the default bench label, but a repository whose bench runner
+  carries another label (`agentmux-lab`) was not protected: its CI runner
+  value could name the bench runner and run pull request code there. The
+  new repository variable `GENTAR_BENCH_LABEL` (default `arena`) is the
+  label the bench job runs on, and the guard refuses a `GENTAR_CI_RUNNER`
+  containing it as well as `arena`, before scheduling anything; so does
+  `plan.py`. A `GENTAR_CI_RUNNER` holding a backslash is refused the same
+  way: `runs-on` decodes JSON escapes, so `"\u0061rena"` passed a check of
+  the raw text and still named the bench runner (Codex). `GENTAR_BENCH_LABEL`
+  is checked on every plan, hosted CI included: one runner label, no
+  surrounding space, and never a default label, which would send the bench
+  job and its secrets to any self-hosted runner (agy). Kit files changed: `.github/workflows/gentar-arena.yml`,
+  `gentar/plan.py`.
+- **`GENTAR_CI_RUNNER` must name a label of its own** (review SB03).
+  `["self-hosted", "linux"]` passed the guard, and every self-hosted
+  runner, the bench runner included, carries those labels. `plan.py` now
+  refuses a value made only of default runner labels. It runs once `plan`
+  is scheduled, so it stops the checks and fails the run loudly; the kit
+  README says why the CI runner needs a label the bench runner lacks.
+- Docs: pushing the `arena` tag on a pull request's commit runs that code
+  with the bench secrets, so only on a commit whose diff was read, never a
+  fork's (review GB4); runners registered as one account share its Docker
+  daemon and files, one trust domain (review SB04).
+
 ### Fixed (gate and nightly suites that could not fail; ground-up review A8)
 - **`otlp-selfreport` proves delivery, not a file** (SC05, S2-1). It checked
   only that the bench's OTLP drop file was non-empty: a collector that
@@ -82,6 +109,22 @@ Adopters pin a release tag, not a branch.
   python on the host) with the comment bug fixed: a comment line no longer
   flips its multi-line-string state, and an inline comment declares
   nothing, as in the kit.
+- **A waiting run no longer changes a running one's files** (ground-up
+  review B3, SB05). `gentar/run.sh` fetched the engine into
+  `gentar/.arena` and replaced `subjects/<subject>` before it took the host
+  lock, so a run queued behind another swapped both under the suites the
+  other was still running: one invocation could test two snapshots. The
+  lock is now taken before the first of those writes. `--stage-engine` and
+  `--check` wait for a running arena of the subject too; `--check` holds
+  the lock through its lint and dry-run, which read the engine it staged.
+  Kit file changed: `gentar/run.sh`.
+- **Two `bin/arena run` calls in one checkout no longer tear each other
+  down** (review B3, S2-2). They shared a compose project, and the second's
+  teardown stopped the first's coordinator. `run`, `dashboard` and `ls`
+  now take a host lock named after the compose project before they build
+  (flock where available, else a lock directory, as the kit's), and
+  `bin/arena down` leaves a live run's arena alone, refusing (exit 2) when
+  it cannot check the lock.
 
 ### Changed
 - `gentar/run.sh --down` reads the scenarios with `plan.py` too, so it
