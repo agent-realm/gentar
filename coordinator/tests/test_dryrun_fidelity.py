@@ -257,3 +257,78 @@ label = "One"
         r = self.dryrun("gentar/scenarios/judged.toml")
         self.assertNotIn("Traceback", r.stderr, r.stderr)
         self.assertIn("UNVERIFIED", r.stdout, r.stdout + r.stderr)
+
+
+# The CLI asks, waits for a pick, then writes out.txt: the turn after the pick
+# and the file assertion both describe the end of a drive the dry-run cannot
+# finish.
+UNREPLAYED_SUITE = """[scenario]
+name = "{name}"
+subject = "fid"
+[driver]
+command = "sh -c 'echo Pick one; read x; echo done > out.txt; echo finished'"
+[[driver.turns]]
+type = "expect"
+pattern = "{first}"
+timeout = 3
+[[driver.turns]]
+{turn}
+[[driver.turns]]
+type = "expect"
+pattern = "finished"
+timeout = 3
+[[verify.files]]
+path = "out.txt"
+"""
+
+TURNS = {
+    "pick": 'type = "pick"\nlabel = "One"',
+    "key": 'type = "key"\nkey = "enter"',
+    "abort": 'type = "abort"',
+}
+
+
+@unittest.skipUnless(KIT.exists(), "the kit is not in the image build context")
+class UnreplayedTurnsAreUnverifiedTest(_ScratchAdoption):
+    """Ground-up review D3: a suite with a pick, key or abort turn came back
+    as FAILURES, because the dry-run kept driving past the turn it could not
+    take (the next turn timed out) and then ran the suite's assertions
+    against a drive that never finished. UNVERIFIED is the honest verdict,
+    and `run.sh --check` accepts it."""
+
+    def write(self, name, kind, first="Pick one"):
+        (self.repo / "gentar" / "scenarios" / f"{name}.toml").write_text(
+            UNREPLAYED_SUITE.format(name=name, first=first, turn=TURNS[kind]))
+
+    def run_bounded(self, name, **env):
+        e = dict(os.environ, GENTAR_ENGINE=str(ENGINE),
+                 GENTAR_DRYRUN_SYSTEM_DIRS=str(self.tmp / "none"))
+        e.update(env)
+        try:
+            return subprocess.run([sys.executable, "gentar/dryrun.py",
+                                   f"gentar/scenarios/{name}.toml"],
+                                  cwd=self.repo, capture_output=True, text=True,
+                                  timeout=60, env=e)
+        except subprocess.TimeoutExpired:
+            self.fail(f"the dry run of {name} hung")
+
+    def test_a_pick_key_or_abort_turn_is_unverified_not_failed(self):
+        for kind in TURNS:
+            with self.subTest(turn=kind):
+                self.write(kind, kind)
+                r = self.run_bounded(kind)
+                out = r.stdout + r.stderr
+                self.assertIn(f"{kind}.toml: UNVERIFIED ({kind} turns need the arena)", r.stdout, out)
+                self.assertNotIn("FAILURES", r.stdout, out)
+                self.assertNotIn("never appeared", r.stdout, out)   # later turns not replayed
+                self.assertNotIn("file MISSING", r.stdout, out)     # assertions not run
+                self.assertNotEqual(r.returncode, 0, out)           # not proven is not a pass
+                ok = self.run_bounded(kind, GENTAR_DRYRUN_UNVERIFIED="ok")
+                self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)   # run.sh --check
+
+    def test_a_turn_that_fails_before_it_is_still_a_failure(self):
+        self.write("early", "pick", first="never on screen")
+        r = self.run_bounded("early", GENTAR_DRYRUN_UNVERIFIED="ok")
+        self.assertIn("early.toml: 2 FAILURES", r.stdout, r.stdout + r.stderr)
+        self.assertIn("pattern never appeared", r.stdout)
+        self.assertEqual(r.returncode, 1, r.stdout)
