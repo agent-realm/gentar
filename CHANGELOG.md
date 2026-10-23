@@ -33,8 +33,13 @@ Adopters pin a release tag, not a branch.
   `plan.py scenarios` reads every suite with tomllib (subject, judged by
   the engine's rule, credential groups, forwarded names), and run.sh asks
   it. A test holds that reading to the engine's `TomlScenario` on every
-  scenario in the repo and on each judged spelling. Kit files changed:
-  `gentar/run.sh`, `gentar/plan.py`.
+  scenario in the repo and on each judged spelling. The kit reads TOML as
+  UTF-8 whatever the locale, as the engine does, and `--check`'s lint lists
+  every suite run.sh would refuse. Kit files changed: `gentar/run.sh`,
+  `gentar/plan.py`.
+- **`credentials` or `pass_env` written as a string is refused** (engine
+  and kit). The engine read `credentials = "KEY_A"` as five one-letter
+  names (`list()` of a string) instead of refusing it.
 - **A suite is its file name.** A `[scenario] name` other than the file
   name broke the sweep (the engine resolves the declared name, run.sh
   passed the file's) and let `run.sh <name>` pass the pull request guard

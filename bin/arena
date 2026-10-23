@@ -143,16 +143,29 @@ scenario_table() {
     # line reading `[scenario]` is TEXT, not a header — without this, it
     # re-entered the table and its `subject` was read.
     function toggles(line, delim,   n) { n = gsub(delim, "", line); return n % 2 }
+    # the line up to a # outside a one-line string: a comment is never the
+    # start or end of a multi-line one (ground-up review A7, GB7; agy)
+    function code(line,   i, c, q, out) {
+      q = ""; out = ""
+      for (i = 1; i <= length(line); i++) {
+        c = substr(line, i, 1)
+        if (q == "\"" && c == "\\") { out = out c substr(line, i + 1, 1); i++; continue }
+        if (q != "") { if (c == q) q = ""; out = out c; continue }
+        if (c == "#") break
+        if (c == "\"" || c == "\047") q = c
+        out = out c
+      }
+      return out
+    }
     !inml && /^[[:space:]]*\[\[?[A-Za-z_][A-Za-z0-9_.-]*\]\]?[[:space:]]*(#.*)?$/ {
       h = $0; gsub(/[][[:space:]]|#.*/, "", h); insc = (h == "scenario"); next
     }
     { if (insc) print
-      # a comment line is never the start or end of a string: one that
-      # mentions triple quotes used to flip the state and hide the table
-      # (ground-up review A7, GB7)
-      if (!inml && $0 ~ /^[[:space:]]*#/) next
-      if (toggles($0, "\047\047\047")) inml = !inml
-      if (toggles($0, "\"\"\"")) inml = !inml }' "$1"
+      # inside a multi-line string a # is text, so the whole line counts
+      # there (a comment on the line that closes one is the one case left)
+      line = inml ? $0 : code($0)
+      if (toggles(line, "\047\047\047")) inml = !inml
+      if (toggles(line, "\"\"\"")) inml = !inml }' "$1"
 }
 
 extract_env_names() {         # scenario files... -> one name per line

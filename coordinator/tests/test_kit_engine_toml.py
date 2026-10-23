@@ -127,6 +127,32 @@ class ScenariosReaderTest(unittest.TestCase):
                 with self.assertRaisesRegex(self.plan.Refuse, why):
                     self.facts(s=text)
 
+    def test_a_scalar_driver_or_verify_is_refused_not_a_crash(self):          # agy D4
+        for table in ("driver", "verify"):
+            with self.subTest(table=table):
+                for f in self.d.glob("*.toml"):
+                    f.unlink()
+                with self.assertRaisesRegex(self.plan.Refuse, f"{table} must be a table"):
+                    self.facts(s=f'{table} = "cmd"\n' + BASE)
+        for table in ("driver", "verify"):         # both at once, for judged_suites
+            (self.d / f"{table}.toml").write_text(f'{table} = "cmd"\n' + BASE)
+        self.plan.SCENARIOS = self.d
+        self.assertEqual(self.plan.judged_suites(strict=False), {})
+
+    def test_utf8_whatever_the_locale(self):                                 # agy D1
+        repo = self.d / "repo"
+        shutil.copytree(KIT, repo / "gentar")
+        sc = repo / "gentar" / "scenarios"
+        shutil.rmtree(sc)
+        sc.mkdir()
+        (sc / "s.toml").write_text('# René — a note\n' + BASE + '[oracle]\nsteps = ["echo é"]\n',
+                                   encoding="utf-8")
+        env = dict(os.environ, LC_ALL="C", LANG="C", PYTHONUTF8="0", PYTHONCOERCECLOCALE="0")
+        r = subprocess.run(["python3", str(repo / "gentar" / "plan.py"), "scenarios"],
+                           capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "s\tx\t0\t\t\n")
+
     def test_a_file_name_outside_the_suite_charset_is_refused(self):
         with self.assertRaisesRegex(self.plan.Refuse, "suite file name"):
             self.facts(**{"a b": BASE})
@@ -171,6 +197,19 @@ class MatchesTheEngineTest(unittest.TestCase):
         dirs += sorted(p for p in (ROOT / "examples").glob("*/gentar/scenarios") if p.is_dir())
         n = sum(self.same(d) for d in dirs if d.is_dir())
         self.assertGreater(n, 20)
+
+    def test_both_refuse_a_string_where_a_list_belongs(self):              # agy D2
+        from gentar.toml_scenario import ScenarioError
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            for field in ("credentials", "pass_env"):
+                with self.subTest(field=field):
+                    f = d / "s.toml"
+                    f.write_text(BASE + f'{field} = "KEY_A"\n[oracle]\nsteps = ["true"]\n')
+                    with self.assertRaisesRegex(ScenarioError, f"{field} must be a list"):
+                        TomlScenario(f)
+                    with self.assertRaisesRegex(self.plan.Refuse, "are lists"):
+                        self.plan.scenario_facts(d)
 
     def test_every_judged_spelling(self):
         with tempfile.TemporaryDirectory() as d:
@@ -251,6 +290,21 @@ class RunShReadsWithTheParserTest(unittest.TestCase):
         self.assertTrue(any("named.toml: [scenario] name = 'other' differs" in p
                             for p in problems), problems)
 
+    def test_lint_lists_what_run_sh_would_refuse(self):                    # agy D2
+        plan = load_plan()
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "a.toml").write_text(BASE + 'credentials = "KEY_A"\n')
+            (d / "b.toml").write_text(BASE + 'pass_env = [3]\n')
+            (d / "c.toml").write_text('[scenario]\nsubject = "a b"\n')
+            (d / "d.toml").write_text('driver = "cmd"\n' + BASE)
+            plan.SCENARIOS = d
+            problems = "\n".join(plan.lint(None, str(d / "no-engine")))
+        for want in ("a.toml: scenario.credentials and scenario.pass_env are lists",
+                     "b.toml: scenario.pass_env[0] must be an env var name",
+                     "c.toml: bad subject name", "d.toml: driver must be a table"):
+            self.assertIn(want, problems)
+
 
 @unittest.skipUnless((ROOT / "bin" / "arena").exists() and shutil.which("bash"),
                      "bin/arena is not in the image build context")
@@ -273,6 +327,11 @@ class BinArenaReadsCommentsTest(unittest.TestCase):
     def test_a_comment_with_triple_quotes_hides_nothing(self):
         self.assertEqual(self.env_names('# about """ quoting\n[scenario]\nsubject = "x"\n'
                                         'credentials = ["A"]\n'), ["A"])
+
+    def test_an_inline_comment_with_triple_quotes_hides_nothing(self):       # agy D3
+        self.assertEqual(self.env_names('timeout = 30 # wait for """ prompt\n[scenario]\n'
+                                        'subject = "x"\ncredentials = ["A"]\n[oracle]\n'
+                                        'steps = ["echo # not a comment"]\n'), ["A"])
 
     def test_an_inline_comment_declares_nothing(self):
         self.assertEqual(self.env_names('[scenario]\npass_env = ["B"]  # was "C"\n'), ["B"])

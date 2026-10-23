@@ -320,15 +320,27 @@ FIXTURES = HERE / "judge-fixtures"
 MIN_FIXTURES = 3
 
 
+def _load(f):
+    """A suite's TOML, read as the engine reads it: bytes, decoded as UTF-8
+    whatever the locale (agy on #96). Raises TOMLDecodeError or
+    UnicodeDecodeError."""
+    with open(f, "rb") as fh:
+        return tomllib.load(fh)
+
+
 def _judged_parts(data):
     """The engine's TomlScenario.uses_judge, on the parsed TOML: a judged
     turn, a goal pilot, or a soft [[verify.judge]] check. One rule for
     plan, lint and run.sh (`scenarios`); a test holds it to the engine's."""
-    driver = data.get("driver") or {}
-    turns = driver.get("turns") or []
+    driver = data.get("driver")
+    driver = driver if isinstance(driver, dict) else {}   # the engine refuses a
+    turns = driver.get("turns")                           # scalar; this must not
+    turns = turns if isinstance(turns, list) else []      # crash on one (agy)
+    verify = data.get("verify")
+    verify = verify if isinstance(verify, dict) else {}
     idx = [i for i, t in enumerate(turns) if isinstance(t, dict) and "judge" in t]
     goal = bool(driver.get("goal"))
-    soft = bool((data.get("verify") or {}).get("judge"))
+    soft = bool(verify.get("judge"))
     return idx, goal, soft
 
 
@@ -360,8 +372,8 @@ def judged_suites(strict=True):
     out = {}
     for f in sorted(SCENARIOS.glob("*.toml")):
         try:
-            data = tomllib.loads(f.read_text())
-        except tomllib.TOMLDecodeError:
+            data = _load(f)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
             continue
         try:
             sc = _identity(f, data)
@@ -388,34 +400,43 @@ def scenario_facts(directory=None):
     facts = []
     for f in sorted((directory or SCENARIOS).glob("*.toml")):
         try:
-            data = tomllib.loads(f.read_text())
+            data = _load(f)
         except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
             raise Refuse(f"{f.name}: not valid TOML: {exc}")
-        sc = _identity(f, data)
-        subject = sc.get("subject", "")
-        if not isinstance(subject, str) or (subject and not NAME.fullmatch(subject)):
-            raise Refuse(f"{f.name}: bad subject name: {subject!r} (letters, digits, dot, "
-                         f"dash, underscore)")
-        creds = sc.get("credentials", [])
-        env = sc.get("pass_env", [])
-        if not isinstance(creds, list) or not isinstance(env, list):
-            raise Refuse(f"{f.name}: scenario.credentials and scenario.pass_env are lists")
-        groups = []
-        for i, entry in enumerate(creds):
-            names = entry if isinstance(entry, list) else [entry]
-            if not names or any(not isinstance(n, str) or not ENV_NAME.fullmatch(n)
-                                for n in names):
-                raise Refuse(f"{f.name}: scenario.credentials[{i}] must be an env var name "
-                             f"or a flat list of them (a group that travels together)")
-            groups.append(names)
-        for i, n in enumerate(env):
-            if not isinstance(n, str) or not ENV_NAME.fullmatch(n):
-                raise Refuse(f"{f.name}: scenario.pass_env[{i}] must be an env var name")
-        idx, goal, soft = _judged_parts(data)
-        forwarded = list(dict.fromkeys([n for g in groups for n in g] + env))
-        facts.append({"stem": f.stem, "subject": subject, "judged": bool(idx or goal or soft),
-                      "groups": groups, "forwarded": forwarded})
+        facts.append(_suite_facts(f, data))
     return facts
+
+
+def _suite_facts(f, data):
+    """One suite's facts, or Refuse. lint lists the same refusals, so
+    --check names every problem run.sh would refuse (agy on #96)."""
+    sc = _identity(f, data)
+    for table in ("driver", "verify"):
+        if table in data and not isinstance(data[table], dict):
+            raise Refuse(f"{f.name}: {table} must be a table — write [{table}]")
+    subject = sc.get("subject", "")
+    if not isinstance(subject, str) or (subject and not NAME.fullmatch(subject)):
+        raise Refuse(f"{f.name}: bad subject name: {subject!r} (letters, digits, dot, "
+                     f"dash, underscore)")
+    creds = sc.get("credentials", [])
+    env = sc.get("pass_env", [])
+    if not isinstance(creds, list) or not isinstance(env, list):
+        raise Refuse(f"{f.name}: scenario.credentials and scenario.pass_env are lists")
+    groups = []
+    for i, entry in enumerate(creds):
+        names = entry if isinstance(entry, list) else [entry]
+        if not names or any(not isinstance(n, str) or not ENV_NAME.fullmatch(n)
+                            for n in names):
+            raise Refuse(f"{f.name}: scenario.credentials[{i}] must be an env var name "
+                         f"or a flat list of them (a group that travels together)")
+        groups.append(names)
+    for i, n in enumerate(env):
+        if not isinstance(n, str) or not ENV_NAME.fullmatch(n):
+            raise Refuse(f"{f.name}: scenario.pass_env[{i}] must be an env var name")
+    idx, goal, soft = _judged_parts(data)
+    forwarded = list(dict.fromkeys([n for g in groups for n in g] + env))
+    return {"stem": f.stem, "subject": subject, "judged": bool(idx or goal or soft),
+            "groups": groups, "forwarded": forwarded}
 
 
 def _no_judged(names):
@@ -664,12 +685,12 @@ def lint(policy, engine_root):
     #    dropped (the first real adopter's bug). Nest the pair.
     for f in sorted(SCENARIOS.glob("*.toml")):
         try:
-            data = tomllib.loads(f.read_text())
-        except tomllib.TOMLDecodeError as exc:
+            data = _load(f)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
             problems.append(f"{f.name}: not valid TOML: {exc}")
             continue
         try:
-            _identity(f, data)
+            _suite_facts(f, data)
         except Refuse as exc:                 # listed with the rest, not alone
             problems.append(str(exc))
             continue
@@ -735,11 +756,14 @@ def lint(policy, engine_root):
     asked = set()
     for f in sorted(SCENARIOS.glob("*.toml")):
         try:
-            sc = tomllib.loads(f.read_text()).get("scenario") or {}
-        except tomllib.TOMLDecodeError:
+            sc = _load(f).get("scenario") or {}
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
             continue                          # reported by check 1
-        for c in (sc.get("credentials") or []) + (sc.get("pass_env") or []):
-            asked.update([c] if isinstance(c, str) else [x for x in c if isinstance(x, str)])
+        listed = [v for v in (sc.get("credentials"), sc.get("pass_env"))
+                  if isinstance(v, list)]          # anything else: check 1 says so
+        for c in [c for v in listed for c in v]:
+            asked.update([c] if isinstance(c, str)
+                         else [x for x in c if isinstance(x, str)] if isinstance(c, list) else [])
     for n in route_names(policy):
         if n not in asked:
             problems.append(f"policy.toml: [secrets] route has {n}, but no suite declares it "
