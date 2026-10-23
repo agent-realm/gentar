@@ -155,9 +155,10 @@ Adopters pin a release tag, not a branch.
 - **The subject guard reads `.git/logs` too.** `git pull <url with a
   token>` writes the URL, token included, into `.git/logs/HEAD` and the
   branch's reflog (git 2.50 still does), and the guard skipped every reflog
-  while the engine ships `.git` whole. A credential in a reflog of the
-  subject, a submodule or a worktree is now refused like one in a config,
-  naming the file, never the value (ground-up review C2).
+  while the engine ships `.git` whole. A credential in a reflog or in
+  `FETCH_HEAD`, of the subject, a submodule or a worktree, is now refused
+  like one in a config, naming the file, never the value (ground-up review
+  C2).
 - **The dry-run no longer turns a suite with a `pick`, `key` or `abort`
   turn into FAILURES.** It kept driving past the turn it cannot take, so
   the next turn timed out, then ran the suite's assertions against a drive

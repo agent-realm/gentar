@@ -95,8 +95,8 @@ refuses (exit 2):
 - a subject whose `.git` holds a credential: in a config (user info in a
   remote or `insteadOf` URL, `http.extraheader`, `http.cookieFile`), in a
   reflog (`.git/logs/**`, where `git pull <url with a token>` writes the
-  token), or in a credential store (`.git-credentials`,
-  `.git/credentials`).
+  token), in `.git/FETCH_HEAD`, or in a credential store
+  (`.git-credentials`, `.git/credentials`).
 
 The engine does not filter files: what is in the directory is what the
 bench gets. The stager decides:
@@ -213,9 +213,9 @@ conditions, reports on disk), by hand:
 1. Carry scenarios in the repo (e.g. `gentar/scenarios/*.toml`,
    `subject = "<repo-name>"`).
 2. In CI (or locally): clone gentar, stage this checkout under
-   `subjects/<repo-name>/` (a copy of the files git would ship, as
-   [below](#what-reaches-the-bench) — no symlink to the checkout, it
-   does not resolve through the bind and is refused), then:
+   `subjects/<repo-name>/` (a copy of the files git would ship, as in
+   [What reaches the bench](#what-reaches-the-bench) — no symlink to the
+   checkout, it does not resolve through the bind and is refused), then:
 
    ```bash
    GENTAR_SUBJECTS_DIR="$PWD/subjects" \
