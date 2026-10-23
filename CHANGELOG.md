@@ -73,6 +73,14 @@ Adopters pin a release tag, not a branch.
   `GENTAR_CI_RUNNER` and `GENTAR_FLOOR`; a test keeps it complete.
 
 ### Fixed
+- **Commit-sha checks no longer depend on the locale.** `mirror.sh`,
+  `release-gate.sh`, the mirror's `verify-ref.sh` and `bin/bench-reap`
+  checked hex with the range `[0-9a-f]`. A shell that orders ranges by the
+  locale's collation (macOS's bash 3.2 under `en_US.UTF-8`) let uppercase
+  A-E through, so an uppercase sha without an F passed the "lowercase hex"
+  check. The sixteen digits are now spelled out. Linux's bash 5 orders ranges
+  by code point, so the mirrors were not affected; the kit's own test failed
+  intermittently on macOS.
 - Driver `pick` turns recognise **unnumbered** pickers (`❯ No, exit` /
   `Yes, I trust this folder`, Claude Code 2.1.283's API-key and trust
   dialogs); only `❯ N.` lines counted before, so an optional pick was

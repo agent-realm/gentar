@@ -43,7 +43,7 @@ usage() { echo "usage: verify-ref.sh [--allow-branch-heads] <public-repo-url> [<
 case "$URL" in ''|-*) usage ;; esac
 case "$SHA" in
   '') ;;
-  *[!0-9a-f]*) echo "verify-ref: refusing ${SHA:0:60} -- not a lowercase hex commit sha" >&2; exit 2 ;;
+  *[!0123456789abcdef]*) echo "verify-ref: refusing ${SHA:0:60} -- not a lowercase hex commit sha" >&2; exit 2 ;;
   *) [ "${#SHA}" = 40 ] || { echo "verify-ref: refusing $SHA -- need the full 40-character sha" >&2; exit 2; } ;;
 esac
 
