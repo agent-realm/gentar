@@ -346,5 +346,31 @@ class DryrunStagesTheSameTest(unittest.TestCase):
         self.assertNotIn(SECRET, r.stdout + r.stderr)
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[2] / "subject-template" / "gentar" / "run.sh").exists(),
+                     "the kit is not in the image build context")
+class KitNameCheckTest(unittest.TestCase):
+    """The kit refuses what the engine refuses, before staging anything."""
+
+    def test_a_leading_dot_or_dash_is_refused_by_the_kit(self):
+        import shutil, subprocess
+        kit = Path(__file__).resolve().parents[2] / "subject-template" / "gentar"
+        for name in (".hidden", "..", "-x"):
+            with self.subTest(name=name):
+                tmp = Path(tempfile.mkdtemp())
+                self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+                shutil.copytree(kit, tmp / "repo" / "gentar")
+                sc = tmp / "repo" / "gentar" / "scenarios"
+                shutil.rmtree(sc)
+                sc.mkdir()
+                (sc / "s.toml").write_text(f'[scenario]\nsubject = "{name}"\n[oracle]\nsteps = ["true"]\n')
+                env = {k: v for k, v in os.environ.items() if not k.startswith(("GENTAR_", "GITHUB_"))}
+                env["GENTAR_REPO_URL"] = str(tmp / "no-engine")
+                r = subprocess.run(["/bin/bash", "gentar/run.sh", "s"], cwd=tmp / "repo", env=env,
+                                   capture_output=True, text=True, timeout=60)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertIn("bad subject name", r.stderr)
+                self.assertFalse((tmp / "repo" / "subjects").exists() and any((tmp / "repo" / "subjects").iterdir()))
+
+
 if __name__ == "__main__":
     unittest.main()

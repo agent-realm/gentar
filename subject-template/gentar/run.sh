@@ -153,6 +153,10 @@ case "$SUBJECT" in
   *[!A-Za-z0-9._-]*)
     echo "bad subject name: $SUBJECT (letters, digits, dot, dash, underscore)" >&2
     exit 2 ;;
+  .*|-*)
+    # the engine refuses these too (C3): `..` would stage into subjects/..
+    echo "bad subject name: $SUBJECT (may not start with a dot or a dash)" >&2
+    exit 2 ;;
 esac
 
 # One arena per subject per Docker host, at a time. Every run of this
