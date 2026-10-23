@@ -103,11 +103,14 @@ def _builtin_clash(name: str, cfg: Config) -> str:
     for d in cfg.scenarios_dirs:
         if (Path(d) / f"{name}.toml").is_file():
             return str(d)
-        try:
-            if name in load_dir(d):
-                return str(d)
-        except Exception:           # a broken TOML is not this run's problem
-            pass
+        # File by file: one broken TOML must neither block the builtin nor
+        # hide a valid clash in a sibling file (Codex on #90).
+        for f in sorted(Path(d).glob("*.toml")):
+            try:
+                if TomlScenario(f).name == name:
+                    return str(d)
+            except Exception:       # a broken TOML is not this run's problem
+                continue
     return ""
 
 

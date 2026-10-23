@@ -47,6 +47,13 @@ class BuiltinNameTest(unittest.TestCase):
         with self.assertRaisesRegex(coord.RunError, "rename it"):
             coord._resolve("smoke", self.cfg)
 
+    def test_a_broken_sibling_cannot_hide_a_clash(self):
+        # Codex on #90: load_dir raised for the whole dir on one broken file
+        (self.d / "mine.toml").write_text('[scenario]\nname = "smoke"\n[oracle]\nsteps = ["true"]\n')
+        (self.d / "broken.toml").write_text("[scenario\n")
+        with self.assertRaisesRegex(coord.RunError, "name of an engine builtin"):
+            coord._resolve("smoke", self.cfg)
+
     def test_the_builtin_still_runs_when_nothing_clashes(self):
         (self.d / "other.toml").write_text('[scenario]\nname = "other"\n[oracle]\nsteps = ["true"]\n')
         (self.d / "broken.toml").write_text("[scenario\n")      # not this run's problem
