@@ -22,6 +22,10 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.11.0 — 2026-10-23
+
+Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what changed and why, the breaking schema change, upgrade for adopters, what is not live-proven, known limits, verification).
+
 ### Added
 - **Failure snapshot** (engine): when a driver turn fails (or the final
   wait times out, or the danger gate or a goal pilot ends the run), the
