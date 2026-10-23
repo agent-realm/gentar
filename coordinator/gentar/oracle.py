@@ -4,6 +4,7 @@ asserts verdicts from reality. The same assertions are reused unchanged
 by the agent driver; only the executor differs."""
 
 import os
+import re
 import time
 
 from gentar.asserts import AssertResult, check_commands, check_files
@@ -15,6 +16,28 @@ from gentar.toml_scenario import TomlScenario, satisfied_group
 
 
 _ERR_LINES = 40
+
+# A subject is one directory under the subjects root, named as the kit's
+# run.sh allows (letters, digits, dot, dash, underscore), minus a leading dot
+# or dash: `..`, a hidden name and an option-shaped one are not repo names.
+SUBJECT_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
+
+
+def subject_dir(cfg: Config, name) -> str:
+    """The directory subject `name` ships from, symlinks resolved; raises
+    ValueError saying why when it may not ship. The name is scenario text:
+    `../run/secrets` shipped the coordinator's own bench key into a bench
+    (C3). So it must be one plain name, and the resolved directory must sit
+    inside the subjects root, which also refuses a symlink out of it."""
+    if not isinstance(name, str) or not SUBJECT_NAME.fullmatch(name):
+        raise ValueError(f"subject {name!r} is not one directory name (letters, digits, "
+                         f"dot, dash, underscore; not starting with a dot or a dash)")
+    root = os.path.realpath(cfg.subjects_root)
+    path = os.path.realpath(os.path.join(root, name))
+    if path == root or os.path.commonpath([root, path]) != root:
+        raise ValueError(f"subject {name!r} resolves to {path}, outside the subjects "
+                         f"root {root} (a symlink out of it)")
+    return path
 
 
 def _step(bench: BenchHost, subject: str, run_id: str, scenario_name: str,
@@ -99,8 +122,9 @@ def run_oracle(scenario: TomlScenario, bench: BenchHost, run_id: str,
     def _push() -> None:
         if not scenario.subject:
             return
-        local_subject = f"{cfg.subjects_root}/{scenario.subject}"
-        bench.push_dir(local_subject, workspace)
+        # Resolved again here, not only in the coordinator's guard: a caller
+        # that skipped the guard must not push a path out of the root either.
+        bench.push_dir(subject_dir(cfg, scenario.subject), workspace)
         spans.emit(subject, run_id, name, "subject.push",
                    attrs={"subject": scenario.subject, "into": workspace})
 

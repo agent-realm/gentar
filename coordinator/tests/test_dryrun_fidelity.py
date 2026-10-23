@@ -39,13 +39,15 @@ def prepare(env):
 
 
 class _ScratchAdoption(unittest.TestCase):
-    """A scratch adoption with the kit's dryrun.py; no tests of its own."""
+    """A scratch adoption with the kit's dryrun.py (and plan.py, which
+    stages its workspace as run.sh stages the bench's); no tests of its own."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         repo = self.tmp / "repo"
         (repo / "gentar" / "scenarios").mkdir(parents=True)
-        shutil.copy(KIT / "dryrun.py", repo / "gentar" / "dryrun.py")
+        for f in ("dryrun.py", "plan.py"):
+            shutil.copy(KIT / f, repo / "gentar" / f)
         self.repo = repo
         self.log = self.tmp / "prepare.log"
         self.log.touch()
