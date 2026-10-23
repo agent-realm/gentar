@@ -294,7 +294,10 @@ Read gentar/reports/report-<id>.md, fix the repo, rerun
 ```
 
 The subject is the **working tree** (uncommitted changes included) — fix
-and rerun, no commit needed to test.
+and rerun, no commit needed to test. It is staged as the files git would
+ship: tracked, plus untracked files git does not ignore. A gitignored
+`.env`, `.npmrc` or build output never reaches the bench; a checkout with
+no `.git` of its own is copied whole.
 
 Exit `1` is a verdict: an assertion saw something other than the claim.
 Exit `2` is a refusal before any bench existed — a missing credential,
