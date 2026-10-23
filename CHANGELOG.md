@@ -65,6 +65,14 @@ Adopters pin a release tag, not a branch.
   `GENTAR_CI_RUNNER` and `GENTAR_FLOOR`; a test keeps it complete.
 
 ### Fixed
+- **A subject suite can no longer hide behind a builtin's name.** A suite
+  named `smoke` or `smoke-fail` used to run the engine's own self-test
+  instead, silently (review A5). It is now refused with a "rename it".
+- **File assertions reach the bench's shell literally.** Paths and
+  `contains` text were quoted with Python's `repr()`, which switches to
+  double quotes when the text holds a `'`, and then `$` and backticks
+  expanded in the bench's shell (review A9). They are now quoted with
+  `shlex.quote`. Only a leading `~` means the home directory.
 - **Commit-sha checks no longer depend on the locale.** `mirror.sh`,
   `release-gate.sh`, the mirror's `verify-ref.sh` and `bin/bench-reap`
   checked hex with the range `[0-9a-f]`. A shell that orders ranges by the
