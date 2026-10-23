@@ -31,6 +31,7 @@
 # Output: `sha=<sha>` and `via=<ref>` lines on stdout, also appended to
 # $GITHUB_OUTPUT when set. Refusals are one line on stderr.
 # Exit: 0 admitted · 1 refused · 2 usage, or the repository could not be read.
+# Removing the temporary clone never changes it.
 
 set -euo pipefail
 
@@ -48,9 +49,26 @@ case "$SHA" in
 esac
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/verify-ref.XXXXXX")
-trap 'rm -rf "$TMP"' EXIT
+# `git fetch` starts `git maintenance run --auto --detach`, which outlives it
+# and can write into $TMP while rm walks it. rm then failed with "Directory
+# not empty", and since `set -e` holds inside an EXIT trap too, an admitted
+# commit exited 1. g() turns automatic maintenance off and the cleanup
+# retries. It runs without -e: a trap that does not exit keeps the script's
+# own status, so a clone that will not go is left behind with a warning and
+# the verdict stands.
+cleanup() {
+  local i
+  set +e
+  for i in 1 2 3 4 5; do
+    rm -rf "$TMP" 2>/dev/null && break
+    [ "$i" = 5 ] || sleep 0.5
+  done
+  [ ! -e "$TMP" ] || echo "verify-ref: could not remove $TMP; left behind" >&2
+}
+trap cleanup EXIT
 export GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1
-g() { git -C "$TMP" -c protocol.version=2 "$@"; }
+# gc.auto=0 for a git older than maintenance.auto (2.29)
+g() { git -C "$TMP" -c protocol.version=2 -c maintenance.auto=false -c gc.auto=0 "$@"; }
 git init -q --bare "$TMP"
 
 # The default branch, as the repository itself names it.

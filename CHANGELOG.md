@@ -81,6 +81,15 @@ Adopters pin a release tag, not a branch.
   `jq` now fails them, so a checkout run cannot pass with none of them run.
 
 ### Fixed
+- **`verify-ref.sh`'s cleanup no longer fails an admitted commit.** A
+  private mirror's gate admitted a commit and then exited 1: `git fetch`
+  starts a detached `git maintenance run --auto` that can still be writing
+  into the temporary clone while `rm` removes it, and under `set -e` the
+  failing `rm` in the EXIT trap became the script's status. Its git runs
+  with automatic maintenance off now, the cleanup retries for up to 2 s and
+  runs without `-e`, and a clone that will not go is left behind with a
+  warning while the verdict stands. Mirrors re-vendor the file
+  (`subject-template/mirror/arena/verify-ref.sh`).
 - **The kit reads a suite's TOML with a TOML parser** (ground-up review
   A7). `gentar/run.sh` read scenarios with awk and grep, and its reading
   diverged from the engine's: a deterministic step that prints `goal=1`
