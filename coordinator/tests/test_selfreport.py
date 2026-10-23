@@ -152,6 +152,12 @@ class JoinTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("query failed: RuntimeError: no table otel_traces", detail)
 
+    def test_an_empty_run_id_is_never_joined(self):
+        c = Client(5)
+        ok, detail = selfreport.joined(spans(c), self.cfg, "")
+        self.assertEqual((ok, detail), (False, "no run id: the join cannot be checked"))
+        self.assertEqual(c.queries, [])
+
     def test_no_client_fails(self):
         ok, detail = selfreport.joined(spans(None), self.cfg, "r")
         self.assertEqual((ok, detail), (False, "no ClickHouse client: the join cannot be checked"))

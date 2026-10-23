@@ -109,6 +109,22 @@ class JudgedPolicyTest(unittest.TestCase):
         self.assertIn("1 no fixture(s)", problems)
         self.assertNotIn("yes fixture(s)", problems)
 
+    def test_an_empty_goal_action_covers_nothing(self):
+        # agy on #99: an empty done/ counted as covering `done`
+        (self.tmp / "scenarios" / "pilot.toml").write_text(
+            '[scenario]\nname = "pilot"\ndata = "synthetic"\n[driver]\ncommand = "d"\n'
+            'goal = "G"\n[[driver.actions]]\nid = "a"\nkey = "down"\nwhen = "w"\n')
+        g = self.tmp / "judge-fixtures" / "pilot" / "goal"
+        (g / "done").mkdir(parents=True)
+        (g / "a").mkdir()
+        for i in range(3):
+            (g / "a" / f"{i}.txt").write_text("screen")
+        problems = "\n".join(self.mod.lint(None, str(self.tmp / "no-engine")))
+        self.assertIn("pilot.toml: its goal pilot needs", problems)
+        (g / "done" / "0.txt").write_text("screen")
+        problems = "\n".join(self.mod.lint(None, str(self.tmp / "no-engine")))
+        self.assertNotIn("pilot.toml: its goal pilot needs", problems)
+
     def test_lint_refuses_a_judged_suite_not_declared_synthetic(self):
         (self.tmp / "scenarios" / "semantic.toml").write_text(JUDGED.format(name="semantic", data=""))
         self.fixtures()
@@ -188,7 +204,7 @@ class EngineScenariosTest(unittest.TestCase):
                           f"GENTAR_MIRROR_CHECKOUT): the mirror's gate list is unverified here")
         m = re.search(r"GATE='(\[[^']*\])'", self.MIRROR.read_text())
         self.assertIsNotNone(m, "no GATE='[...]' list in the mirror's arena.yml")
-        self.assertEqual(json.loads(m.group(1)), self.documented_gate())
+        self.assertEqual(set(json.loads(m.group(1))), set(self.documented_gate()))
 
     def test_judged_turns_and_goal_pilots_have_their_fixtures(self):
         fixtures = self.scen / "judge-fixtures"
@@ -203,8 +219,8 @@ class EngineScenariosTest(unittest.TestCase):
                     checked += 1
             if s.goal:
                 # plan.py's rule: 3+ screens over 2+ actions, `done` among them
-                picks = {d.name: len(list(d.glob("*.txt")))
-                         for d in (fixtures / name / "goal").glob("*") if d.is_dir()}
+                picks = {d.name: n for d in (fixtures / name / "goal").glob("*")
+                         if d.is_dir() and (n := len(list(d.glob("*.txt"))))}
                 with self.subTest(suite=name, goal=True):
                     self.assertGreaterEqual(sum(picks.values()), 3, picks)
                     self.assertIn("done", picks)

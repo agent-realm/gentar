@@ -68,6 +68,9 @@ def joined(spans, cfg, run_id: str, deadline: float = DEADLINE,
     """Poll until the join finds a span or the deadline passes. (ok, detail)."""
     if spans.client is None:
         return False, "no ClickHouse client: the join cannot be checked"
+    if not run_id:
+        # an empty run id would join every trace that carries none (agy)
+        return False, "no run id: the join cannot be checked"
     end, last = clock() + deadline, ""
     while True:
         try:
