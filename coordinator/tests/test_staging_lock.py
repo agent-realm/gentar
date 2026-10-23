@@ -14,6 +14,7 @@ anything a running arena reads (ground-up review 2026-10-19, B3).
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -49,7 +50,11 @@ class Holder:
         lock = Path(str(self.base) + ".lock")
         if self.flock:
             lock.touch()
-            self.proc = subprocess.Popen([self.flock, str(lock), "sleep", "120"])
+            # Its own process group: flock's `sleep` child inherits the
+            # locked descriptor, so killing flock alone left the lock held
+            # (CI, Linux, on #97); release() kills the whole group.
+            self.proc = subprocess.Popen([self.flock, str(lock), "sleep", "120"],
+                                         start_new_session=True)
             assert wait_until(lambda: subprocess.run([self.flock, "-n", str(lock), "true"])
                               .returncode != 0)
             Path(str(lock) + ".holder").write_text(f"pid {self.proc.pid} on host since now\n")
@@ -61,8 +66,11 @@ class Holder:
         return self
 
     def release(self):
-        if self.proc:
-            self.proc.kill()
+        if self.proc and self.proc.poll() is None:
+            if self.flock:
+                os.killpg(self.proc.pid, signal.SIGKILL)
+            else:
+                self.proc.kill()
             self.proc.wait()
         d = Path(str(self.base) + ".lock.d")
         if not self.flock and d.exists():
