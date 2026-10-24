@@ -3,3 +3,6 @@ daytona>=0.198,<1
 opensandbox>=0.1,<0.2
 pexpect>=4.9,<5
 websockets>=13,<18
+baml-py==0.226.2
+pydantic>=2,<3
+typing_extensions>=4.7

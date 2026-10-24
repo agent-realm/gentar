@@ -8,6 +8,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY gentar/ gentar/
+# The BAML schema the committed gentar/baml_client was generated from; a
+# test holds the generator pin, the client and requirements.txt together.
+COPY baml_src/ baml_src/
 COPY scenarios/ /app/scenarios/
 COPY tests/ tests/
 # Unit tests gate the image build: any coordinator change busts the
