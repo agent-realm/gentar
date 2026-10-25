@@ -30,10 +30,12 @@ Adopters pin a release tag, not a branch.
   address, a `/Users/<name>` or `/home/<name>` path other than a stand-in, a
   cloud or API credential shape, and the model ids, name or port of a private
   model route. Shapes only: the scan names nothing private, and a finding
-  prints as `path:line: class`, never the matched text. Synthetic fixtures
-  that keep a credential's shape are allowlisted in
-  `.github/scan-allowlist.toml`, each with its reason. The tree already on
-  `main` is not this job's concern.
+  prints as `path:line: class`, never the matched text. A file git calls
+  binary (a NUL byte, or a `binary` or `-diff` attribute) is diffed as text,
+  so its lines are scanned too. Synthetic fixtures that keep a credential's
+  shape are allowlisted in `.github/scan-allowlist.toml`, each entry matching
+  the whole fixture line, so a value appended to one is still found, and each
+  with its reason. The tree already on `main` is not this job's concern.
 - **The bench runner's label is one variable** (ground-up review C4; found
   by agentmux-lab). The kit's guard refused a `GENTAR_CI_RUNNER` naming
   `arena`, the default bench label, but a repository whose bench runner
