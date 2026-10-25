@@ -859,7 +859,7 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
   `GENTAR_OTLP_EXPORT`, its head `http://1` redacted every `http://1…`
   address in a report — a provider route, `127.0.0.1` — and an `https://`
   destination would have redacted every https URL; a bench host's head
-  `10.10.10` did the same to its whole subnet. Reports looked like they
+  `192.0.2.` did the same to its whole subnet. Reports looked like they
   leaked the collector when they had not (cockpit#29, reproduced with the
   engine's scrubber). A **locator** — a `*_HOST`, `*_USER`, `*_URL`,
   `*_ENDPOINT`, `*_EXPORT` or `*_JUMP` setting whose value is shaped like a

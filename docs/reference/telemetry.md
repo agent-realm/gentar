@@ -33,7 +33,7 @@ repository both settings are Actions secrets; locally:
 
 ```bash
 GENTAR_OTLP_EXPORT=http://192.0.2.58:4318 \
-  with-secret GENTAR_OTLP_KEY=keychain:pilot/clickstack-ingest -- bin/arena run smoke
+  with-secret GENTAR_OTLP_KEY=keychain:<your-ingest-key> -- bin/arena run smoke
 ```
 
 `compose.export.yml` is what wires it (layered by `bin/arena`, the kit's
