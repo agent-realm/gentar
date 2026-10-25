@@ -26,6 +26,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 IDENT = ROOT / "bin" / "docker-identity"
+FILE_LOGIN = ROOT / "bin" / "sbx-file-login"
 ARENA = ROOT / "bin" / "arena"
 KIT_RUN = ROOT / "subject-template" / "gentar" / "run.sh"
 
@@ -41,11 +42,15 @@ case "$1 $2" in
     echo "$FAKE_CONTEXT_HOST"; exit 0 ;;
 esac
 if [ "$1" = -H ] && [ "$3" = info ]; then
+  [ -z "${FAKE_INFO_READS_STDIN:-}" ] || cat > "$FIX/info.stdin"
   case "${FAKE_INFO_MODE:-print}" in
     fail) exit 1 ;;
     sleep) sleep 30; exit 0 ;;
     print) printf '%s\n' "$FAKE_INFO"; exit 0 ;;
   esac
+fi
+if [ "$1" = -H ] && [ "$3" = run ]; then
+  [ -z "${FAKE_RUN_READS_STDIN:-}" ] || cat > "$FIX/run.stdin"
 fi
 if [ "$1" = compose ]; then
   echo "compose uid=${GENTAR_LOCAL_UID:-} gid=${GENTAR_LOCAL_GID:-} sock=${GENTAR_DOCKER_SOCK:-} host=${DOCKER_HOST:-}" >> "$FIX/compose.env"
@@ -198,6 +203,76 @@ class DockerIdentityTest(unittest.TestCase):
         r, out = self.ident(DOCKER_HOST="tcp://10.0.0.1:2375")
         self.assertEqual((r.returncode, out), (0, {"sock": "/var/run/docker.sock"}))
         self.assertFalse([c for c in self.f.calls("docker.calls") if " info " in f" {c} "])
+
+
+@unittest.skipUnless(FILE_LOGIN.exists() and IDENT.exists(), "bin/ is not in the image build context")
+class SbxFileLoginTest(unittest.TestCase):
+    """bin/sbx-file-login writes the login the local coordinator reads, so it
+    runs on the daemon and as the uid docker-identity decides for that
+    coordinator. On rootless Docker the user's own uid inside the container
+    maps to a subordinate uid, and the login would be written as a stranger."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.f = Fakes(self.tmp)
+        self.home = self.tmp / "home"
+        self.home.mkdir()
+
+    def login(self, token="", **env):
+        r = subprocess.run(["/bin/bash", str(FILE_LOGIN), "--username", "u", "--password-stdin"],
+                           env=self.f.env(HOME=str(self.home), **env), input=token,
+                           capture_output=True, text=True, timeout=60)
+        runs = [c for c in self.f.calls("docker.calls") if " run " in f" {c} "]
+        return r, runs
+
+    def test_rootless_logs_in_as_container_root_on_the_users_daemon(self):
+        r, runs = self.login(DOCKER_HOST=f"unix://{USER_SOCK}", FAKE_INFO=ROOTLESS,
+                             FAKE_UID="1001", FAKE_GID="1001")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(runs), 1, runs)
+        self.assertTrue(runs[0].startswith(f"-H unix://{USER_SOCK} run "), runs[0])
+        self.assertIn(" --user 0:0 ", runs[0])
+
+    def test_rootful_logs_in_as_the_user_on_the_resolved_daemon(self):
+        r, runs = self.login(FAKE_CONTEXT_HOST="unix:///var/run/docker.sock", FAKE_INFO=ROOTFUL,
+                             FAKE_UID="1001", FAKE_GID="1002")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(runs), 1, runs)
+        self.assertTrue(runs[0].startswith("-H unix:///var/run/docker.sock run "), runs[0])
+        self.assertIn(" --user 1001:1002 ", runs[0])
+
+    def test_a_daemon_it_cannot_identify_is_refused_before_any_login(self):
+        for env in ({"FAKE_INFO_MODE": "fail"}, {"FAKE_INFO": "rootless, probably"},
+                    {"FAKE_INFO": ROOTFUL, "FAKE_UID": "0"}):
+            with self.subTest(env=env):
+                (self.f.fix / "docker.calls").unlink(missing_ok=True)
+                r, runs = self.login(DOCKER_HOST="unix:///var/run/docker.sock", **env)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertIn("docker-identity:", r.stderr)
+                self.assertEqual(runs, [])
+                self.assertFalse((self.home / ".config").exists())    # nothing made either
+
+    def test_the_token_reaches_the_login_and_nothing_else(self):
+        token = "dckr_pat_" + "Q" * 20
+        r, runs = self.login(token, DOCKER_HOST=f"unix://{USER_SOCK}", FAKE_INFO=ROOTLESS,
+                             FAKE_INFO_READS_STDIN="1", FAKE_RUN_READS_STDIN="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.f.fix / "info.stdin").read_text(), "")
+        self.assertEqual((self.f.fix / "run.stdin").read_text(), token)
+        self.assertNotIn(token, "\n".join(self.f.calls("docker.calls")) + r.stdout + r.stderr)
+
+    def test_without_docker_identity_beside_it_it_refuses(self):
+        alone = self.tmp / "alone"
+        alone.mkdir()
+        shutil.copy(FILE_LOGIN, alone / "sbx-file-login")
+        r = subprocess.run(["/bin/bash", str(alone / "sbx-file-login")],
+                           env=self.f.env(HOME=str(self.home), DOCKER_HOST=f"unix://{USER_SOCK}",
+                                          FAKE_INFO=ROOTLESS),
+                           input="", capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("needs bin/docker-identity beside it", r.stderr)
+        self.assertEqual(self.f.calls("docker.calls"), [])
 
 
 @unittest.skipUnless(ARENA.exists() and IDENT.exists(), "bin/ is not in the image build context")

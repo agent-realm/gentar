@@ -13,6 +13,13 @@
 # coordinator and no session bus, so the login is written where the
 # coordinator reads it. A keyring login the host already has stays as it is.
 #
+# The container runs on the daemon and as the uid that bin/docker-identity
+# --local decides for the coordinator: on rootless Docker that is 0:0, which
+# there IS this user (the user's own uid would map to a subordinate uid, and
+# the login would be written as a stranger); on rootful Docker, this user's
+# uid. A daemon it cannot identify is refused, as local bench mode refuses it.
+# So it runs from a gentar checkout, with bin/docker-identity beside it.
+#
 # Run it once, as the runner's user, on the bench host:
 #   bin/sbx-file-login                                    # device flow
 #   printf %s "$PAT" | bin/sbx-file-login --username <user> --password-stdin
@@ -49,6 +56,22 @@ if [ "$expect_name" = 1 ]; then echo "sbx-file-login: --username needs a name" >
 SBX=$(command -v sbx 2>/dev/null || true)
 [ -n "$SBX" ] || { echo "sbx-file-login: no sbx on PATH" >&2; exit 2; }
 SBX=$(readlink -f "$SBX" 2>/dev/null || echo "$SBX")
+# The coordinator's own answer. stdin is /dev/null: with --password-stdin it
+# holds the token, which only `sbx login` may read.
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")
+[ -x "$here/docker-identity" ] || {
+  echo "sbx-file-login: needs bin/docker-identity beside it ($here); run it from a gentar checkout" >&2
+  exit 2
+}
+ident=$("$here/docker-identity" --local </dev/null) || exit 2
+host="" uid="" gid=""
+while IFS='=' read -r k v; do
+  case "$k" in host) host=$v ;; uid) uid=$v ;; gid) gid=$v ;; esac
+done <<<"$ident"
+if [ -z "$host" ] || [ -z "$uid" ] || [ -z "$gid" ]; then
+  echo "sbx-file-login: bin/docker-identity named no daemon or uid; refusing to guess" >&2
+  exit 2
+fi
 # A missing bind source would be created by Docker as root; create it here,
 # as this user, and refuse one that belongs to someone else.
 for d in "$HOME/.local/state/sandboxes" "$HOME/.config/sandboxes" "$HOME/.config/com.docker.sandboxes"; do
@@ -63,8 +86,8 @@ done
 tty=()
 [ -t 0 ] && tty=(-t)
 rc=0
-docker run --rm -i ${tty[@]+"${tty[@]}"} \
-  --user "$(id -u):$(id -g)" -e HOME="$HOME" \
+docker -H "$host" run --rm -i ${tty[@]+"${tty[@]}"} \
+  --user "$uid:$gid" -e HOME="$HOME" \
   -v "$SBX:/usr/bin/sbx:ro" \
   -v "$HOME/.local/state/sandboxes:$HOME/.local/state/sandboxes" \
   -v "$HOME/.config/sandboxes:$HOME/.config/sandboxes" \

@@ -97,6 +97,16 @@ Adopters pin a release tag, not a branch.
   `jq` now fails them, so a checkout run cannot pass with none of them run.
 
 ### Fixed
+- **`bin/sbx-file-login` works on rootless Docker.** It ran the login
+  container as `--user $(id -u):$(id -g)`. Under rootless Docker that uid
+  maps to a subordinate uid, so the login files were written as a stranger,
+  the final `chmod` failed, and local-mode benches failed at PREPARE IMAGE.
+  It now takes the daemon and the uid from `bin/docker-identity --local`,
+  the same answer the local coordinator runs with: 0:0 on rootless Docker
+  (there, the calling user), the user's own uid on rootful Docker. A daemon
+  that script cannot identify is refused before anything is written, and so
+  is running it as root on rootful Docker. It needs `bin/docker-identity`
+  beside it, so run it from a gentar checkout.
 - **A forwarded provider key no longer makes the bench-host check refuse
   every suite.** The check for stored sbx secrets ran `sbx secret ls` with the
   caller's whole environment, and on the local tier (`GENTAR_BENCH_HOST=local`)
