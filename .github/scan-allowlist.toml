@@ -24,3 +24,21 @@ path = "coordinator/tests/test_publish_safety.py"
 class = "key-shape"
 line = 'sk-ant-[a]pi03-ABCDEFGHIJKLMNOP'
 reason = "an alphabet placeholder: the redaction tests prove a token value, and a truncated head of it, are masked"
+
+[[allow]]
+path = "bin/bench-host-provision"
+class = "private-ip"
+line = '10\.201\.0\.0/16'
+reason = "the provisioner's default Docker address pool: Docker pools must be private ranges, and no host has this address"
+
+[[allow]]
+path = "coordinator/tests/test_bench_host_provision.py"
+class = "private-ip"
+line = '10\.0\.0\.0/16; rm'
+reason = "a synthetic pool with a shell tail: the test proves an unsafe GENTAR_DOCKER_POOL is refused"
+
+[[allow]]
+path = "coordinator/tests/test_docker_identity.py"
+class = "private-ip"
+line = 'tcp://10\.0\.0\.1:2375'
+reason = "a synthetic TCP Docker host: the tests prove a daemon that is not a unix socket is refused or reported"
