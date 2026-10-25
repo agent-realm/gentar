@@ -1,0 +1,26 @@
+# Synthetic fixtures that bin/pr-scan may meet in a pull request's added
+# lines. An entry silences one class, in files matching `path` (a glob), on
+# lines that also match `line` (a regular expression), and says why the value
+# is synthetic. Shapes only: an entry never holds a real value. A pattern
+# breaks the literal with a one-character class (`sk-ant-[a]pi03-...`) so the
+# allowlist itself does not match the shape it allows.
+#
+# Commit messages cannot be allowlisted.
+
+[[allow]]
+path = "coordinator/tests/test_agentstats.py"
+class = "key-shape"
+line = 'sk-ant-[F]AKE-0123456789-planted'
+reason = "a planted fake key: the test proves agent stats never carry a key that appeared in the transcript"
+
+[[allow]]
+path = "coordinator/tests/test_judge.py"
+class = "key-shape"
+line = 'sk-ant-[a]pi03-Q7x9Lm2Pz4Rt8Vw1Ny6Ks3Hd5Fg0Jb'
+reason = "a synthetic key shorter than a real one: the test proves the judge's screen is scrubbed of it"
+
+[[allow]]
+path = "coordinator/tests/test_publish_safety.py"
+class = "key-shape"
+line = 'sk-ant-[a]pi03-ABCDEFGHIJKLMNOP'
+reason = "an alphabet placeholder: the redaction tests prove a token value, and a truncated head of it, are masked"
