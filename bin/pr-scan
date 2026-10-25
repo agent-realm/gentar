@@ -10,7 +10,8 @@ lines the pull request adds (`git diff base...head`, by file and new line
 number) and every line of its commits' messages (`git log base..head`). The
 tree that is already on the base branch is not scanned: only what this pull
 request brings. A file git calls binary (a NUL byte, or a `binary` or `-diff`
-attribute) is diffed as text, so its lines are scanned too.
+attribute) is diffed as text, so its lines are scanned too. Commit messages
+are read from the commit objects, and a NUL byte in one is a finding.
 
 Generic shapes only, so this file names nothing private:
 
@@ -74,6 +75,10 @@ CLASSES = {
         r"(?<![\w.])2012[8](?![\w.])",  # [8]: as above
     )],
 }
+
+# git itself never writes a NUL byte into a commit message; one written by
+# hand is refused rather than read around.
+NUL = "nul-byte"
 
 SCAN_ITSELF = ("bin/pr-scan", ".github/scan-allowlist.toml", ".github/workflows/gentar.yml")
 
@@ -173,14 +178,13 @@ def added_lines(base: str, head: str):
 def commit_messages(base: str, head: str):
     """(sha, line number, text) for every line of the commits head has and base has not.
 
-    Records are NUL-separated (`-z`): git refuses a NUL in a commit message,
-    while any other separator could sit inside one and hide what follows it
-    (Codex on #104)."""
-    out = git("log", "-z", "--format=%H%n%B", f"{base}..{head}")
-    for rec in out.split("\x00"):
-        sha, _, body = rec.lstrip("\n").partition("\n")
+    Read from each commit object, not `git log --format=%B`: that stops at a
+    NUL byte, and git only warns about one (fsck `nulInCommit`), so a commit
+    written by hand could carry text past it that was never scanned."""
+    for sha in lines_of(git("rev-list", f"{base}..{head}")):
         if not sha:
             continue
+        body = git("cat-file", "commit", sha).partition("\n\n")[2]
         for n, line in enumerate(lines_of(body.rstrip("\n")), 1):
             yield sha, n, line
 
@@ -223,7 +227,7 @@ def main(argv=None) -> int:
     if not a.files:
         for sha, n, text in commit_messages(a.base, a.head):
             commits.add(sha)
-            for cls in classes_of(text):
+            for cls in ([NUL] if "\x00" in text else []) + classes_of(text):
                 findings.append((f"commit {sha[:12]} message", n, cls, False))
 
     for where, n, cls, is_file in findings:

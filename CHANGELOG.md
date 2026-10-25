@@ -32,10 +32,12 @@ Adopters pin a release tag, not a branch.
   model route. Shapes only: the scan names nothing private, and a finding
   prints as `path:line: class`, never the matched text. A file git calls
   binary (a NUL byte, or a `binary` or `-diff` attribute) is diffed as text,
-  so its lines are scanned too. Synthetic fixtures that keep a credential's
-  shape are allowlisted in `.github/scan-allowlist.toml`, each entry matching
-  the whole fixture line, so a value appended to one is still found, and each
-  with its reason. The tree already on `main` is not this job's concern.
+  so its lines are scanned too; commit messages are read from the commit
+  objects, and a NUL byte in one is refused. Synthetic fixtures that keep a
+  credential's shape are allowlisted in `.github/scan-allowlist.toml`, each
+  entry matching the whole fixture line, so a value appended to one is still
+  found, and each with its reason. The tree already on `main` is not this
+  job's concern.
 - **The bench runner's label is one variable** (ground-up review C4; found
   by agentmux-lab). The kit's guard refused a `GENTAR_CI_RUNNER` naming
   `arena`, the default bench label, but a repository whose bench runner

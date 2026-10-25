@@ -234,6 +234,25 @@ class PrScanTest(unittest.TestCase):
         self.assertEqual(r.stdout.splitlines(), [f"commit {self.rev()[:12]} message:3: private-ip"])
         self.assertNoValue(r, [ip])
 
+    def test_a_nul_byte_in_a_commit_message_hides_nothing(self):
+        # `git log --format=%B` stops at a NUL; git only warns about one, so
+        # a commit written by hand can carry text past it
+        ip = SAMPLES["private-ip"][2]
+        tree, parent = self.rev("HEAD^{tree}"), self.rev()
+        obj = (f"tree {tree}\nparent {parent}\n"
+               "author t <t@example.invalid> 1700000000 +0000\n"
+               "committer t <t@example.invalid> 1700000000 +0000\n\n"
+               f"subject\n\nbefore\x00after {ip}\n").encode()
+        sha = subprocess.run(["git", "hash-object", "-t", "commit", "-w", "--literally", "--stdin"],
+                             input=obj, cwd=self.repo, check=True, capture_output=True
+                             ).stdout.decode().strip()
+        self.git("update-ref", "refs/heads/pr", sha)
+        r = self.scan()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(), [f"commit {sha[:12]} message:3: nul-byte",
+                                                 f"commit {sha[:12]} message:3: private-ip"])
+        self.assertNoValue(r, [ip])
+
     def test_a_change_that_only_deletes_from_the_scan_still_warns(self):
         # Codex on #104: the warning came from added lines, so deleting a
         # pattern or an allowlist entry, and adding nothing, went unflagged
