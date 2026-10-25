@@ -22,6 +22,25 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.10.1 — 2026-10-25
+
+Release notes: [docs/releases/v0.10.1.md](docs/releases/v0.10.1.md) (what changed and why, upgrade for adopters, verification).
+
+### Fixed
+- **A forwarded provider key no longer makes the bench-host check refuse
+  every suite.** The check for stored sbx secrets ran `sbx secret ls` with the
+  caller's whole environment, and on the local tier (`GENTAR_BENCH_HOST=local`)
+  that is the coordinator's, forwarded provider keys included. With
+  `ANTHROPIC_API_KEY` set, sbx 0.39 prints "Note: 1 additional environment
+  variable found" where it would print "No secrets found"; the check counted
+  that line as a stored secret and refused the run with exit 2. It now runs
+  under `env -i` with only what sbx reads to find its config, state and
+  keyring (`HOME`, the four `XDG_*_HOME` directories, `XDG_RUNTIME_DIR`,
+  `DBUS_SESSION_BUS_ADDRESS`, and `PATH` to find `sbx`), each passed only when
+  set, on the ssh tier too. A stored secret is still refused, and still
+  reported as a count only. Engine only (`coordinator/gentar/benchhost.py`);
+  the only kit change is the engine pin in `gentar/run.sh`.
+
 ## 0.10.0 — 2026-10-22
 
 Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what changed and why, upgrade for adopters, what is not live-proven, known limits, verification).
