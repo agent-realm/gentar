@@ -8,6 +8,9 @@
 #   unit tests   every PR and every push to main: the whole unit suite on the
 #                checkout, on ubuntu-latest, read-only, no secrets.
 #   release tag  a `v*` tag: the tag must equal `v$(cat VERSION)`.
+#   scan         every PR: the lines it adds and its commit messages, for
+#                generic shapes of environment data and credentials
+#                (bin/pr-scan). Prints path:line:class, never the text.
 #
 # The bench suites (the gate, the nightly, one-off scenarios) run in the
 # PRIVATE mirror agent-realm/gentar-arena, which pulls this repository and
@@ -67,3 +70,26 @@ jobs:
           WANT="v$(cat VERSION)"
           [ "$TAG" = "$WANT" ] || { echo "::error::release tag $TAG != $WANT (VERSION file)"; exit 1; }
           echo "release tag $TAG matches VERSION"
+
+  scan:
+    name: scan (added lines)
+    # gentar is public: a pull request may not add an internal address, a
+    # home path with a real name, a credential shape or a private model
+    # route (bin/pr-scan has the shapes; synthetic fixtures are allowlisted
+    # in .github/scan-allowlist.toml). Only what the PR adds, not the tree
+    # already on the base branch. A required check on main and release/*.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: scan the pull request's added lines and commit messages
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 bin/pr-scan --base "$BASE" --head "$HEAD"
