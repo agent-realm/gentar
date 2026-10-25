@@ -143,21 +143,49 @@ class PrScanTest(unittest.TestCase):
     def test_an_allowlisted_fixture_passes_only_where_it_is_allowed(self):
         key = SAMPLES["key-shape"][1]
         self.allow([{"path": "tests/test_*.py", "class": "key-shape",
-                     "line": re.escape(key), "reason": "synthetic fixture"}])
-        self.commit({"tests/test_x.py": f"SECRET = '{key}'\n"})
+                     "line": re.escape(f'SECRET = "{key}"'), "reason": "synthetic fixture"}])
+        self.commit({"tests/test_x.py": f'SECRET = "{key}"\n'})
         r = self.scan()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         # the same value elsewhere, another shape in the file, another class: findings
         other_key = SAMPLES["key-shape"][0]
         ip = SAMPLES["private-ip"][0]
         self.commit({"docs/x.md": f"{key}\n",
-                     "tests/test_x.py": f"SECRET = '{key}'\nOTHER = '{other_key}'\nHOST = '{ip}'\n"})
+                     "tests/test_x.py": f'SECRET = "{key}"\nOTHER = "{other_key}"\nHOST = "{ip}"\n'})
         r = self.scan()
         self.assertEqual(r.returncode, 1)
         self.assertEqual(sorted(r.stdout.splitlines()),
                          ["docs/x.md:1: key-shape", "tests/test_x.py:2: key-shape",
                           "tests/test_x.py:3: private-ip"])
         self.assertNoValue(r, [key, other_key, ip])
+
+    def test_an_allowlist_entry_covers_the_whole_line_only(self):
+        # Codex, on a copy of this scanner: with search(), a private address
+        # appended to an allowlisted fixture line was hidden by the fixture's own match
+        fixture = f'NETS = "{j("10.", "0.0.0/8")}"'
+        ip = SAMPLES["private-ip"][2]
+        self.allow([{"path": "conf.txt", "class": "private-ip",
+                     "line": re.escape(fixture), "reason": "synthetic fixture"}])
+        self.commit({"conf.txt": f"{fixture}\n"})
+        r = self.scan()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.commit({"conf.txt": f"{fixture}\n{fixture[:-1]},{ip}\"\n{fixture} # {ip}\n"})
+        r = self.scan()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(), ["conf.txt:2: private-ip", "conf.txt:3: private-ip"])
+        self.assertNoValue(r, [ip])
+
+    def test_a_file_git_calls_binary_is_still_scanned(self):
+        # Codex, on a copy of this scanner: a NUL byte made git print
+        # "Binary files ... differ", no line was read, and the scan said clean
+        key = SAMPLES["key-shape"][0]
+        ip = SAMPLES["private-ip"][0]
+        (self.repo / "blob.bin").write_bytes(b"\x00\x01head\n" + f"token {key}\n".encode())
+        self.commit({".gitattributes": "*.dat binary\n", "notes.dat": f"host {ip}\n"})
+        r = self.scan()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(sorted(r.stdout.splitlines()), ["blob.bin:2: key-shape", "notes.dat:1: private-ip"])
+        self.assertNoValue(r, [key, ip])
 
     def test_an_allowlist_entry_needs_a_reason_and_a_known_class(self):
         self.allow([{"path": "*", "class": "key-shape", "line": "x", "reason": " "}])
@@ -204,6 +232,25 @@ class PrScanTest(unittest.TestCase):
         r = self.scan()
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertEqual(r.stdout.splitlines(), [f"commit {self.rev()[:12]} message:3: private-ip"])
+        self.assertNoValue(r, [ip])
+
+    def test_a_nul_byte_in_a_commit_message_hides_nothing(self):
+        # `git log --format=%B` stops at a NUL; git only warns about one, so
+        # a commit written by hand can carry text past it
+        ip = SAMPLES["private-ip"][2]
+        tree, parent = self.rev("HEAD^{tree}"), self.rev()
+        obj = (f"tree {tree}\nparent {parent}\n"
+               "author t <t@example.invalid> 1700000000 +0000\n"
+               "committer t <t@example.invalid> 1700000000 +0000\n\n"
+               f"subject\n\nbefore\x00after {ip}\n").encode()
+        sha = subprocess.run(["git", "hash-object", "-t", "commit", "-w", "--literally", "--stdin"],
+                             input=obj, cwd=self.repo, check=True, capture_output=True
+                             ).stdout.decode().strip()
+        self.git("update-ref", "refs/heads/pr", sha)
+        r = self.scan()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(), [f"commit {sha[:12]} message:3: nul-byte",
+                                                 f"commit {sha[:12]} message:3: private-ip"])
         self.assertNoValue(r, [ip])
 
     def test_a_change_that_only_deletes_from_the_scan_still_warns(self):
@@ -255,7 +302,7 @@ class WiringTest(unittest.TestCase):
                 files = sorted(ROOT.glob(e["path"]))
                 self.assertTrue(files, "the allowlisted file is gone")
                 rx = re.compile(e["line"])
-                used = [l for f in files for l in f.read_text().splitlines() if rx.search(l)]
+                used = [l for f in files for l in f.read_text().splitlines() if rx.fullmatch(l)]
                 self.assertTrue(used, "no line matches the entry any more")
                 # and the entry is needed: without it, those lines are findings of its class
                 r = subprocess.run([sys.executable, str(PR_SCAN), "--allowlist", os.devnull,

@@ -1,44 +1,70 @@
 # Synthetic fixtures that bin/pr-scan may meet in a pull request's added
 # lines. An entry silences one class, in files matching `path` (a glob), on
-# lines that also match `line` (a regular expression), and says why the value
-# is synthetic. Shapes only: an entry never holds a real value. A pattern
-# breaks the literal with a one-character class (`sk-ant-[a]pi03-...`) so the
-# allowlist itself does not match the shape it allows.
+# lines that `line` (a regular expression) matches in full, and says why the
+# value is synthetic. Write the whole fixture line, `\s*` for its indent: an
+# entry that matched only part of a line would hide a value appended to it.
+# Shapes only: an entry never holds a real value. A pattern breaks the literal
+# with a one-character class (`sk-ant-[a]pi03-...`) or an escaped dot
+# (`10\.0\.0\.1`) so the allowlist itself does not match the shape it allows.
 #
 # Commit messages cannot be allowlisted.
 
 [[allow]]
 path = "coordinator/tests/test_agentstats.py"
 class = "key-shape"
-line = 'sk-ant-[F]AKE-0123456789-planted'
+line = 'SECRET = "sk-ant-[F]AKE-0123456789-planted"'
 reason = "a planted fake key: the test proves agent stats never carry a key that appeared in the transcript"
 
 [[allow]]
 path = "coordinator/tests/test_judge.py"
 class = "key-shape"
-line = 'sk-ant-[a]pi03-Q7x9Lm2Pz4Rt8Vw1Ny6Ks3Hd5Fg0Jb'
+line = 'SECRET = "sk-ant-[a]pi03-Q7x9Lm2Pz4Rt8Vw1Ny6Ks3Hd5Fg0Jb"'
 reason = "a synthetic key shorter than a real one: the test proves the judge's screen is scrubbed of it"
 
 [[allow]]
 path = "coordinator/tests/test_publish_safety.py"
 class = "key-shape"
-line = 'sk-ant-[a]pi03-ABCDEFGHIJKLMNOP'
+line = '\s*v = "sk-ant-[a]pi03-ABCDEFGHIJKLMNOP"'
 reason = "an alphabet placeholder: the redaction tests prove a token value, and a truncated head of it, are masked"
+
+[[allow]]
+path = "coordinator/tests/test_publish_safety.py"
+class = "key-shape"
+line = '\s*for name, v in \(\("WEIRD_URL", "sk-ant-[a]pi03-ABCDEFGHIJKLMNOP token"\),'
+reason = "the same alphabet placeholder, in the table of values the redaction must mask"
+
+[[allow]]
+path = "coordinator/tests/test_publish_safety.py"
+class = "key-shape"
+line = '\s*\("API_USER", "sk-ant-[a]pi03-ABCDEFGHIJKLMNOP"\),\s*# [a-z]+: dash token'
+reason = "the same alphabet placeholder, in the table of values the redaction must mask"
 
 [[allow]]
 path = "bin/bench-host-provision"
 class = "private-ip"
-line = '10\.201\.0\.0/16'
+line = '#   - Docker\x27s networks in GENTAR_DOCKER_POOL \(default 10\.201\.0\.0/16\): keep it'
+reason = "the provisioner's default Docker address pool, named in its header: Docker pools must be private ranges, and no host has this address"
+
+[[allow]]
+path = "bin/bench-host-provision"
+class = "private-ip"
+line = 'POOL=\$\{GENTAR_DOCKER_POOL:-10\.201\.0\.0/16\}'
 reason = "the provisioner's default Docker address pool: Docker pools must be private ranges, and no host has this address"
 
 [[allow]]
 path = "coordinator/tests/test_bench_host_provision.py"
 class = "private-ip"
-line = '10\.0\.0\.0/16; rm'
+line = '\s*\(\{"GENTAR_DOCKER_POOL": "10\.0\.0\.0/16; rm"\}, "bad GENTAR_DOCKER_POOL"\),'
 reason = "a synthetic pool with a shell tail: the test proves an unsafe GENTAR_DOCKER_POOL is refused"
 
 [[allow]]
 path = "coordinator/tests/test_docker_identity.py"
 class = "private-ip"
-line = 'tcp://10\.0\.0\.1:2375'
-reason = "a synthetic TCP Docker host: the tests prove a daemon that is not a unix socket is refused or reported"
+line = '\s*self\.refused\("needs a unix-socket Docker daemon", "--local", DOCKER_HOST="tcp://10\.0\.0\.1:2375"\)'
+reason = "a synthetic TCP Docker host: the test proves a daemon that is not a unix socket is refused"
+
+[[allow]]
+path = "coordinator/tests/test_docker_identity.py"
+class = "private-ip"
+line = '\s*r, out = self\.ident\(DOCKER_HOST="tcp://10\.0\.0\.1:2375"\)'
+reason = "a synthetic TCP Docker host: the test proves a daemon that is not a unix socket is reported"
