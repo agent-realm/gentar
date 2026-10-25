@@ -248,15 +248,38 @@ def _env_file(env: dict[str, str]) -> str:
     return "".join(f"export {k}={shlex.quote(v)}\n" for k, v in env.items())
 
 
-def _op_label(remote: str) -> str:
-    """A command's first two words, for an error that must not carry the
-    rest of it."""
-    return mask_token_shapes(" ".join(remote.split()[:2]))[:60]
-
-
 def _sq(s: str) -> str:
     """Single-quote for a remote shell word."""
     return "'" + s.replace("'", "'\\''") + "'"
+
+
+# What `sbx secret ls` gets of the environment, measured with sbx 0.39 on a
+# bench host by tracing the call with each variable pointed at an empty
+# directory: HOME (without it sbx panics), the four XDG base directories,
+# each of which moves a part of sbx's files (XDG_CONFIG_HOME its settings and
+# store), and the session bus that reaches its keyring. PATH only lets `env`
+# find a bare `sbx`. Everything else stays out, a provider key above all:
+# with ANTHROPIC_API_KEY set, sbx answers "Note: 1 additional environment
+# variable found" where it would say "No secrets found", and the check
+# refused every suite of a run that forwarded one.
+SBX_CHECK_ENV = ("HOME", "PATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
+                 "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS")
+_CLEAN_ENV = "exec env -i " + " ".join(f'${{{v}+"{v}=${v}"}}' for v in SBX_CHECK_ENV) + " "
+
+
+def clean_env_line(remote: str) -> str:
+    """A shell line that runs `remote` with only SBX_CHECK_ENV. The shell
+    that runs the line expands it: the coordinator's sh on the local tier,
+    the bench user's login shell over ssh. A name is passed only when it is
+    set, so an unset XDG directory stays unset rather than empty."""
+    return _CLEAN_ENV + remote
+
+
+def _op_label(remote: str) -> str:
+    """A command's first two words, for an error that must not carry the
+    rest of it."""
+    remote = remote.removeprefix(_CLEAN_ENV)
+    return mask_token_shapes(" ".join(remote.split()[:2]))[:60]
 
 
 class SbxBenchHost(BenchHost):
@@ -284,10 +307,13 @@ class SbxBenchHost(BenchHost):
 
     def _run(self, remote_cmd: list[str], timeout: int = 300,
              strict: bool = True,
-             input: str | None = None) -> subprocess.CompletedProcess:
+             input: str | None = None,
+             clean_env: bool = False) -> subprocess.CompletedProcess:
         # ssh flattens argv with shell word-splitting on the remote side,
         # so quote every word; sbx flags with values stay one word each.
         remote = " ".join(shlex.quote(w) for w in remote_cmd)
+        if clean_env:
+            remote = clean_env_line(remote)
         return self._ssh_run(self._ssh_base(), remote,
                              timeout=timeout, strict=strict, input=input)
 
@@ -316,11 +342,16 @@ class SbxBenchHost(BenchHost):
 
         GENTAR_SBX_SECRETS=allow is for an arena that uses sbx secrets as
         its credential mechanism on purpose. Only a count is reported,
-        never the listing."""
+        never the listing.
+
+        The check runs with only SBX_CHECK_ENV of the environment
+        (clean_env_line): a provider key the run forwards changes sbx's
+        answer, and on the local tier the coordinator's environment is the
+        one sbx gets."""
         if self.cfg.sbx_secrets == "allow":
             return []
         proc = self._run([self.cfg.sbx_bin, "secret", "ls"], timeout=60,
-                         strict=False)
+                         strict=False, clean_env=True)
         out = (proc.stdout + proc.stderr).strip()
         if proc.returncode != 0:
             return [f"could not check for stored sbx secrets on "

@@ -81,6 +81,19 @@ Adopters pin a release tag, not a branch.
   `jq` now fails them, so a checkout run cannot pass with none of them run.
 
 ### Fixed
+- **A forwarded provider key no longer makes the bench-host check refuse
+  every suite.** The check for stored sbx secrets ran `sbx secret ls` with the
+  caller's whole environment, and on the local tier (`GENTAR_BENCH_HOST=local`)
+  that is the coordinator's, forwarded provider keys included. With
+  `ANTHROPIC_API_KEY` set, sbx 0.39 prints "Note: 1 additional environment
+  variable found" where it would print "No secrets found"; the check counted
+  that line as a stored secret and refused the run with exit 2. It now runs
+  under `env -i` with only what sbx reads to find its config, state and
+  keyring (`HOME`, the four `XDG_*_HOME` directories, `XDG_RUNTIME_DIR`,
+  `DBUS_SESSION_BUS_ADDRESS`, and `PATH` to find `sbx`), each passed only when
+  set, on the ssh tier too. A stored secret is still refused, and still
+  reported as a count only. Engine only (`coordinator/gentar/benchhost.py`);
+  no kit file changed.
 - **`verify-ref.sh`'s cleanup no longer fails an admitted commit.** A
   private mirror's gate admitted a commit and then exited 1: `git fetch`
   starts a detached `git maintenance run --auto` that can still be writing
