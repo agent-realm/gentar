@@ -595,7 +595,7 @@ Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed 
   suite hides an engine one.
 - **Local bench mode on a host whose sbx login is in a keyring.** sbx in
   the coordinator has no session bus and reads the Docker login only from
-  files, so on a host with gnome-keyring (arf VM 142, sbx 0.39) every bench
+  files, so on a host with gnome-keyring (a bench host, sbx 0.39) every bench
   failed at `PREPARE IMAGE`: "no default account profile set: secret not
   found". New `bin/sbx-file-login` signs sbx in from a container, so the
   login is also written as files; the host's keyring login stays. The kit's
@@ -631,7 +631,7 @@ Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed 
     a variable and skips the key checks in local mode.
   - `local` is a mode, not a locator, so it is never redacted.
 
-  Proven on VM 151: `smoke` and `scripted-onboarding` pass end to end,
+  Proven on a test bench host: `smoke` and `scripted-onboarding` pass end to end,
   with no sandbox left.
 - Kit `[stage] git = true` (`gentar/policy.toml`): ship git history into the
   bench for suites that clone their own release tags. `plan.py stage-git`
@@ -827,9 +827,9 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
   lines of its stderr into the report, the span and the failure message,
   redacted like everything else. Passing steps are unchanged.
 - **A redacted host or user matches only as a whole token.** Bench user
-  `polat` redacted the middle of `github.com/ramazanpolat/…` in live
-  reports (claude-playbooks), and a host `10.10.10.5` would have taken the
-  head of `10.10.10.52` (cockpit). A locator is now replaced only where no
+  `user` redacted the middle of `github.com/someuser/…` in live
+  reports (claude-playbooks), and a host `192.0.2.5` would have taken the
+  head of `192.0.2.52` (cockpit). A locator is now replaced only where no
   host/user character (`[A-Za-z0-9-]`, or a `.` followed by one) continues
   it on either side — a sentence-final `.` still ends it, `_` ends it, and
   so does any escape right before it (terminal colour codes, `\n`/`\x0a`/
@@ -869,7 +869,7 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
   credential (user:pass@, a query, a fragment, or a path segment over 12
   characters, as in webhook URLs). A host counts only when shaped like
   one: IPv4, a lowercase dotted name, or a short lowercase label.
-- **Every value is now also redacted URL-encoded** (`polat%40host`,
+- **Every value is now also redacted URL-encoded** (`user%40host`,
   `sk%2Fabc…`) — credentials included; no form matched it before. Trade-off: a locator cut
   mid-value keeps its surviving head, a partial address.
 
@@ -877,7 +877,7 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
 
 **Every run leaves the arena as a trace.** A repo declares a telemetry
 destination and the arena forwards everything to it — the organisation's
-ClickStack on arf first.
+ClickStack first.
 
 ### Added
 
@@ -1002,7 +1002,7 @@ No schema or exit-code change; everything new is opt-in except the guard.
   credential proxy swaps in a real value for any service with a stored
   secret — so one `sbx secret set` on a shared host would hand that key to
   every suite there, whatever credential group the engine forwarded
-  (claude-playbooks, measured on arena-142: placeholders present, no secrets
+  (claude-playbooks, measured on a bench host: placeholders present, no secrets
   stored). The guarantee now holds by construction, not by host state.
   sbx 0.39 cannot turn the injection off per sandbox; an arena that uses sbx
   secrets on purpose sets `GENTAR_SBX_SECRETS=allow`. Only a count is

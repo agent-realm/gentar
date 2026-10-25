@@ -188,7 +188,7 @@ class WiringTest(unittest.TestCase):
         sc = TomlScenario(SCENARIO)
         bench = mock.MagicMock(push_before_create=True)
         bench.workspace.return_value = "/w"
-        bench.exec.return_value = (0, "/home/arena\nselfreport-nonempty\n")
+        bench.exec.return_value = (0, "/home/user\nselfreport-nonempty\n")
         cfg = SimpleNamespace(otlp_endpoint="http://otelcol:4318", clickhouse_db="gentar")
         with mock.patch.object(oracle, "_step"), \
              mock.patch("gentar.selfreport.check",
