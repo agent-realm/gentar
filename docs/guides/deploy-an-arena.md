@@ -149,8 +149,12 @@ The token goes through a pipe only. The script passes `sbx login` nothing
 but `--username`, `--password-stdin` and `--help`, and refuses anything
 else without echoing it (a token on the command line would show in `ps`
 and `docker inspect`; `-D` debug output may print auth). It also refuses
-`--password-stdin` from a terminal, where a typed token would echo. After the
-login it makes the store owner-only (sbx writes its files 644). The host's
+`--password-stdin` from a terminal, where a typed token would echo. The
+login container runs on the daemon and as the uid that `bin/docker-identity
+--local` gives the coordinator (0:0 on rootless Docker, which there is the
+runner's user; the user's own uid on rootful Docker), so run it from the
+gentar checkout. After the login it makes the store owner-only (sbx writes
+its files 644). The host's
 keyring login stays as it is. The arena refuses with exit 2
 while that folder has no default account profile
 (`GENTAR_SBX_AUTH_CHECK=off` skips the check, for an sbx that keeps it
