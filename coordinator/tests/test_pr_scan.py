@@ -62,7 +62,7 @@ class PrScanTest(unittest.TestCase):
         for name, text in files.items():
             p = self.repo / name
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(text)
+            p.write_bytes(text) if isinstance(text, bytes) else p.write_text(text)
         self.git("add", "-A")
         self.git("commit", "-q", "-m", message)
         return self.rev()
@@ -184,8 +184,74 @@ class PrScanTest(unittest.TestCase):
         self.commit({".gitattributes": "*.dat binary\n", "notes.dat": f"host {ip}\n"})
         r = self.scan()
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertEqual(sorted(r.stdout.splitlines()), ["blob.bin:2: key-shape", "notes.dat:1: private-ip"])
+        self.assertEqual(sorted(r.stdout.splitlines()), ["blob.bin: binary", "blob.bin:2: key-shape",
+                                                         "notes.dat: binary", "notes.dat:1: private-ip"])
         self.assertNoValue(r, [key, ip])
+
+    def test_a_binary_fails_unless_its_path_and_blob_are_allowlisted(self):
+        self.commit({"assets/blob.dat": b"\x00header\nplain\n"})
+        r = self.scan(GITHUB_ACTIONS="true")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(), [
+            "assets/blob.dat: binary",
+            "::error file=assets/blob.dat::binary: allowlist it by its blob id once reviewed"])
+        self.assertIn("a reviewed binary with its blob id", r.stderr)
+        # path and blob together pass
+        blob = self.rev("HEAD:assets/blob.dat")
+        self.allow([{"path": "assets/*.dat", "class": "binary", "blob": blob,
+                     "reason": "reviewed test asset"}])
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "allow the asset")
+        r = self.scan()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # new bytes under the same path need a new entry
+        self.commit({"assets/blob.dat": b"\x00changed\n"})
+        self.assertEqual(self.scan().stdout.splitlines(), ["assets/blob.dat: binary"])
+        # and the allowed blob under a path the entry does not name fails
+        self.commit({"assets/blob.dat": b"\x00header\nplain\n"})
+        self.assertEqual(self.scan().returncode, 0)
+        self.git("mv", "assets/blob.dat", "other.dat")
+        self.git("commit", "-q", "-m", "move")
+        self.assertEqual(self.scan().stdout.splitlines(), ["other.dat: binary"])
+
+    def test_an_allowlisted_binary_is_still_scanned_line_by_line(self):
+        ip = SAMPLES["private-ip"][1]
+        self.commit({"asset.bin": f"\x00head\nhost {ip}\n".encode()})
+        self.allow([{"path": "asset.bin", "class": "binary", "blob": self.rev("HEAD:asset.bin"),
+                     "reason": "reviewed test asset"}])
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "allow the asset")
+        r = self.scan()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(), ["asset.bin:2: private-ip"])
+        self.assertNoValue(r, [ip])
+
+    def test_an_attribute_that_makes_a_file_binary_makes_it_need_an_entry(self):
+        self.commit({".gitattributes": "*.md -diff\n", "notes.md": "plain notes\n"})
+        r = self.scan()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(), ["notes.md: binary"])
+
+    def test_deleting_a_binary_is_not_a_finding(self):
+        self.git("checkout", "-q", "main")
+        self.commit({"old.bin": b"\x00old\n"})
+        self.base = self.rev()
+        self.git("checkout", "-q", "-B", "pr", "main")
+        self.git("rm", "-q", "old.bin")
+        self.git("commit", "-q", "-m", "drop it")
+        r = self.scan()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_binary_entry_needs_a_full_blob_id(self):
+        self.commit({"a.txt": "fine\n"})
+        self.allow([{"path": "x.bin", "class": "binary", "reason": "r"}])
+        r = self.scan()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("lacks blob", r.stderr)
+        self.allow([{"path": "x.bin", "class": "binary", "blob": "abc123", "reason": "r"}])
+        r = self.scan()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not a full object id", r.stderr)
 
     def test_an_allowlist_entry_needs_a_reason_and_a_known_class(self):
         self.allow([{"path": "*", "class": "key-shape", "line": "x", "reason": " "}])
@@ -301,6 +367,11 @@ class WiringTest(unittest.TestCase):
                 self.assertTrue(e["reason"].strip())
                 files = sorted(ROOT.glob(e["path"]))
                 self.assertTrue(files, "the allowlisted file is gone")
+                if e["class"] == "binary":
+                    ids = [subprocess.run(["git", "hash-object", str(f)], capture_output=True,
+                                          text=True, check=True).stdout.strip() for f in files]
+                    self.assertIn(e["blob"], ids, "the allowlisted binary has changed")
+                    continue
                 rx = re.compile(e["line"])
                 used = [l for f in files for l in f.read_text().splitlines() if rx.fullmatch(l)]
                 self.assertTrue(used, "no line matches the entry any more")
