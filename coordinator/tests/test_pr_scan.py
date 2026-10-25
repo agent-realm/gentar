@@ -180,6 +180,50 @@ class PrScanTest(unittest.TestCase):
         self.assertIn("::warning::this pull request changes the scan itself (bin/pr-scan)", r.stdout)
         self.assertNoValue(r, [ip])
 
+    def test_a_line_is_split_at_newlines_only(self):
+        # Codex on #104: splitlines() broke an added line at \v, \f, U+2028
+        # (and text mode at a lone \r), and the rest was never scanned
+        ip = SAMPLES["private-ip"][0]
+        seps = ["\v", "\f", "\u2028", "\r", "\x1c", "\x1e"]
+        self.commit({"odd.txt": "".join(f"header{sep}{ip}\n" for sep in seps)})
+        r = self.scan()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(),
+                         [f"odd.txt:{i}: private-ip" for i in range(1, len(seps) + 1)])
+        self.assertNoValue(r, [ip])
+
+    def test_a_record_separator_in_a_commit_message_hides_nothing(self):
+        # Codex on #104: a \x1e inside a message was read as a commit boundary
+        ip = SAMPLES["private-ip"][1]
+        msg = self.repo.parent / f"{self.repo.name}.msg"
+        self.addCleanup(lambda: msg.unlink(missing_ok=True))
+        msg.write_text(f"subject\n\nbefore\x1eafter {ip}\n")
+        (self.repo / "a.txt").write_text("fine\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-F", str(msg))
+        r = self.scan()
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(), [f"commit {self.rev()[:12]} message:3: private-ip"])
+        self.assertNoValue(r, [ip])
+
+    def test_a_change_that_only_deletes_from_the_scan_still_warns(self):
+        # Codex on #104: the warning came from added lines, so deleting a
+        # pattern or an allowlist entry, and adding nothing, went unflagged
+        self.git("checkout", "-q", "main")
+        self.commit({"bin/pr-scan": "pattern one\npattern two\n",
+                     ".github/scan-allowlist.toml": "# entries\n"})
+        self.base = self.rev()
+        self.git("checkout", "-q", "-B", "pr", "main")
+        self.commit({"bin/pr-scan": "pattern one\n"})
+        r = self.scan(GITHUB_ACTIONS="true")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("::warning::this pull request changes the scan itself (bin/pr-scan)", r.stdout)
+        self.git("rm", "-q", ".github/scan-allowlist.toml")
+        self.git("commit", "-q", "-m", "drop the allowlist")
+        r = self.scan()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("changes the scan itself (.github/scan-allowlist.toml, bin/pr-scan)", r.stderr)
+
     def test_usage(self):
         self.assertEqual(self.scan("--base", self.base).returncode, 2)
         self.assertEqual(self.scan("--files", "README.md", "--base", self.base).returncode, 2)

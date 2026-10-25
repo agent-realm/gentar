@@ -74,7 +74,7 @@ CLASSES = {
     )],
 }
 
-SCAN_ITSELF = ("bin/pr-scan", ".github/scan-allowlist.toml")
+SCAN_ITSELF = ("bin/pr-scan", ".github/scan-allowlist.toml", ".github/workflows/gentar.yml")
 
 
 def die(msg: str):
@@ -119,12 +119,20 @@ class Allowlist:
 
 
 def git(*args: str) -> str:
-    proc = subprocess.run(["git", "-c", "core.quotepath=false", *args],
-                          capture_output=True, text=True, errors="replace")
+    # Bytes, decoded here: text mode would turn a lone \r inside a line into
+    # a line break, and the rest of that line would never be scanned.
+    proc = subprocess.run(["git", "-c", "core.quotepath=false", *args], capture_output=True)
     if proc.returncode != 0:
         # git's own message names refs, never file content
-        die(f"git {args[0]} failed: {proc.stderr.strip()[:300]}")
-    return proc.stdout
+        die(f"git {args[0]} failed: {proc.stderr.decode(errors='replace').strip()[:300]}")
+    return proc.stdout.decode("utf-8", errors="replace")
+
+
+def lines_of(text: str) -> list[str]:
+    """Split on \n only. str.splitlines() also breaks at \v, \f, \x1c-\x1e
+    and U+2028, which git does not: a finding after one of them in an added
+    line would land on a "line" that is not part of the diff (Codex on #104)."""
+    return text.split("\n")
 
 
 def _unquote(path: str) -> str:
@@ -139,7 +147,7 @@ def added_lines(base: str, head: str):
     out = git("diff", "--no-color", "--no-ext-diff", "--unified=0", "--no-renames",
               f"{base}...{head}")
     path, n, in_hunk = None, 0, False
-    for line in out.splitlines():
+    for line in lines_of(out):
         if line.startswith("diff --git "):
             path, in_hunk = None, False
         elif not in_hunk and line.startswith("+++ "):
@@ -155,15 +163,23 @@ def added_lines(base: str, head: str):
 
 
 def commit_messages(base: str, head: str):
-    """(sha, line number, text) for every line of the commits head has and base has not."""
-    out = git("log", "--format=%H%x00%B%x1e", f"{base}..{head}")
-    for rec in out.split("\x1e"):
-        rec = rec.strip("\n")
-        if not rec:
+    """(sha, line number, text) for every line of the commits head has and base has not.
+
+    Records are NUL-separated (`-z`): git refuses a NUL in a commit message,
+    while any other separator could sit inside one and hide what follows it
+    (Codex on #104)."""
+    out = git("log", "-z", "--format=%H%n%B", f"{base}..{head}")
+    for rec in out.split("\x00"):
+        sha, _, body = rec.lstrip("\n").partition("\n")
+        if not sha:
             continue
-        sha, _, body = rec.partition("\x00")
-        for n, line in enumerate(body.splitlines(), 1):
+        for n, line in enumerate(lines_of(body.rstrip("\n")), 1):
             yield sha, n, line
+
+
+def changed_files(base: str, head: str) -> set[str]:
+    """Every path the pull request adds, changes, deletes or renames."""
+    return set(lines_of(git("diff", "--name-only", "--no-renames", f"{base}...{head}"))) - {""}
 
 
 def _prop(s: str) -> str:
@@ -188,13 +204,11 @@ def main(argv=None) -> int:
     findings, lines_seen, commits = [], 0, set()
     if a.files:
         source = ((p, n, l) for p in a.files
-                  for n, l in enumerate(Path(p).read_text(errors="replace").splitlines(), 1))
+                  for n, l in enumerate(lines_of(Path(p).read_bytes().decode("utf-8", "replace")), 1))
     else:
         source = added_lines(a.base, a.head)
-    touched = set()
     for path, n, text in source:
         lines_seen += 1
-        touched.add(path)
         for cls in classes_of(text):
             if not allow.allows(path, cls, text):
                 findings.append((path, n, cls, True))
@@ -208,9 +222,12 @@ def main(argv=None) -> int:
         print(f"{where}:{n}: {cls}")
         if gha and is_file:
             print(f"::error file={_prop(where)},line={n}::{cls} (the matched text is not shown)")
-    changed_scan = sorted(touched & set(SCAN_ITSELF))
-    if changed_scan and gha:
-        print(f"::warning::this pull request changes the scan itself ({', '.join(changed_scan)}): review that change")
+    # From the changed paths, not the added lines: a pull request that only
+    # deletes a pattern or an allowlist line adds nothing (Codex on #104).
+    changed_scan = [] if a.files else sorted(changed_files(a.base, a.head) & set(SCAN_ITSELF))
+    if changed_scan:
+        note = f"this pull request changes the scan itself ({', '.join(changed_scan)}): review that change"
+        print(f"::warning::{note}" if gha else f"pr-scan: {note}", file=sys.stdout if gha else sys.stderr)
     what = f"{lines_seen} line(s)" + ("" if a.files else f" and {len(commits)} commit message(s)")
     if findings:
         print(f"pr-scan: {len(findings)} finding(s) in {what}. Use stand-ins (192.0.2.x, "
