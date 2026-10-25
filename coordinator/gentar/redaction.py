@@ -24,19 +24,19 @@ address cannot survive inside another URL. A URL is a locator only when
 it carries nothing credential-shaped: no user:pass@, query, fragment, or
 path segment longer than 12 characters. A locator's 8-char heads are
 shared with innocent text: `http://1` of an export URL redacted every
-http://1… address in a report, and `10.10.10` of a bench host every host on
+http://1… address in a report, and `192.0.2.` of a bench host every host on
 its subnet (cockpit, reproduced with this scrubber). The trade-off, stated:
 a locator cut mid-value keeps its surviving head (a partial address), which
 is not a credential. Either test failing — name or shape — means the value
 is treated as a credential: the stricter rule is the default.
 
 A locator matches only as a whole token: not inside a longer name or
-address. Without that, bench user `polat` redacted the middle of
-`github.com/ramazanpolat/…`, and host 10.10.10.5 the head of 10.10.10.52
+address. Without that, bench user `user` redacted the middle of
+`github.com/someuser/…`, and host 192.0.2.5 the head of 192.0.2.52
 (claude-playbooks, cockpit). A word character — [A-Za-z0-9-], or a `.`
 followed by one — on either side continues the token; anything else ends
-it, so `connect to 10.10.10.52.` at a sentence end is still replaced. `_`
-ends a token (hosts and GitHub users never contain one: `user_polat` is
+it, so `connect to 192.0.2.52.` at a sentence end is still replaced. `_`
+ends a token (hosts and GitHub users never contain one: `id_user` is
 redacted). And an ESCAPE right before the value ends it too, whatever its
 last character: a terminal colour code (`\x1b[31m`), a string escape
 (`\n`, `é`, `\x0a`, `\012`), URL-encoding (`%2F`), an HTML entity with

@@ -19,5 +19,5 @@ only this directory is mounted, so inside the coordinator a link points at
 a host path that does not exist there, and a symlink out of this root is
 refused before any bench exists.
 
-Or point compose elsewhere: `GENTAR_SUBJECTS_DIR=~/DEV` gives the
+Or point compose elsewhere: `GENTAR_SUBJECTS_DIR=~/src` gives the
 coordinator every checkout under it.

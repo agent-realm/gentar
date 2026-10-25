@@ -33,12 +33,12 @@ class RedactTest(unittest.TestCase):
 
     def test_named_values_are_replaced_by_their_name(self):
         r, out = self.run_redact(
-            "ssh: connect to host 10.10.10.52 port 22 as polat\nkey sk-abc123xyz\n",
+            "ssh: connect to host 192.0.2.52 port 22 as user\nkey sk-abc123xyz\n",
             GENTAR_REDACT_NAMES="GENTAR_BENCH_HOST GENTAR_BENCH_USER ANTHROPIC_AUTH_TOKEN",
-            GENTAR_BENCH_HOST="10.10.10.52", GENTAR_BENCH_USER="polat",
+            GENTAR_BENCH_HOST="192.0.2.52", GENTAR_BENCH_USER="user",
             ANTHROPIC_AUTH_TOKEN="sk-abc123xyz")
         self.assertEqual(r.returncode, 0, r.stderr)
-        for secret in ("10.10.10.52", "polat", "sk-abc123xyz"):
+        for secret in ("192.0.2.52", "user", "sk-abc123xyz"):
             self.assertNotIn(secret, out)
         self.assertIn("«redacted:GENTAR_BENCH_HOST»", out)
         self.assertIn("«redacted:ANTHROPIC_AUTH_TOKEN»", out)
@@ -70,17 +70,17 @@ class RedactTest(unittest.TestCase):
 
     def test_a_locator_does_not_redact_unrelated_addresses(self):
         # cockpit#29: the 8-char head `http://1` of the export URL redacted
-        # every http://1… URL; `10.10.10` of the bench host its whole subnet
-        text = ("export http://10.10.10.58:4318/v1/traces\n"
-                "provider http://10.10.10.100:20128/v1 local http://127.0.0.1:8123\n"
-                "bench ssh polat@10.10.10.52 ; peer 10.10.10.58:4318 ; other 10.10.10.60\n")
+        # every http://1… URL; `192.0.2.` of the bench host its whole subnet
+        text = ("export http://192.0.2.58:4318/v1/traces\n"
+                "provider http://192.0.2.100:8000/v1 local http://127.0.0.1:8123\n"
+                "bench ssh user@192.0.2.52 ; peer 192.0.2.58:4318 ; other 192.0.2.60\n")
         r, out = self.run_redact(
             text, GENTAR_REDACT_NAMES="GENTAR_OTLP_EXPORT GENTAR_BENCH_HOST",
-            GENTAR_OTLP_EXPORT="http://10.10.10.58:4318", GENTAR_BENCH_HOST="10.10.10.52")
+            GENTAR_OTLP_EXPORT="http://192.0.2.58:4318", GENTAR_BENCH_HOST="192.0.2.52")
         self.assertEqual(r.returncode, 0, r.stderr)
-        for kept in ("http://10.10.10.100:20128/v1", "http://127.0.0.1:8123", "10.10.10.60"):
+        for kept in ("http://192.0.2.100:8000/v1", "http://127.0.0.1:8123", "192.0.2.60"):
             self.assertIn(kept, out)
-        for gone in ("10.10.10.58", "10.10.10.52"):   # exact value, host:port and host
+        for gone in ("192.0.2.58", "192.0.2.52"):   # exact value, host:port and host
             self.assertNotIn(gone, out)
 
     def test_an_https_locator_leaves_other_https_urls_alone(self):
@@ -120,49 +120,49 @@ class RedactTest(unittest.TestCase):
 
     def test_a_value_is_caught_url_encoded(self):
         # agy: an application that URL-encodes a value (a query parameter)
-        # emits polat%40bench.corp, which no raw/JSON/HTML form matches
-        for name, v, enc in (("GENTAR_BENCH_JUMP", "polat@bench.corp", "polat%40bench.corp"),
+        # emits user%40bench.corp, which no raw/JSON/HTML form matches
+        for name, v, enc in (("GENTAR_BENCH_JUMP", "user@bench.corp", "user%40bench.corp"),
                              ("ANTHROPIC_AUTH_TOKEN", "sk/abc+def=ghij", "sk%2Fabc%2Bdef%3Dghij")):
             _, out = self.run_redact(f"GET /x?u={enc}&y=1", GENTAR_REDACT_NAMES=name,
                                      **{name: v})
             self.assertNotIn(enc, out, (name, out))
 
     def test_a_locator_matches_only_as_a_whole_token(self):
-        # claude-playbooks: bench user polat redacted the middle of
-        # github.com/ramazanpolat/...; cockpit: host 10.10.10.5 the head of .52
-        text = ("repo github.com/ramazanpolat/claude-playbooks polatx\n"
-                "ssh polat@10.10.10.5 ; /Users/polat/x ; other 10.10.10.52 and 110.10.10.5\n"
-                "connect to 10.10.10.5.\nuser polat.\n")
+        # claude-playbooks: bench user `user` redacted the middle of
+        # github.com/someuser/...; cockpit: host 192.0.2.5 the head of .52
+        text = ("repo github.com/someuser/example-repo userx\n"
+                "ssh user@192.0.2.5 ; /home/user/x ; other 192.0.2.52 and 1192.0.2.5\n"
+                "connect to 192.0.2.5.\nlogin user.\n")
         _, out = self.run_redact(text, GENTAR_REDACT_NAMES="GENTAR_BENCH_USER GENTAR_BENCH_HOST",
-                                 GENTAR_BENCH_USER="polat", GENTAR_BENCH_HOST="10.10.10.5")
-        for kept in ("ramazanpolat", "polatx", "10.10.10.52", "110.10.10.5"):
+                                 GENTAR_BENCH_USER="user", GENTAR_BENCH_HOST="192.0.2.5")
+        for kept in ("someuser", "userx", "192.0.2.52", "1192.0.2.5"):
             self.assertIn(kept, out)
         self.assertIn("«redacted:GENTAR_BENCH_USER»@«redacted:GENTAR_BENCH_HOST»", out)
-        self.assertIn("/Users/«redacted:GENTAR_BENCH_USER»/x", out)
+        self.assertIn("/home/«redacted:GENTAR_BENCH_USER»/x", out)
         self.assertIn("connect to «redacted:GENTAR_BENCH_HOST».", out)   # sentence end
-        self.assertIn("user «redacted:GENTAR_BENCH_USER».", out)
+        self.assertIn("login «redacted:GENTAR_BENCH_USER».", out)
 
     def test_a_locator_after_an_escape_sequence_is_still_redacted(self):
         # the dashboard embeds text as JSON: a newline is `\n`, a LETTER
         # right before the host — the boundary must not let it survive
         import json as _json
-        text = _json.dumps({"detail": "ssh failed\n10.10.10.5 port 22\tpolaté10.10.10.5"})
+        text = _json.dumps({"detail": "ssh failed\n192.0.2.5 port 22\tuseré192.0.2.5"})
         _, out = self.run_redact(text, GENTAR_REDACT_NAMES="GENTAR_BENCH_USER GENTAR_BENCH_HOST",
-                                 GENTAR_BENCH_USER="polat", GENTAR_BENCH_HOST="10.10.10.5")
-        self.assertNotIn("10.10.10.5", out)
-        self.assertNotIn("polat", out)
+                                 GENTAR_BENCH_USER="user", GENTAR_BENCH_HOST="192.0.2.5")
+        self.assertNotIn("192.0.2.5", out)
+        self.assertNotIn("user", out)
 
     def test_a_locator_after_any_escape_or_underscore_is_redacted(self):
         # agy review of the whole-token rule: each of these hid the value
         # behind a letter or digit that is not part of its token
-        for text in ("url=%2F10.10.10.5", "user=%40polat", "\x1b[31m10.10.10.5\x1b[0m",
-                     "\x1b[1;38;5;208mpolat", "user_polat", "polat_ssh",
-                     "\\x0a10.10.10.5", "\\01210.10.10.5", "&quot10.10.10.5", "&#39;polat",
-                     "ramazan%2Fpolat%2Frepo", "ssh%3A%2F%2Fuser%4010.10.10.5%2Fx"):  # Codex
+        for text in ("url=%2F192.0.2.5", "u=%40user", "\x1b[31m192.0.2.5\x1b[0m",
+                     "\x1b[1;38;5;208muser", "id_user", "user_ssh",
+                     "\\x0a192.0.2.5", "\\012192.0.2.5", "&quot192.0.2.5", "&#39;user",
+                     "owner%2Fuser%2Frepo", "ssh%3A%2F%2Fuser%40192.0.2.5%2Fx"):  # Codex
             _, out = self.run_redact(text, GENTAR_REDACT_NAMES="GENTAR_BENCH_USER GENTAR_BENCH_HOST",
-                                     GENTAR_BENCH_USER="polat", GENTAR_BENCH_HOST="10.10.10.5")
-            self.assertNotIn("10.10.10.5", out, text)
-            self.assertNotIn("polat", out, text)
+                                     GENTAR_BENCH_USER="user", GENTAR_BENCH_HOST="192.0.2.5")
+            self.assertNotIn("192.0.2.5", out, text)
+            self.assertNotIn("user", out, text)
 
     def test_a_value_containing_another_is_replaced_whole(self):
         _, out = self.run_redact("token=abcd-efgh",

@@ -11,7 +11,7 @@ driver, OTel-shaped telemetry, reality-based assertions — on a Proxmox VM
 substrate. That substrate is the expensive part and the fragile part: clone
 lifecycle, sudoers, ZFS snapshot ladder, credential sync, plus two open wounds
 (the vzdump durability gap and the `/etc/environment` token-leak class).
-testbed is already a Linux approximation of a macOS home, so a container is
+The test VM is already a Linux approximation of a macOS home, so a container is
 no less faithful than the VM was. Replacing VMs with a single Docker Compose
 stack deletes the whole apparatus, both known gaps, and makes the engine
 runnable anywhere.
@@ -133,7 +133,7 @@ portable:
   cron, or a laptop.
 
 Runners must exist on whatever metal we use (self-hosted runner in an LXC on
-arf for Linux benches; a runner on a Mac for the tart/macOS tier — macOS
+a Proxmox host for Linux benches; a runner on a Mac for the tart/macOS tier — macOS
 VMs require Apple hardware, Proxmox cannot host them). Runners connect
 outbound only (polling); no inbound ports.
 
@@ -141,9 +141,9 @@ outbound only (polling); no inbound ports.
 
 | # | Question | Notes |
 |---|---|---|
-| 6 | ~~Nested-Docker vehicle~~ **DECIDED by spike 2026-08-18: Docker Sandboxes (sbx)** | All unknowns resolved live on arf (VM 9100, Ubuntu 24.04, nested KVM): headless device-flow auth with on-disk persistent token; full programmatic lifecycle (`create`/`exec -t` pty/`cp`/`ls --json`/`rm`, `run -d`); custom templates (`-t`, tar load); workspace bind-mounts + `--clone` git wiring; **a full Docker Engine inside each sandbox** with hard two-way isolation from the host daemon; egress under policy; `shell` agent = no-LLM oracle vehicle; per-agent default images (claude, codex, …). Spike report: task artifact `sbx-spike-2026-08-18-02_41.md` |
-| 7 | CubeSandbox as a fourth bench tier? **CANDIDATE — recorded 2026-09-15, not spiked** | RustVMM/KVM microVM service with an E2B-compatible API and an L7 egress proxy with per-request credential injection ([TencentCloud/CubeSandbox](https://github.com/TencentCloud/CubeSandbox), v0.7.0). Would combine what the two Linux tiers split: sbx's microVM isolation with osb's API drive. The one unmet need it maps to is the deferred security-tier credential-holding proxy (decided 2026-08-18 below) — no live consumer until real-agent/security-tier work starts. Headless CI microVM is already covered (sbx gate green on VM 142). Revisit trigger: security-tier work begins. Spike checklist (KVM on the host, API lifecycle incl. pty, Docker-in-microVM, custom templates, proxy credential opacity, density/boot-time vs sbx, v0.x API stability) lives in the handoff: task artifact `handoff-cubesandbox-2026-09-15-07_45.md`. Do not use tr0 for any of it (pilot constraint). |
-| 8 | ~~Agent credential provider~~ **DECIDED 2026-09-15: provider-agnostic alternatives — refined 2026-09-21 (PR #26 review): alternatives of GROUPS** | Tier-1 credential guard treats declared entries as ALTERNATIVES, and an entry that is a LIST is an all-of GROUP: `ANTHROPIC_API_KEY` (first-party) or `ANTHROPIC_AUTH_TOKEN`+`ANTHROPIC_BASE_URL` (any Anthropic-protocol endpoint — GLM coding plan at `https://api.z.ai/api/anthropic` proven live in agent-smoke, routers, proxies) — the pair travels together because a token without its endpoint is HALF a provider: the old any-of guard let it half-pass and start a misconfigured credentialed bench; now it refuses (exit 2) before any bench exists. claude-code reads both shapes natively, z.ai accepts claude-* model IDs (no model pin). Verified end-to-end: bench egress to z.ai, real run PASS host-side + in compose with spans, refusal path exit 2 (pair-half refusal unit-tested). **Cheaper-model pin (2026-09-15):** scenarios carry optional `pass_env` (non-guard passthrough); agent-smoke pins `ANTHROPIC_DEFAULT_SONNET_MODEL` (repo var) — slot vars accept glm-* IDs the main-model path's catalog rejects (glm-5.3-flash hard-fails as `ANTHROPIC_MODEL`, works as the sonnet slot, proven live). |
+| 6 | ~~Nested-Docker vehicle~~ **DECIDED by spike 2026-08-18: Docker Sandboxes (sbx)** | All unknowns resolved live on a spike VM (Ubuntu 24.04, nested KVM): headless device-flow auth with on-disk persistent token; full programmatic lifecycle (`create`/`exec -t` pty/`cp`/`ls --json`/`rm`, `run -d`); custom templates (`-t`, tar load); workspace bind-mounts + `--clone` git wiring; **a full Docker Engine inside each sandbox** with hard two-way isolation from the host daemon; egress under policy; `shell` agent = no-LLM oracle vehicle; per-agent default images (claude, codex, …). Spike report: task artifact `sbx-spike-2026-08-18-02_41.md` |
+| 7 | CubeSandbox as a fourth bench tier? **CANDIDATE — recorded 2026-09-15, not spiked** | RustVMM/KVM microVM service with an E2B-compatible API and an L7 egress proxy with per-request credential injection ([TencentCloud/CubeSandbox](https://github.com/TencentCloud/CubeSandbox), v0.7.0). Would combine what the two Linux tiers split: sbx's microVM isolation with osb's API drive. The one unmet need it maps to is the deferred security-tier credential-holding proxy (decided 2026-08-18 below) — no live consumer until real-agent/security-tier work starts. Headless CI microVM is already covered (sbx gate green on a bench host). Revisit trigger: security-tier work begins. Spike checklist (KVM on the host, API lifecycle incl. pty, Docker-in-microVM, custom templates, proxy credential opacity, density/boot-time vs sbx, v0.x API stability) lives in the handoff: task artifact `handoff-cubesandbox-2026-09-15-07_45.md`. Do not use the shared development host for any of it (pilot constraint). |
+| 8 | ~~Agent credential provider~~ **DECIDED 2026-09-15: provider-agnostic alternatives — refined 2026-09-21 (PR #26 review): alternatives of GROUPS** | Tier-1 credential guard treats declared entries as ALTERNATIVES, and an entry that is a LIST is an all-of GROUP: `ANTHROPIC_API_KEY` (first-party) or `ANTHROPIC_AUTH_TOKEN`+`ANTHROPIC_BASE_URL` (any Anthropic-protocol endpoint — GLM coding plan at `https://api.z.ai/api/anthropic` proven live in agent-smoke, routers, proxies) — the pair travels together because a token without its endpoint is HALF a provider: the old any-of guard let it half-pass and start a misconfigured credentialed bench; now it refuses (exit 2) before any bench exists. claude-code reads both shapes natively, z.ai accepts claude-* model IDs (no model pin). Verified end-to-end: bench egress to z.ai, real run PASS host-side + in compose with spans, refusal path exit 2 (pair-half refusal unit-tested). **Cheaper-model pin (2026-09-15):** scenarios carry optional `pass_env` (non-guard passthrough); agent-smoke pins `ANTHROPIC_DEFAULT_SONNET_MODEL` (repo var) — slot vars accept third-party IDs the main-model path's catalog rejects (a third-party flash model ID hard-fails as `ANTHROPIC_MODEL`, works as the sonnet slot, proven live). |
 | 9 | ~~The arena runs under the playbooks it tests (ouroboros)~~ **DECIDED 2026-09-19: pin last-known-good machinery** | When a scenario's machinery overlaps the ref under test — gentar scenarios driving claude-playbook installs, cpb shaping the agent's own environment — that machinery is pinned to the newest release tag, cloned from the subject's own mounted `.git` (private repo; full history travels with the checkout). The ref under test is never its own tool. First suite: `agent-profile-smoke` — real claude-code runs headless under `CLAUDE_CONFIG_DIR` pointed at the pinned install; the verdict is triple reality (`version.txt` string-equals the pinned `VERSION`, banner-sourced through the pinned SessionStart hook; a session transcript lands in the pinned dir's `projects/` — a directory `install.sh` never creates, so it proves the config dir was honored with zero LLM cooperation; `describe --exact-match` proves the pin held). |
 
 Decided 2026-08-17: ~~no-LLM smoke variants~~ → oracle-solution pattern
@@ -174,9 +174,9 @@ gentar first, then archive the GitHub repo and move the checkout to
 
 Decided 2026-08-18: **bench shape** — the pilot home dir is a scenario
 decision: `pilot_user` renders as `/Users/<name>` on the macOS backend and
-`/home/<name>` on Linux (path-keyed session data stays valid; the testbed
+`/home/<name>` on Linux (path-keyed session data stays valid; the test VM's
 convention, generalized). **macOS tier is in scope now**: tart runs on the
-pilot's Mac (`macminim`) behind a `[gentar, macos]` runner. **First
+pilot's Mac behind a `[gentar, macos]` runner. **First
 subjects, in order:** claude-playbooks (the installer CLI) ·
 kommander-playbook · memhouse.
 
@@ -195,7 +195,7 @@ Each bench = its own microVM with its own Docker daemon — the nested
 boundary comes free. Driver transport becomes `sbx exec -t` (Linux benches)
 + `ssh` (tart macOS tier) behind the same interface; sbx's per-agent
 default images replace part of the terminal-bench adapter work; DinD/sysbox
-and apple/container-in-tart drop to fallbacks only. tart on macminim
+and apple/container-in-tart drop to fallbacks only. tart on a Mac
 remains the macOS backend (sbx itself cannot host macOS sandboxes).
 
 Decided 2026-09-20: **simulated pilots** — the interactive real-agent

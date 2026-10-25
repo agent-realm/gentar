@@ -80,7 +80,7 @@ sits in a file next to the keyring it unlocks.
    (the password file is mode 600, readable by that user only).
 2. A drop-in that brings it back after a crash:
    `ExecStartPre=-/usr/bin/pkill -x gnome-keyring-d`, `Restart=always`,
-   `RestartSec=3`. gnome-keyring 46.1 crashed 14 times in 30 days on VM 142
+   `RestartSec=3`. gnome-keyring 46.1 crashed 14 times in 30 days on one bench host
    (a GLib assertion when a client leaves during a session handshake).
 3. A D-Bus override, so that a client asking for the secrets service in
    the 3-second restart gap starts THAT unit and waits for it, instead of
@@ -114,7 +114,7 @@ as the runner's user, with the host's `sbx` binary, its state and config
 (`~/.local/state/sandboxes`, `~/.config/sandboxes`,
 `~/.config/com.docker.sandboxes`) and the workspace root mounted at the same
 paths. The runner's user must be the one that ran `sbx login`. Benches see
-none of it; each gets only its own workspace directory. Proven on an arf VM
+none of it; each gets only its own workspace directory. Proven on a VM
 (sbx 0.45.1) with the `smoke` and `scripted-onboarding` suites.
 
 **Rootless Docker.** Which uid "the runner's user" is inside the coordinator
