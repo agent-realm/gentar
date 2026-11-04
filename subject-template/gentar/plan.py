@@ -18,7 +18,7 @@ it on a GitHub-hosted runner (or the one GENTAR_CI_RUNNER names, never the
 bench's) BEFORE any job may touch the self-hosted bench runner:
 a pull request's code never reaches the bench-host unless this says so.
 
-Phases (the pilot's words: phase 1 for every PR, phase 2 only when asked):
+Phases (phase 1 for every PR, phase 2 only when asked):
 
   phase 1   every PR and every push to the default branch
               checks   bench-free, on a GitHub-hosted runner (run.sh --check)
@@ -489,7 +489,7 @@ def ci_runner(env):
     # pre-scheduling guard (`contains(vars.GENTAR_CI_RUNNER, 'arena')`, and
     # the same for GENTAR_BENCH_LABEL): runner labels match regardless of
     # case, so `Arena` IS the bench runner (Codex). A bench runner labelled
-    # otherwise (agentmux's `agentmux-lab`) is caught by its own label.
+    # otherwise (`my-bench`, say) is caught by its own label.
     for label in ["arena"] + ([bench] if bench else []):
         if label.lower() in raw.lower():          # no escapes (above): raw IS decoded
             raise Refuse(f"GENTAR_CI_RUNNER names the bench runner's label {label!r} (or a "
@@ -522,7 +522,7 @@ def plan(env, policy):
     res = {"checks": False, "bench": "none", "suites": [], "reason": "",
            "setup": {}, "os": ["ubuntu-latest"], "route": route_names(policy)}
     runner = ci_runner(env)
-    # Where plan and checks ran, in the plan output (claude-playbooks-dc):
+    # Where plan and checks ran, in the plan output:
     # a subject can see it without reading repository settings.
     res["runner"] = json.dumps(runner) if runner else "github-hosted"
     if runner is not None:

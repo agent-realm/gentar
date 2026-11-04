@@ -1,4 +1,4 @@
-"""Pickers without numbers (cockpit, 2026-10-01).
+"""Pickers without numbers (an adopter, 2026-10-01).
 
 pick_option only recognised `❯ N.` cursor lines, so Claude Code 2.1.283's
 API-key and trust dialogs ("❯ No, exit" / "Yes, I trust this folder") never

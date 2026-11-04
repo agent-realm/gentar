@@ -81,14 +81,14 @@ class CiRunnerTest(unittest.TestCase):
                 self.plan(bad)
 
     def test_a_bench_runner_with_its_own_label_is_never_named(self):
-        # agentmux's bench runner carries `agentmux-lab`, not `arena`
-        for bad in ('["self-hosted", "agentmux-lab"]', '["self-hosted", "AgentMux-Lab"]',
-                    '"agentmux-lab-ci"'):
-            with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse, "agentmux-lab"):
-                self.plan(bad, GENTAR_BENCH_LABEL="agentmux-lab")
+        # a bench runner that carries `my-bench`, not `arena`
+        for bad in ('["self-hosted", "my-bench"]', '["self-hosted", "My-Bench"]',
+                    '"my-bench-ci"'):
+            with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse, "my-bench"):
+                self.plan(bad, GENTAR_BENCH_LABEL="my-bench")
         with self.assertRaisesRegex(self.p.Refuse, "'arena'"):     # arena stays refused
-            self.plan('["self-hosted", "arena"]', GENTAR_BENCH_LABEL="agentmux-lab")
-        self.assertEqual(self.plan(SELF, GENTAR_BENCH_LABEL="agentmux-lab")["runner"],
+            self.plan('["self-hosted", "arena"]', GENTAR_BENCH_LABEL="my-bench")
+        self.assertEqual(self.plan(SELF, GENTAR_BENCH_LABEL="my-bench")["runner"],
                          '["self-hosted", "linux-ci"]')
         with self.assertRaisesRegex(self.p.Refuse, "GENTAR_BENCH_LABEL must be one"):
             self.plan(SELF, GENTAR_BENCH_LABEL="a b")
@@ -96,20 +96,20 @@ class CiRunnerTest(unittest.TestCase):
     def test_the_bench_label_is_checked_even_on_hosted_ci(self):
         # agy on #98: it was read only when GENTAR_CI_RUNNER was set; the
         # bench job runs on it either way
-        for bad in ("a b", "agentmux-lab ", "linux", "Self-Hosted", "x64"):
+        for bad in ("a b", "my-bench ", "linux", "Self-Hosted", "x64"):
             with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse,
                                                                "GENTAR_BENCH_LABEL must be one"):
                 self.plan(GENTAR_BENCH_LABEL=bad)
-        self.assertEqual(self.plan(GENTAR_BENCH_LABEL="agentmux-lab")["runner"], "github-hosted")
+        self.assertEqual(self.plan(GENTAR_BENCH_LABEL="my-bench")["runner"], "github-hosted")
 
     def test_a_json_escape_is_refused(self):
         # runs-on decodes, the guard reads raw text: "\u0061rena" named the
         # bench runner past both (Codex on #98). No label needs an escape,
         # so any backslash is refused, even in a harmless label.
-        for bad in ('["self-hosted", "agentmux\\u002dlab"]', '"\\u0061rena"',
+        for bad in ('["self-hosted", "my\\u002dbench"]', '"\\u0061rena"',
                     '["self-hosted", "linux\\u002dci"]'):
             with self.subTest(bad=bad), self.assertRaisesRegex(self.p.Refuse, "JSON escape"):
-                self.plan(bad, GENTAR_BENCH_LABEL="agentmux-lab")
+                self.plan(bad, GENTAR_BENCH_LABEL="my-bench")
 
     def test_default_labels_alone_are_refused(self):
         # every self-hosted runner carries them, the bench runner included (SB03)
@@ -168,7 +168,7 @@ class WorkflowTest(unittest.TestCase):
     def test_the_bench_label_is_refused_before_any_job_is_scheduled(self):
         # runs-on would start plan ON the bench runner, running the PR's
         # plan.py there before plan.py could refuse (Codex). `arena`, and the
-        # label GENTAR_BENCH_LABEL names (agentmux-lab), in all three places.
+        # label GENTAR_BENCH_LABEL names (my-bench), in all three places.
         # The `!= ''` matters: contains(x, '') is true for every x. The
         # backslash: runs-on decodes JSON escapes this raw check cannot see.
         refused = self.job("ci-runner-refused")

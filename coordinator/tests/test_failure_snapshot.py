@@ -1,6 +1,6 @@
 """A failed driver turn leaves the session's state in the report.
 
-cockpit's first-run scenario parked after three bench rounds: its TUI never
+An adopter's first-run scenario parked after three bench rounds: its TUI never
 drew the expected screen, and the report held only the transcript, because
 verify does not run after a failed turn. Now a failed turn (or the final
 wait timing out, or the danger gate) captures the rendered last screen, the
@@ -18,7 +18,7 @@ from gentar.report import RunReport
 from gentar.toml_scenario import ScenarioError, TomlScenario
 
 SECRET = "sk-SECRETVALUE123"
-BASE = '[scenario]\nname = "tui"\n[driver]\ncommand = "cockpit run"\n'
+BASE = '[scenario]\nname = "tui"\n[driver]\ncommand = "mytool run"\n'
 TURN = '[[driver.turns]]\ntype = "expect"\npattern = "Welcome"\ntimeout = 1\n'
 
 
@@ -40,7 +40,7 @@ class FakeDriver:
         return False                                    # the screen never comes
 
     def screen(self):
-        return f"Starting cockpit... token={SECRET}"
+        return f"Starting mytool... token={SECRET}"
 
     transport = "sbx"
 
@@ -115,7 +115,7 @@ class SnapshotTest(unittest.TestCase):
         bench = FakeBench()
         r = self.run_turns(bench, BASE + TURN + '[on_failure]\ncommands = ["devbox info"]\n')
         f = r.failure
-        self.assertIn("Starting cockpit", f["screen"])
+        self.assertIn("Starting mytool", f["screen"])
         self.assertIn("\\x1b[6n", f["raw_tail"])             # the escape is visible
         self.assertIn("claude --key", f["processes"])
         self.assertEqual(f["on_failure"][0]["command"], "devbox info")
@@ -137,7 +137,7 @@ class SnapshotTest(unittest.TestCase):
         r = self.run_turns(FakeBench(fail_ps=True))
         self.assertIn("could not read: TimeoutError", r.failure["processes"])
         self.assertNotIn(SECRET, r.failure["processes"])        # the error text is scrubbed too
-        self.assertIn("Starting cockpit", r.failure["screen"])
+        self.assertIn("Starting mytool", r.failure["screen"])
 
     def test_a_snapshot_that_breaks_never_replaces_the_failure(self):
         sc = load(BASE + TURN)
@@ -173,19 +173,19 @@ class SnapshotTest(unittest.TestCase):
 
 class PlainTimeoutTest(unittest.TestCase):
     """GNU timeout's child is a background process group: a TUI under it is
-    stopped by SIGTTIN before it draws (cockpit, 2026-10-01)."""
+    stopped by SIGTTIN before it draws (an adopter, 2026-10-01)."""
 
     def test_detection(self):
         from gentar.toml_scenario import plain_timeout as p
         flagged = ["timeout 300 claude", "/usr/bin/timeout 9 x", "cd x && timeout 5 y",
                    "FOO=1 timeout 5 y", "exec timeout 5 y", 'bash -lc "timeout 60 claude"',
                    "timeout -k 5 60 x", "timeout --kill-after 5 60 x",
-                   'timeout -s INT 60 bash -lc "cockpit run"',
+                   'timeout -s INT 60 bash -lc "mytool run"',
                    # agy on #61: a prefix by path, a command on a later line
                    "/usr/bin/env timeout 60 claude", "cd /app\ntimeout 60 claude"]
         clean = ["timeout --foreground 300 claude", "timeout -k 5 --foreground 60 x",
                  "timeout --signal=INT --foreground 5 x", "claude --timeout 5", "echo timeout",
-                 "echo timeout 5", 'sh -c "cd x && timeout --foreground 5 y"', "cockpit run",
+                 "echo timeout 5", 'sh -c "cd x && timeout --foreground 5 y"', "mytool run",
                  "cd /app\ntimeout --foreground 60 claude", "cd /app\necho timeout 5"]
         for c in flagged:
             self.assertTrue(p(c), c)
@@ -193,9 +193,9 @@ class PlainTimeoutTest(unittest.TestCase):
             self.assertFalse(p(c), c)
 
     def test_warned_only_with_interactive_turns(self):
-        self.assertTrue(load(BASE.replace("cockpit run", "timeout 60 cockpit run") + TURN).warnings)
-        self.assertFalse(load(BASE.replace("cockpit run", "timeout 60 cockpit run")).warnings)
-        self.assertFalse(load(BASE.replace("cockpit run", "timeout --foreground 60 cockpit run")
+        self.assertTrue(load(BASE.replace("mytool run", "timeout 60 mytool run") + TURN).warnings)
+        self.assertFalse(load(BASE.replace("mytool run", "timeout 60 mytool run")).warnings)
+        self.assertFalse(load(BASE.replace("mytool run", "timeout --foreground 60 mytool run")
                               + TURN).warnings)
 
     def test_the_engines_own_scenarios_are_clean(self):

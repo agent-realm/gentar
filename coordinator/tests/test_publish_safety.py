@@ -69,7 +69,7 @@ class RedactTest(unittest.TestCase):
         self.assertIn("«redacted:ANTHROPIC_AUTH_TOKEN»`", out)
 
     def test_a_locator_does_not_redact_unrelated_addresses(self):
-        # cockpit#29: the 8-char head `http://1` of the export URL redacted
+        # An adopter's report: the 8-char head `http://1` of the export URL redacted
         # every http://1… URL; `192.0.2.` of the bench host its whole subnet
         text = ("export http://192.0.2.58:4318/v1/traces\n"
                 "provider http://192.0.2.100:8000/v1 local http://127.0.0.1:8123\n"
@@ -129,7 +129,7 @@ class RedactTest(unittest.TestCase):
 
     def test_a_locator_matches_only_as_a_whole_token(self):
         # claude-playbooks: bench user `user` redacted the middle of
-        # github.com/someuser/...; cockpit: host 192.0.2.5 the head of .52
+        # github.com/someuser/...; another adopter: host 192.0.2.5 the head of .52
         text = ("repo github.com/someuser/example-repo userx\n"
                 "ssh user@192.0.2.5 ; /home/user/x ; other 192.0.2.52 and 1192.0.2.5\n"
                 "connect to 192.0.2.5.\nlogin user.\n")

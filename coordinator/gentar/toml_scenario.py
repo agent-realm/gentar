@@ -297,7 +297,7 @@ def plain_timeout(command: str, depth: int = 0) -> bool:
     `--foreground`. timeout puts its child in a NEW background process group,
     so an interactive program under it is stopped by SIGTTIN (state T) the
     moment it reads the tty, before it draws anything; headless `-p` runs
-    never notice (cockpit's first-run scenario, 2026-10-01).
+    never notice (an adopter's first-run scenario, 2026-10-01).
 
     Only `timeout` in command position counts (`echo timeout` does not), and
     a quoted script (`bash -lc "timeout 60 claude"`) is looked into."""
@@ -367,7 +367,7 @@ class TomlScenario:
             raise ScenarioError(f"{path}: scenario.bench_only must be a non-empty string: "
                                 f"why only a bench can prove this suite")
         # What kind of data the scenario touches. "synthetic" is the only
-        # value that lets a semantic turn send a screen to a judge (pilot,
+        # value that lets a semantic turn send a screen to a judge (decided
         # 2026-09-26); anything else, or nothing, keeps every screen inside
         # the arena. Checked by the coordinator before any bench exists.
         self.data = sc.get("data", "")
@@ -394,7 +394,7 @@ class TomlScenario:
         self.judge_lines = int(judge.get("lines", 40))
         if not 1 <= self.judge_lines <= 40:
             raise ScenarioError(
-                f"{path}: judge.lines must be 1..40 — the pilot's egress rule sends at "
+                f"{path}: judge.lines must be 1..40 — the egress rule sends at "
                 f"most the last 40 content rows of the screen")
         # Entries are ALTERNATIVE providers; an entry may be a single env
         # var name or a LIST of names that must travel together — a token
@@ -424,7 +424,7 @@ class TomlScenario:
         self.steps = list((doc.get("oracle") or {}).get("steps", []))
         # Diagnostics run on the bench when a driver turn fails, before the
         # session is closed: their output lands in the report's failure
-        # snapshot (cockpit). Never a verdict; same timeout rule as verify.
+        # snapshot (an adopter's ask). Never a verdict; same timeout rule as verify.
         on_failure = doc.get("on_failure") or {}
         if not isinstance(on_failure, dict) or set(on_failure) - {"commands"}:
             raise ScenarioError(f"{path}: [on_failure] takes only `commands`")

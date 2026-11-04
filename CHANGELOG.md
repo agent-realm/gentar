@@ -40,9 +40,9 @@ Adopters pin a release tag, not a branch.
   found, and each with its reason. The tree already on `main` is not this
   job's concern.
 - **The bench runner's label is one variable** (ground-up review C4; found
-  by agentmux-lab). The kit's guard refused a `GENTAR_CI_RUNNER` naming
+  by an adopter). The kit's guard refused a `GENTAR_CI_RUNNER` naming
   `arena`, the default bench label, but a repository whose bench runner
-  carries another label (`agentmux-lab`) was not protected: its CI runner
+  carries another label (`my-bench`) was not protected: its CI runner
   value could name the bench runner and run pull request code there. The
   new repository variable `GENTAR_BENCH_LABEL` (default `arena`) is the
   label the bench job runs on, and the guard refuses a `GENTAR_CI_RUNNER`
@@ -201,12 +201,12 @@ Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what change
   report gets the rendered last screen, the raw tail of the pty stream
   with escapes visible, the bench's process tree, and the output of a new
   optional `[on_failure] commands` table, captured before the session is
-  closed. A stuck TUI used to leave only the transcript (cockpit's
-  first-run scenario, parked after three rounds).
+  closed. A stuck TUI used to leave only the transcript (an
+  adopter's first-run scenario, parked after three rounds).
 - A warning (printed, and in the report) when a scenario with driver turns
   starts its command under plain `timeout`: GNU timeout's child runs in a
   background process group, so a TUI is stopped by SIGTTIN on its first tty
-  read (found by cockpit). Use `timeout --foreground`. The engine's own
+  read (found by an adopter). Use `timeout --foreground`. The engine's own
   `agent-pty-smoke` now does; unverified live until its next dispatch.
 
 ### Changed
@@ -243,7 +243,7 @@ Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what change
   public repositories only; a private subject sets it as a repository
   variable, or the workflow never sees it: `plan` silently falls back to
   `ubuntu-latest` and `checks` to `[phase1] os` (every OS listed there)
-  (cockpit's v0.9.0 re-pin, 2026-09-30). Check the plan's `runner=` line.
+  (an adopter's v0.9.0 re-pin, 2026-09-30). Check the plan's `runner=` line.
 - Kit README: with `GENTAR_CI_RUNNER` set, only same-repository PRs get
   phase 1 checks; a fork's all-skipped run is not a pass. The "Secrets/vars
   the workflow reads" list now holds every name the workflow reads,
@@ -347,7 +347,7 @@ Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what change
 - Driver `pick` turns recognise **unnumbered** pickers (`❯ No, exit` /
   `Yes, I trust this folder`, Claude Code 2.1.283's API-key and trust
   dialogs); only `❯ N.` lines counted before, so an optional pick was
-  skipped silently and a required one failed "not reachable" (cockpit).
+  skipped silently and a required one failed "not reachable" (found by an adopter).
   A label missing from the list fails instead of cycling: on a numbered
   picker once the cursor wraps, on an unnumbered one before any key (it
   counts as the turn's picker only when the label is in its aligned option
@@ -404,7 +404,7 @@ Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what change
   suites without a subject token.
 - **gentar's public CI is GitHub-hosted only; the bench suites moved to a
   private mirror.** gentar is public, and a self-hosted runner registered
-  to a public repository can be reached by a fork's own workflow (D5,
+  to a public repository can be reached by a fork's own workflow (decided
   2026-10-08). `.github/workflows/gentar.yml` now runs only two hosted jobs:
   the unit suite on every PR and every push to `main`, and the release-tag
   check on `v*` tags. The gate, nightly and dispatch jobs and every bench
@@ -523,7 +523,7 @@ Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what change
   `docker-compose.yml` forwarded it only in local bench mode, so over SSH the
   coordinator always used `/tmp/gentar-workspaces` while `bin/bench-reap`
   followed the caller's value. An arena whose bench user has its own
-  workspace root (D5: one 0700 root per bench user) made its workspaces in
+  workspace root (one 0700 root per bench user) made its workspaces in
   the shared default instead. The compose default repeats config.py's,
   behind `:-`, so an empty value also falls back (config.py treats empty as
   set).
@@ -566,7 +566,7 @@ Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what change
   and prints the first fingerprint at the end.
 
 ### Changed
-- **License: MIT to Apache-2.0**, from v0.10.0 (the pilot's decision,
+- **License: MIT to Apache-2.0**, from v0.10.0 (decided
   2026-10-10). `LICENSE` is apache.org's LICENSE-2.0.txt verbatim, and `NOTICE`
   holds the copyright line, which Apache-2.0 asks redistributors to keep.
   Releases v0.1.1 through v0.9.3 remain MIT (v0.1.0 shipped without a
@@ -575,7 +575,7 @@ Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what change
   for byte (`gentar/run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh` and
   the arena workflow) starts with `SPDX-License-Identifier: Apache-2.0` and
   the copyright line, after a shebang where there is one, so the license
-  travels with the copy (AK47's ruling on #73). Subjects pick it up at
+  travels with the copy (decided in #73). Subjects pick it up at
   their next kit re-copy.
 
 ## 0.9.3 — 2026-10-08
@@ -733,7 +733,7 @@ Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed 
 
 ### Added
 
-- **The docs standard** (pilot, 2026-09-26: no release without it):
+- **The docs standard** (2026-09-26: no release without it):
   - a short README (what, why, how), with the manual moved to
     `docs/reference/`;
   - `docs/tutorials/` (first run, adopting a repo, a judged turn, a goal
@@ -792,7 +792,7 @@ can flag a run without deciding it. Minor bump: the scenario schema gains
 ## 0.7.0 — 2026-09-26
 
 **Semantic turns.** A regex that breaks on rewording can be replaced by a
-typed judgment of the screen, under the pilot's egress rule. Minor bump: the
+typed judgment of the screen, under the egress rule. Minor bump: the
 scenario schema gains `[scenario] data`, `[judge]` and `[driver.turns.judge]`,
 and the kit gains judged-suite rules (AGENTS.md decision 7).
 
@@ -825,7 +825,7 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
   catches what survives when a window keeps a value's beginning; a TAIL
   window — a failed step's last lines (0.6.3), a report's `…` tail — can
   start inside a secret and keep only its end, which nothing matched
-  (cockpit#31) — and a value longer than a window, cut at both ends, keeps
+  (an adopter's report) — and a value longer than a window, cut at both ends, keeps
   its middle. Credentials now lose ANY 8+ character piece — head, tail or
   middle — in every form, found in one pass over the text (the value's
   8-grams are indexed and each hit extended along it). One rule in the
@@ -855,7 +855,7 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
 - **A redacted host or user matches only as a whole token.** Bench user
   `user` redacted the middle of `github.com/someuser/…` in live
   reports (claude-playbooks), and a host `192.0.2.5` would have taken the
-  head of `192.0.2.52` (cockpit). A locator is now replaced only where no
+  head of `192.0.2.52` (another adopter). A locator is now replaced only where no
   host/user character (`[A-Za-z0-9-]`, or a `.` followed by one) continues
   it on either side — a sentence-final `.` still ends it, `_` ends it, and
   so does any escape right before it (terminal colour codes, `\n`/`\x0a`/
@@ -886,7 +886,7 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
   address in a report — a provider route, `127.0.0.1` — and an `https://`
   destination would have redacted every https URL; a bench host's head
   `192.0.2.` did the same to its whole subnet. Reports looked like they
-  leaked the collector when they had not (cockpit#29, reproduced with the
+  leaked the collector when they had not (an adopter's report, reproduced with the
   engine's scrubber). A **locator** — a `*_HOST`, `*_USER`, `*_URL`,
   `*_ENDPOINT`, `*_EXPORT` or `*_JUMP` setting whose value is shaped like a
   URL or host — is now replaced in every form of its exact value, and a URL
@@ -988,7 +988,7 @@ agent suite finally says what the agent did.
 
 ## 0.4.2 — 2026-09-23
 
-**Every run leaves a dashboard** — the pilot's ask since the morning.
+**Every run leaves a dashboard.**
 
 ### Added
 
@@ -1054,7 +1054,7 @@ No schema or exit-code change; everything new is opt-in except the guard.
 ## 0.4.0 — 2026-09-23
 
 **The run policy.** Which suites run when is decided once, at adaptation,
-and then automated — the pilot's policy, shaped with the first adopter
+and then automated — a policy shaped with the first adopter
 (claude-playbooks):
 
 - **Phase 1** on every pull request and every push to the default branch:

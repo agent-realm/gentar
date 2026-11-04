@@ -58,8 +58,8 @@ permissions:
 
 jobs:
   # A GENTAR_CI_RUNNER that mentions the bench runner's label (`arena`, or
-  # GENTAR_BENCH_LABEL when the bench runner carries another; agentmux's is
-  # `agentmux-lab`) is refused BEFORE any job is scheduled on it: `runs-on`
+  # GENTAR_BENCH_LABEL when the bench runner carries another) is refused
+  # BEFORE any job is scheduled on it: `runs-on`
   # would otherwise start plan on the bench runner and run the PR's own
   # plan.py there before plan.py could refuse (Codex). contains() is
   # case-insensitive, as runner labels are, and tests the raw text, so

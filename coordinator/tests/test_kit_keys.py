@@ -1,6 +1,6 @@
 """The kit's CI jobs do not leave SSH keys behind on a self-hosted runner.
 
-2026-10-08 (cockpit-47, via claude-playbooks-eb): RUNNER_TEMP is not always
+2026-10-08 (from an adopter): RUNNER_TEMP is not always
 emptied when a job is cancelled, and the kit wrote bench_key and
 gentar_clone_key there without removing them. Now: keys are written under
 umask 077 (no moment where they are readable by others), stale ones are

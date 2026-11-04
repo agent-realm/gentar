@@ -1,6 +1,6 @@
 """The arena mirror: a PUBLIC repository's phase 2 runs in a private mirror.
 
-2026-10-08 (D5, the pilot's "fix it"; root's design for claude-playbooks):
+2026-10-08 (the design for claude-playbooks):
 a public repository must have no self-hosted job at all, since a fork can
 bring its own workflow to any runner registered there. The kit ships:
 
@@ -326,7 +326,7 @@ ROUTE_PY = ROOT / "subject-template" / "mirror" / "arena" / "route.py"
 @unittest.skipUnless(ROUTE_PY.exists(), "the kit is not in the image build context")
 class MirrorRouteTest(unittest.TestCase):
     """The mirror's GENTAR_ROUTE_ALLOW is the upper bound; a commit's
-    policy can only narrow it (AK47, required before v0.10.0)."""
+    policy can only narrow it (required before v0.10.0)."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
