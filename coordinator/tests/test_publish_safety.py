@@ -129,7 +129,7 @@ class RedactTest(unittest.TestCase):
 
     def test_a_locator_matches_only_as_a_whole_token(self):
         # claude-playbooks: bench user `user` redacted the middle of
-        # github.com/someuser/...; cockpit: host 192.0.2.5 the head of .52
+        # github.com/someuser/...; another adopter: host 192.0.2.5 the head of .52
         text = ("repo github.com/someuser/example-repo userx\n"
                 "ssh user@192.0.2.5 ; /home/user/x ; other 192.0.2.52 and 1192.0.2.5\n"
                 "connect to 192.0.2.5.\nlogin user.\n")

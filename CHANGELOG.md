@@ -740,7 +740,7 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
 - **A redacted host or user matches only as a whole token.** Bench user
   `user` redacted the middle of `github.com/someuser/…` in live
   reports (claude-playbooks), and a host `192.0.2.5` would have taken the
-  head of `192.0.2.52` (cockpit). A locator is now replaced only where no
+  head of `192.0.2.52` (another adopter). A locator is now replaced only where no
   host/user character (`[A-Za-z0-9-]`, or a `.` followed by one) continues
   it on either side — a sentence-final `.` still ends it, `_` ends it, and
   so does any escape right before it (terminal colour codes, `\n`/`\x0a`/
