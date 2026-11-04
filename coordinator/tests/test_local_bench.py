@@ -20,6 +20,9 @@ from gentar.config import Config
 from gentar.redaction import scrubber
 
 ROOT = Path(__file__).resolve().parents[2]
+# A fake docker's answer to bin/docker-identity's `docker -H <sock> info`: a
+# rootful daemon, so bin/sbx-file-login logs in as this user.
+ROOTFUL_INFO = """if [ "$3" = info ]; then echo '["name=seccomp,profile=builtin"]'; exit 0; fi\n"""
 
 
 def cfg(**env):
@@ -196,10 +199,12 @@ class KeyringLoginTest(unittest.TestCase):
         bindir.mkdir()
         log = tmp / "docker.args"
         (bindir / "sbx").write_text("#!/bin/sh\nexit 0\n")
-        (bindir / "docker").write_text(f'#!/bin/sh\nfor a in "$@"; do echo "$a"; done > {log}\n')
+        (bindir / "docker").write_text(
+            f'#!/bin/sh\n{ROOTFUL_INFO}for a in "$@"; do echo "$a"; done > {log}\n')
         for f in ("sbx", "docker"):
             (bindir / f).chmod(0o755)
         env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home),
+               "DOCKER_HOST": "unix:///var/run/docker.sock",
                "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus"}
         r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "sbx-file-login"),
                             "--username", "u", "--password-stdin"],
@@ -222,10 +227,12 @@ class KeyringLoginTest(unittest.TestCase):
         home.mkdir()
         bindir = tmp / "bin"
         bindir.mkdir()
+        (bindir / "sbx").write_text("#!/bin/sh\nexit 0\n")
+        (bindir / "docker").write_text(f"#!/bin/sh\n{ROOTFUL_INFO}exit 0\n")
         for f in ("sbx", "docker"):
-            (bindir / f).write_text("#!/bin/sh\nexit 0\n")
             (bindir / f).chmod(0o755)
-        env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home)}
+        env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home),
+               "DOCKER_HOST": "unix:///var/run/docker.sock"}
         r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "sbx-file-login")],
                            env=env, input="", capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)        # a fresh host: the dirs are made
@@ -309,13 +316,14 @@ class LoginSecrecyTest(unittest.TestCase):
         (bindir / "sbx").write_text("#!/bin/sh\nexit 0\n")
         # the fake login writes the store as sbx does: 700 folders, 644 files
         (bindir / "docker").write_text(
-            f"#!/bin/sh\ntouch {called}\nmkdir -p {auth}\nchmod 700 {auth}\n"
+            f"#!/bin/sh\n{ROOTFUL_INFO}touch {called}\nmkdir -p {auth}\nchmod 700 {auth}\n"
             f"echo x > {auth}/secretpass\nchmod 644 {auth}/secretpass\n")
         for f in ("sbx", "docker"):
             (bindir / f).chmod(0o755)
         kw = {"stdin": stdin} if stdin is not None else {"input": input}
         r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "sbx-file-login"), *args],
-                           env={"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home)},
+                           env={"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home),
+                                "DOCKER_HOST": "unix:///var/run/docker.sock"},
                            capture_output=True, text=True, **kw)
         return r, home, called.exists(), auth
 
