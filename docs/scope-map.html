@@ -516,7 +516,7 @@ footer{border-top:1px solid var(--rule);padding-top:22px;font-size:13.5px;color:
         <tr><td class="ent">bench</td><td class="card">1 → 1</td><td><code>WORKSPACE_DIR</code></td><td>a <strong>writable</strong> copy of the subject, pushed by tar over SSH</td></tr>
         <tr><td class="ent">coordinator</td><td class="card">1 → 1</td><td><code>/subjects</code> bind</td><td><strong>read-only</strong> — this is the mount that carries <code>:ro</code>, not the bench's</td></tr>
         <tr><td class="ent">bench</td><td class="card">1 → N</td><td>OTel spans</td><td>emitted from inside, joined to assertions in one SQL query</td></tr>
-        <tr><td class="ent">Proxmox host</td><td class="card">1 → N</td><td>VMs and LXCs</td><td>arf currently runs 9 VMs and 9 LXCs</td></tr>
+        <tr><td class="ent">Proxmox host</td><td class="card">1 → N</td><td>VMs and LXCs</td><td>one host can run many of each</td></tr>
         <tr><td class="ent">bench-host</td><td class="card">1 → 1</td><td>VM or LXC</td><td>a role a machine plays, not a machine type</td></tr>
       </tbody>
     </table>

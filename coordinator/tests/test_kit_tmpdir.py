@@ -1,6 +1,6 @@
 """The kit's CI jobs keep their temp files in the runner's per-job temp dir.
 
-2026-10-07: a self-hosted runner LXC (ci-runner-arf) went offline when its
+2026-10-07: a self-hosted runner LXC went offline when its
 tmpfs /tmp filled with 7.4 GB of leaked test dirs. On a self-hosted runner
 /tmp is shared and never cleaned; RUNNER_TEMP is emptied after every job.
 The kit's dry-run keeps a failing suite's scratch home "for inspection", and

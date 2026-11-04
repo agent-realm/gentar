@@ -5,10 +5,10 @@ phase = one demonstrable capability; each phase's acceptance criteria are
 executable, not narrative. Phase 0 is already complete.
 
 Standing decisions this plan inherits: benches are **sbx sandboxes**
-(decision #6, spike-proven on arf); subjects are mounted, never baked;
+(decision #6, spike-proven on a Proxmox VM); subjects are mounted, never baked;
 verdicts from reality; budget guard lives in the coordinator; forge-agnostic
 CI contract (`docker compose up` + exit code); subjects in order
-**claude-playbooks → kommander-playbook → memhouse**; tart/macminim is the
+**claude-playbooks → kommander-playbook → memhouse**; tart on a Mac is the
 macOS tier (not on this plan's critical path).
 
 ## Implementation choices (made here, veto-able)
@@ -17,8 +17,8 @@ macOS tier (not on this plan's critical path).
   port cleanly to it — gauntlet's `lib/matrix_gen.py`, dashboard
   `generate.py`; the driver needs `pexpect` (pty); telemetry needs
   `clickhouse-connect`. One language across coordinator, driver, dashboard.
-- **First bench-host: VM 9100 on arf** (`gentar-sbx-spike`, 10.10.10.200 —
-  logged in, sbx v0.38.0 installed). A cheaper LXC bench-host is a later
+- **First bench-host: a spike VM** (logged in, sbx v0.38.0
+  installed). A cheaper LXC bench-host is a later
   optimization, not a prerequisite.
 - **Scenario format: TOML** (`gentar/` dir per design; schema v1 in phase 2).
 - **gauntlet port checklist** (what gets copied vs rewritten): telemetry
@@ -33,7 +33,7 @@ macOS tier (not on this plan's critical path).
 
 ## Phase 0 — bench substrate spike ✅ DONE (2026-08-18)
 
-sbx proven on headless Linux on arf: device-flow auth with persistent
+sbx proven on headless Linux on a Proxmox VM: device-flow auth with persistent
 token, `create`/`exec -t`/`cp`/`ls --json`/`rm` lifecycle, custom
 templates, workspace bind-mounts, nested Docker with hard isolation,
 `shell` agent for no-LLM runs. Report: task artifact
@@ -125,7 +125,7 @@ not failed.
   nightly (agent-in-the-loop, behind budget guard), `workflow_dispatch`
   inputs (subject, ref, suite, benches).
 - Subject-side integration doc + first subject wired (the ~10-line job).
-- Bench-host runner registration (arf), concurrency groups, per-run
+- Bench-host runner registration, concurrency groups, per-run
   compose project names.
 
 **Acceptance** — a PR on the wired subject repo triggers the deterministic
@@ -149,7 +149,7 @@ passes.
 
 ## Deferred (explicitly not in v1)
 
-- tart/macOS tier wiring on macminim (design hooks exist; no phase).
+- tart/macOS tier wiring on a Mac (design hooks exist; no phase).
 - Gitea/Forgejo forge swap (portability is designed, not exercised).
 - Kits evaluation (`--kit`), Allure emitter, LXC bench-host, multi-bench
   parallel matrices (coordinator supports it; CI sizing comes later).

@@ -4,7 +4,7 @@ Every sbx sandbox carries `proxy-managed` placeholders for the common
 provider keys, and sbx's credential proxy swaps in a real value for any
 service with a stored secret. So one `sbx secret set` on a shared host
 would hand that key to every suite there, whatever credential group the
-engine forwarded (claude-playbooks, measured on arena-142: placeholders
+engine forwarded (claude-playbooks, measured on a bench host: placeholders
 present, no secrets stored — safe by host state only). The engine now
 checks, and refuses with exit 2 unless GENTAR_SBX_SECRETS=allow.
 

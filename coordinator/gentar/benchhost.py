@@ -337,7 +337,7 @@ class SbxBenchHost(BenchHost):
         arena there, whatever credential group the engine forwarded — the
         guarantee that only the winning group reaches a bench would hold
         by host state, not by construction (claude-playbooks, measured on
-        arena-142). sbx 0.39 cannot create a sandbox with the proxy's
+        a bench host). sbx 0.39 cannot create a sandbox with the proxy's
         injection off, so the engine refuses instead.
 
         GENTAR_SBX_SECRETS=allow is for an arena that uses sbx secrets as
