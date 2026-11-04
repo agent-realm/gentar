@@ -384,7 +384,7 @@ Two things worth checking against any bench-host:
   WHOLE name matches that prefix plus the coordinator's run-id shape — never another
   run's. Still uncovered: a runner that dies outright never runs its teardown step.
 
-  **Confirmed, and fixed in 0.1.0.** The arena side of exactly this gap put the pilot's
+  **Confirmed, and fixed in 0.1.0.** The arena side of exactly this gap put the operator's
   machine under: `compose run --rm` removed only the coordinator, while `clickhouse` and
   `otelcol` came up via `depends_on` as ordinary containers and survived, stranding two
   containers and a named volume per compose project. `bin/arena` now starts every

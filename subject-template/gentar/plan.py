@@ -18,7 +18,7 @@ it on a GitHub-hosted runner (or the one GENTAR_CI_RUNNER names, never the
 bench's) BEFORE any job may touch the self-hosted bench runner:
 a pull request's code never reaches the bench-host unless this says so.
 
-Phases (the pilot's words: phase 1 for every PR, phase 2 only when asked):
+Phases (phase 1 for every PR, phase 2 only when asked):
 
   phase 1   every PR and every push to the default branch
               checks   bench-free, on a GitHub-hosted runner (run.sh --check)
@@ -393,7 +393,7 @@ def plan(env, policy):
     res = {"checks": False, "bench": "none", "suites": [], "reason": "",
            "setup": {}, "os": ["ubuntu-latest"], "route": route_names(policy)}
     runner = ci_runner(env)
-    # Where plan and checks ran, in the plan output (claude-playbooks-dc):
+    # Where plan and checks ran, in the plan output:
     # a subject can see it without reading repository settings.
     res["runner"] = json.dumps(runner) if runner else "github-hosted"
     if runner is not None:

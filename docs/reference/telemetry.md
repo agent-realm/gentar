@@ -27,13 +27,13 @@ ClickHouse. A test holds that no export pipeline reads the raw receiver.
 Export is best-effort — a collector that is down is warned about once and never
 changes a verdict. The arena keeps its local copy as before.
 
-The organisation's destination is ClickStack on arf (VM 149,
-`http://10.10.10.58:4318`, HyperDX on `:8080`, retention forever). For this
+The organisation's destination is a self-hosted ClickStack (for example
+`http://192.0.2.58:4318`, HyperDX on `:8080`, retention forever). For this
 repository both settings are Actions secrets; locally:
 
 ```bash
-GENTAR_OTLP_EXPORT=http://10.10.10.58:4318 \
-  with-secret GENTAR_OTLP_KEY=keychain:pilot/clickstack-ingest -- bin/arena run smoke
+GENTAR_OTLP_EXPORT=http://192.0.2.58:4318 \
+  with-secret GENTAR_OTLP_KEY=keychain:<your-ingest-key> -- bin/arena run smoke
 ```
 
 `compose.export.yml` is what wires it (layered by `bin/arena`, the kit's

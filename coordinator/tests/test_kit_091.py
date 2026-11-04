@@ -1,4 +1,4 @@
-"""Kit fixes queued after v0.9.0 (claude-playbooks-ac, 2026-09-30).
+"""Kit fixes queued after v0.9.0 (2026-09-30).
 
 1. A workflow_dispatch ON a tag ref is a dispatch: it used to hit the
    release rule and plan nothing, so a drift run of a release read

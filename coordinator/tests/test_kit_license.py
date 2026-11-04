@@ -1,6 +1,6 @@
 """Every kit file a subject copies byte for byte says its license.
 
-2026-10-10 (AK47's ruling on the Apache-2.0 relicense, gentar#73): the kit's
+2026-10-10 (the Apache-2.0 relicense, gentar#73): the kit's
 files are redistributed verbatim into subject repositories, and Apache-2.0
 asks that the license travel with them. Each carries a two-line header in
 its own comment syntax, right after a shebang when there is one.

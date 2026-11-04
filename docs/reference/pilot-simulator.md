@@ -180,7 +180,7 @@ clear no or undecided. **The verdict is still reality's:** a judged turn
 only decides when the driver has seen what it waits for, and
 `[[verify.*]]` decides pass or fail.
 
-**What may leave the arena** (the pilot's rule, enforced in code):
+**What may leave the arena** (the egress rule, enforced in code):
 
 - only for a scenario that declares `data = "synthetic"`. Anything else
   with a judged turn is refused, exit 2, before any bench exists;

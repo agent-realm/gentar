@@ -22,6 +22,51 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.11.1 — 2026-11-05
+
+Release notes: [docs/releases/v0.11.1.md](docs/releases/v0.11.1.md) (what changed and why, upgrade for adopters, verification).
+
+### Security
+- **gentar's own pull requests are scanned for environment data and
+  credentials.** A required job in `gentar.yml`, `scan (added lines)`, runs
+  `bin/pr-scan` over the lines a pull request adds and its commit messages. A
+  finding prints as `path:line: class`, never the matched text. A file git
+  calls binary is diffed as text, so its lines are scanned too, and it must
+  also be allowlisted by its blob id before it lands. Synthetic fixtures that
+  keep a credential's shape are allowlisted in `.github/scan-allowlist.toml`,
+  each entry matching the whole fixture line, with its reason. This is this
+  repository's CI; no kit file changes.
+
+### Fixed
+- **`bin/sbx-file-login` works on rootless Docker.** It ran the login
+  container as `--user $(id -u):$(id -g)`. Under rootless Docker that uid
+  maps to a subordinate uid, so the login files were written as a stranger,
+  the final `chmod` failed, and local-mode benches failed at PREPARE IMAGE.
+  It now takes the daemon and the uid from `bin/docker-identity --local`: 0:0
+  on rootless Docker (there, the calling user), the user's own uid on rootful
+  Docker. A daemon that script cannot identify is refused before anything is
+  written, and so is running it as root on rootful Docker.
+- **A forwarded provider key no longer makes the bench-host check refuse
+  every suite.** The check for stored sbx secrets ran `sbx secret ls` with the
+  caller's whole environment, and on the local tier that is the coordinator's,
+  forwarded provider keys included. With `ANTHROPIC_API_KEY` set, sbx 0.39
+  prints a note where it would print "No secrets found", and the check counted
+  that line as a stored secret. It now runs under `env -i` with only what sbx
+  reads to find its config, state and keyring. v0.10.1 carried this fix;
+  v0.11.0 did not. Engine only (`coordinator/gentar/benchhost.py`).
+- **`verify-ref.sh`'s cleanup no longer fails an admitted commit.** `git fetch`
+  starts a detached `git maintenance run --auto` that can still be writing into
+  the temporary clone while `rm` removes it, and under `set -e` the failing
+  `rm` in the EXIT trap became the script's status. Its git runs with automatic
+  maintenance off now, the cleanup retries for up to 2 s and runs without `-e`,
+  and a clone that will not go is left behind with a warning while the verdict
+  stands. Mirrors re-vendor the file
+  (`subject-template/mirror/arena/verify-ref.sh`).
+
+### Changed
+- Comments, docs and test fixtures use synthetic stand-in values and neutral
+  wording, kit comments included. No behaviour changes.
+
 ## 0.11.0 — 2026-10-23
 
 Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what changed and why, the breaking schema change, upgrade for adopters, what is not live-proven, known limits, verification).
@@ -41,12 +86,12 @@ Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what change
   report gets the rendered last screen, the raw tail of the pty stream
   with escapes visible, the bench's process tree, and the output of a new
   optional `[on_failure] commands` table, captured before the session is
-  closed. A stuck TUI used to leave only the transcript (cockpit's
-  first-run scenario, parked after three rounds).
+  closed. A stuck TUI used to leave only the transcript (an
+  adopter's first-run scenario, parked after three rounds).
 - A warning (printed, and in the report) when a scenario with driver turns
   starts its command under plain `timeout`: GNU timeout's child runs in a
   background process group, so a TUI is stopped by SIGTTIN on its first tty
-  read (found by cockpit). Use `timeout --foreground`. The engine's own
+  read (found by an adopter). Use `timeout --foreground`. The engine's own
   `agent-pty-smoke` now does; unverified live until its next dispatch.
 
 ### Changed
@@ -83,7 +128,7 @@ Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what change
   public repositories only; a private subject sets it as a repository
   variable, or the workflow never sees it: `plan` silently falls back to
   `ubuntu-latest` and `checks` to `[phase1] os` (every OS listed there)
-  (cockpit's v0.9.0 re-pin, 2026-09-30). Check the plan's `runner=` line.
+  (an adopter's v0.9.0 re-pin, 2026-09-30). Check the plan's `runner=` line.
 - Kit README: with `GENTAR_CI_RUNNER` set, only same-repository PRs get
   phase 1 checks; a fork's all-skipped run is not a pass. The "Secrets/vars
   the workflow reads" list now holds every name the workflow reads,
@@ -187,7 +232,7 @@ Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what change
 - Driver `pick` turns recognise **unnumbered** pickers (`❯ No, exit` /
   `Yes, I trust this folder`, Claude Code 2.1.283's API-key and trust
   dialogs); only `❯ N.` lines counted before, so an optional pick was
-  skipped silently and a required one failed "not reachable" (cockpit).
+  skipped silently and a required one failed "not reachable" (found by an adopter).
   A label missing from the list fails instead of cycling: on a numbered
   picker once the cursor wraps, on an unnumbered one before any key (it
   counts as the turn's picker only when the label is in its aligned option
@@ -244,7 +289,7 @@ Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what change
   suites without a subject token.
 - **gentar's public CI is GitHub-hosted only; the bench suites moved to a
   private mirror.** gentar is public, and a self-hosted runner registered
-  to a public repository can be reached by a fork's own workflow (D5,
+  to a public repository can be reached by a fork's own workflow (decided
   2026-10-08). `.github/workflows/gentar.yml` now runs only two hosted jobs:
   the unit suite on every PR and every push to `main`, and the release-tag
   check on `v*` tags. The gate, nightly and dispatch jobs and every bench
@@ -363,7 +408,7 @@ Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what change
   `docker-compose.yml` forwarded it only in local bench mode, so over SSH the
   coordinator always used `/tmp/gentar-workspaces` while `bin/bench-reap`
   followed the caller's value. An arena whose bench user has its own
-  workspace root (D5: one 0700 root per bench user) made its workspaces in
+  workspace root (one 0700 root per bench user) made its workspaces in
   the shared default instead. The compose default repeats config.py's,
   behind `:-`, so an empty value also falls back (config.py treats empty as
   set).
@@ -406,7 +451,7 @@ Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what change
   and prints the first fingerprint at the end.
 
 ### Changed
-- **License: MIT to Apache-2.0**, from v0.10.0 (the pilot's decision,
+- **License: MIT to Apache-2.0**, from v0.10.0 (decided
   2026-10-10). `LICENSE` is apache.org's LICENSE-2.0.txt verbatim, and `NOTICE`
   holds the copyright line, which Apache-2.0 asks redistributors to keep.
   Releases v0.1.1 through v0.9.3 remain MIT (v0.1.0 shipped without a
@@ -415,7 +460,7 @@ Release notes: [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md) (what change
   for byte (`gentar/run.sh`, `dryrun.py`, `plan.py`, `release-gate.sh` and
   the arena workflow) starts with `SPDX-License-Identifier: Apache-2.0` and
   the copyright line, after a shebang where there is one, so the license
-  travels with the copy (AK47's ruling on #73). Subjects pick it up at
+  travels with the copy (decided in #73). Subjects pick it up at
   their next kit re-copy.
 
 ## 0.9.3 — 2026-10-08
@@ -461,7 +506,7 @@ Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed 
   suite hides an engine one.
 - **Local bench mode on a host whose sbx login is in a keyring.** sbx in
   the coordinator has no session bus and reads the Docker login only from
-  files, so on a host with gnome-keyring (arf VM 142, sbx 0.39) every bench
+  files, so on a host with gnome-keyring (a bench host, sbx 0.39) every bench
   failed at `PREPARE IMAGE`: "no default account profile set: secret not
   found". New `bin/sbx-file-login` signs sbx in from a container, so the
   login is also written as files; the host's keyring login stays. The kit's
@@ -497,7 +542,7 @@ Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed 
     a variable and skips the key checks in local mode.
   - `local` is a mode, not a locator, so it is never redacted.
 
-  Proven on VM 151: `smoke` and `scripted-onboarding` pass end to end,
+  Proven on a test bench host: `smoke` and `scripted-onboarding` pass end to end,
   with no sandbox left.
 - Kit `[stage] git = true` (`gentar/policy.toml`): ship git history into the
   bench for suites that clone their own release tags. `plan.py stage-git`
@@ -573,7 +618,7 @@ Release notes: [docs/releases/v0.9.3.md](docs/releases/v0.9.3.md) (what changed 
 
 ### Added
 
-- **The docs standard** (pilot, 2026-09-26: no release without it):
+- **The docs standard** (2026-09-26: no release without it):
   - a short README (what, why, how), with the manual moved to
     `docs/reference/`;
   - `docs/tutorials/` (first run, adopting a repo, a judged turn, a goal
@@ -632,7 +677,7 @@ can flag a run without deciding it. Minor bump: the scenario schema gains
 ## 0.7.0 — 2026-09-26
 
 **Semantic turns.** A regex that breaks on rewording can be replaced by a
-typed judgment of the screen, under the pilot's egress rule. Minor bump: the
+typed judgment of the screen, under the egress rule. Minor bump: the
 scenario schema gains `[scenario] data`, `[judge]` and `[driver.turns.judge]`,
 and the kit gains judged-suite rules (AGENTS.md decision 7).
 
@@ -665,7 +710,7 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
   catches what survives when a window keeps a value's beginning; a TAIL
   window — a failed step's last lines (0.6.3), a report's `…` tail — can
   start inside a secret and keep only its end, which nothing matched
-  (cockpit#31) — and a value longer than a window, cut at both ends, keeps
+  (an adopter's report) — and a value longer than a window, cut at both ends, keeps
   its middle. Credentials now lose ANY 8+ character piece — head, tail or
   middle — in every form, found in one pass over the text (the value's
   8-grams are indexed and each hit extended along it). One rule in the
@@ -693,9 +738,9 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
   lines of its stderr into the report, the span and the failure message,
   redacted like everything else. Passing steps are unchanged.
 - **A redacted host or user matches only as a whole token.** Bench user
-  `polat` redacted the middle of `github.com/ramazanpolat/…` in live
-  reports (claude-playbooks), and a host `10.10.10.5` would have taken the
-  head of `10.10.10.52` (cockpit). A locator is now replaced only where no
+  `user` redacted the middle of `github.com/someuser/…` in live
+  reports (claude-playbooks), and a host `192.0.2.5` would have taken the
+  head of `192.0.2.52` (another adopter). A locator is now replaced only where no
   host/user character (`[A-Za-z0-9-]`, or a `.` followed by one) continues
   it on either side — a sentence-final `.` still ends it, `_` ends it, and
   so does any escape right before it (terminal colour codes, `\n`/`\x0a`/
@@ -725,8 +770,8 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
   `GENTAR_OTLP_EXPORT`, its head `http://1` redacted every `http://1…`
   address in a report — a provider route, `127.0.0.1` — and an `https://`
   destination would have redacted every https URL; a bench host's head
-  `10.10.10` did the same to its whole subnet. Reports looked like they
-  leaked the collector when they had not (cockpit#29, reproduced with the
+  `192.0.2.` did the same to its whole subnet. Reports looked like they
+  leaked the collector when they had not (an adopter's report, reproduced with the
   engine's scrubber). A **locator** — a `*_HOST`, `*_USER`, `*_URL`,
   `*_ENDPOINT`, `*_EXPORT` or `*_JUMP` setting whose value is shaped like a
   URL or host — is now replaced in every form of its exact value, and a URL
@@ -735,7 +780,7 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
   credential (user:pass@, a query, a fragment, or a path segment over 12
   characters, as in webhook URLs). A host counts only when shaped like
   one: IPv4, a lowercase dotted name, or a short lowercase label.
-- **Every value is now also redacted URL-encoded** (`polat%40host`,
+- **Every value is now also redacted URL-encoded** (`user%40host`,
   `sk%2Fabc…`) — credentials included; no form matched it before. Trade-off: a locator cut
   mid-value keeps its surviving head, a partial address.
 
@@ -743,7 +788,7 @@ and the kit gains judged-suite rules (AGENTS.md decision 7).
 
 **Every run leaves the arena as a trace.** A repo declares a telemetry
 destination and the arena forwards everything to it — the organisation's
-ClickStack on arf first.
+ClickStack first.
 
 ### Added
 
@@ -828,7 +873,7 @@ agent suite finally says what the agent did.
 
 ## 0.4.2 — 2026-09-23
 
-**Every run leaves a dashboard** — the pilot's ask since the morning.
+**Every run leaves a dashboard.**
 
 ### Added
 
@@ -868,7 +913,7 @@ No schema or exit-code change; everything new is opt-in except the guard.
   credential proxy swaps in a real value for any service with a stored
   secret — so one `sbx secret set` on a shared host would hand that key to
   every suite there, whatever credential group the engine forwarded
-  (claude-playbooks, measured on arena-142: placeholders present, no secrets
+  (claude-playbooks, measured on a bench host: placeholders present, no secrets
   stored). The guarantee now holds by construction, not by host state.
   sbx 0.39 cannot turn the injection off per sandbox; an arena that uses sbx
   secrets on purpose sets `GENTAR_SBX_SECRETS=allow`. Only a count is
@@ -894,7 +939,7 @@ No schema or exit-code change; everything new is opt-in except the guard.
 ## 0.4.0 — 2026-09-23
 
 **The run policy.** Which suites run when is decided once, at adaptation,
-and then automated — the pilot's policy, shaped with the first adopter
+and then automated — a policy shaped with the first adopter
 (claude-playbooks):
 
 - **Phase 1** on every pull request and every push to the default branch:

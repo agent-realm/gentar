@@ -422,7 +422,7 @@ def _run(name: str, cfg: Config | None = None) -> int:
     # -- judge guard: refuse before any bench exists ---------------------
     # A semantic turn sends the current screen to a judge (TypeSafe). That
     # is allowed only for a scenario that declares its data synthetic
-    # (pilot, 2026-09-26) — refusing here, not mid-run, means no bench and
+    # (2026-09-26) — refusing here, not mid-run, means no bench and
     # no screen ever exists for a scenario that may not use one. A missing
     # key is refused the same way: a semantic suite without its judge is
     # a usage error, never a pass. Names only; the key never reaches a log.

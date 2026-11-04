@@ -1,7 +1,7 @@
 """The human-simulation driver — pexpect over `ssh -tt … sbx exec -t`,
 replacing gauntlet's tmux/send-keys transport with a direct pty. Policies
-port verbatim from agent-gauntlet/lib/drive.sh (itself from the herdr
-incident 2026-07-13):
+port verbatim from agent-gauntlet/lib/drive.sh (itself from a terminal-driver
+incident, 2026-07-13):
 
 - Approve ordinary permission prompts ("Do you want to proceed?" /
   "requires approval" / "allow this command") with Enter —
@@ -24,7 +24,7 @@ from gentar.gates import APPROVAL_RE, DANGER_RE  # noqa: E402,F401  (re-exported
 PICKER_CURSOR_RE = re.compile(r"^\s*❯\s*[0-9]+\.", re.MULTILINE)
 # An UNNUMBERED picker's cursor line: `❯ <text>`. Claude Code 2.1.283's
 # API-key and trust dialogs ("❯ No, exit" / "Yes, I trust this folder") have
-# no numbers (cockpit). Text after the glyph is required: an empty `❯` is the
+# no numbers (found by an adopter). Text after the glyph is required: an empty `❯` is the
 # input prompt, not a picker.
 CURSOR_TEXT_RE = re.compile(r"^\s*❯\s*\S.*$", re.MULTILINE)
 SPINNER_RE = re.compile(r"^[✻✽✢·✳✶]", re.MULTILINE)

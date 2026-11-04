@@ -30,7 +30,7 @@ pilots and soft checks: `plan.py` drops them from any phase-1 pick, and
    ```toml
    [phase1]
    checks = true
-   bench = "off"          # or "declared"; on a public repository that is the pilot's call
+   bench = "off"          # or "declared"; on a public repository that is the operator's call
    floor = []             # cheap, deterministic suites
 
    [phase2]

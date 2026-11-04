@@ -1,8 +1,8 @@
 """Local bench mode: GENTAR_BENCH_HOST=local, no ssh, no bench key.
 
-The pilot (2026-10-03): adopting gentar should need a runner on an arf VM and
+2026-10-03: adopting gentar should need a runner on a VM and
 nothing else. When that runner IS the bench host, the arena calls sbx
-directly; proven on VM 151 first (the sbx CLI in a container, with the
+directly; proven on a test bench host first (the sbx CLI in a container, with the
 host's binary, state and config mounted, created a bench, exec'd in it with
 a pty, shared the workspace both ways, and removed it).
 """
@@ -20,6 +20,9 @@ from gentar.config import Config
 from gentar.redaction import scrubber
 
 ROOT = Path(__file__).resolve().parents[2]
+# A fake docker's answer to bin/docker-identity's `docker -H <sock> info`: a
+# rootful daemon, so bin/sbx-file-login logs in as this user.
+ROOTFUL_INFO = """if [ "$3" = info ]; then echo '["name=seccomp,profile=builtin"]'; exit 0; fi\n"""
 
 
 def cfg(**env):
@@ -39,7 +42,7 @@ class LocalHostTest(unittest.TestCase):
         self.assertEqual(out, "a b|c'd")                 # the same quoting as over ssh
 
     def test_a_remote_host_still_uses_ssh(self):
-        h = SbxBenchHost(cfg(GENTAR_BENCH_HOST="10.10.10.52", GENTAR_BENCH_USER="polat"))
+        h = SbxBenchHost(cfg(GENTAR_BENCH_HOST="192.0.2.52", GENTAR_BENCH_USER="user"))
         self.assertFalse(h.local)
         self.assertEqual(h._ssh_base()[0], "ssh")
 
@@ -126,7 +129,7 @@ class ReviewFixesTest(unittest.TestCase):
 
 
 class KeyringLoginTest(unittest.TestCase):
-    """VM 142, 2026-10-03: sbx 0.39 kept its Docker login in gnome-keyring.
+    """A bench host, 2026-10-03: sbx 0.39 kept its Docker login in gnome-keyring.
     sbx in the coordinator (no session bus) read files only, so every bench
     failed at PREPARE IMAGE, and the 400-character head cut hid the reason."""
 
@@ -167,7 +170,7 @@ class KeyringLoginTest(unittest.TestCase):
                 r = self._run_check(script, home)
                 self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
                 self.assertIn("sbx-file-login", r.stderr)
-                # what VM 142 had: the store folder with only its lock
+                # what that bench host had: the store folder with only its lock
                 (home / auth).mkdir(parents=True)
                 (home / auth / ".posixage.lock").write_text("")
                 self.assertEqual(self._run_check(script, home).returncode, 2)
@@ -176,7 +179,7 @@ class KeyringLoginTest(unittest.TestCase):
                 (home / auth / "ZG9ja2VyL290aGVy" / "secretpass").write_text("x")
                 (home / auth / self.PROFILE).mkdir()
                 self.assertEqual(self._run_check(script, home).returncode, 2)
-                # what VM 151 has: the default account profile, with content
+                # what a working bench host has: the default account profile, with content
                 (home / auth / self.PROFILE / "secretpass").write_text("x")
                 r = self._run_check(script, home)
                 self.assertEqual((r.returncode, r.stdout.strip()), (0, "passed"), r.stderr)
@@ -196,10 +199,12 @@ class KeyringLoginTest(unittest.TestCase):
         bindir.mkdir()
         log = tmp / "docker.args"
         (bindir / "sbx").write_text("#!/bin/sh\nexit 0\n")
-        (bindir / "docker").write_text(f'#!/bin/sh\nfor a in "$@"; do echo "$a"; done > {log}\n')
+        (bindir / "docker").write_text(
+            f'#!/bin/sh\n{ROOTFUL_INFO}for a in "$@"; do echo "$a"; done > {log}\n')
         for f in ("sbx", "docker"):
             (bindir / f).chmod(0o755)
         env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home),
+               "DOCKER_HOST": "unix:///var/run/docker.sock",
                "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus"}
         r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "sbx-file-login"),
                             "--username", "u", "--password-stdin"],
@@ -222,10 +227,12 @@ class KeyringLoginTest(unittest.TestCase):
         home.mkdir()
         bindir = tmp / "bin"
         bindir.mkdir()
+        (bindir / "sbx").write_text("#!/bin/sh\nexit 0\n")
+        (bindir / "docker").write_text(f"#!/bin/sh\n{ROOTFUL_INFO}exit 0\n")
         for f in ("sbx", "docker"):
-            (bindir / f).write_text("#!/bin/sh\nexit 0\n")
             (bindir / f).chmod(0o755)
-        env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home)}
+        env = {"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home),
+               "DOCKER_HOST": "unix:///var/run/docker.sock"}
         r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "sbx-file-login")],
                            env=env, input="", capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)        # a fresh host: the dirs are made
@@ -241,8 +248,7 @@ class KeyringLoginTest(unittest.TestCase):
         self.assertIn("not a directory owned by", r.stderr)
 
 class LoginSecrecyTest(unittest.TestCase):
-    """The pilot's second look at #65 (2026-10-04, Antigravity, gemini-3.8-
-    flash-high): no path may print the sbx login or its token."""
+    """A second look at #65 (2026-10-04): no path may print the sbx login or its token."""
 
     SBX_ERROR = ('ERROR: encode registry auth: registry credentials for "docker/sandbox-templates:'
                  'shell-docker": get Docker Hub access token: user is not authenticated to Docker: '
@@ -309,13 +315,14 @@ class LoginSecrecyTest(unittest.TestCase):
         (bindir / "sbx").write_text("#!/bin/sh\nexit 0\n")
         # the fake login writes the store as sbx does: 700 folders, 644 files
         (bindir / "docker").write_text(
-            f"#!/bin/sh\ntouch {called}\nmkdir -p {auth}\nchmod 700 {auth}\n"
+            f"#!/bin/sh\n{ROOTFUL_INFO}touch {called}\nmkdir -p {auth}\nchmod 700 {auth}\n"
             f"echo x > {auth}/secretpass\nchmod 644 {auth}/secretpass\n")
         for f in ("sbx", "docker"):
             (bindir / f).chmod(0o755)
         kw = {"stdin": stdin} if stdin is not None else {"input": input}
         r = subprocess.run(["/bin/bash", str(ROOT / "bin" / "sbx-file-login"), *args],
-                           env={"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home)},
+                           env={"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(home),
+                                "DOCKER_HOST": "unix:///var/run/docker.sock"},
                            capture_output=True, text=True, **kw)
         return r, home, called.exists(), auth
 
@@ -368,7 +375,7 @@ class RedactionTest(unittest.TestCase):
 
     def test_a_real_host_still_is(self):
         s = scrubber([("GENTAR_BENCH_HOST", "bench7.example.org")])
-        self.assertNotIn("bench7.example.org", s("ssh polat@bench7.example.org"))
+        self.assertNotIn("bench7.example.org", s("ssh user@bench7.example.org"))
 
 
 class WiringTest(unittest.TestCase):

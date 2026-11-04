@@ -1,6 +1,6 @@
 """A suite only a bench can prove says so, and the dry-run reports it.
 
-memhouse's adoption (2026-10-04, review by memhouse-f7): memhouse-house
+memhouse's adoption (2026-10-04, from its review): memhouse-house
 deploys a ClickHouse through the bench's Docker. The bench-free dry-run
 cannot, ran its verify commands without the house, and turned every
 memhouse pull request red. `[scenario] bench_only = "<why>"` makes the

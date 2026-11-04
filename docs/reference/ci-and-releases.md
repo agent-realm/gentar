@@ -10,7 +10,7 @@ GitHub, Gitea, Jenkins, cron, or a laptop unchanged.
 
 gentar is public, so no self-hosted runner serves it: a fork's pull request
 can bring its own workflow to any runner registered to a public repository
-(the D5 decision, 2026-10-08). Since 2026-10-12 the GitHub wiring has two
+(decided 2026-10-08). Since 2026-10-12 the GitHub wiring has two
 halves:
 
 - **The public workflow** ([`.github/workflows/gentar.yml`](../../.github/workflows/gentar.yml))
@@ -22,6 +22,7 @@ halves:
 |---|---|---|
 | public `gentar.yml` | every PR, every push to `main` | the unit suite on the checkout (ubuntu-latest) |
 | public `gentar.yml` | a `v*` tag | a check that the tag equals `v$(cat VERSION)` |
+| public `gentar.yml` | every PR | `scan (added lines)`: `bin/pr-scan` over the lines the PR adds and its commit messages, for internal addresses, home paths with a real name, credential shapes and private model routes; prints `path:line: class`, never the text; a file git calls binary is diffed as text and must be allowlisted by its blob id; synthetic fixtures in `.github/scan-allowlist.toml`, each entry matching a whole line |
 | mirror, `gate` tier | a dispatch with `scenario=gate`, or daily at 00:17 UTC | six deterministic bench suites: `smoke`, `bench-template-verify`, `otlp-selfreport`, `budget-sim`, `scripted-onboarding`, `scripted-danger` |
 | mirror, `nightly` tier | daily at 01:17 UTC, or a dispatch with `scenario=nightly` | the nightly suites; the agent suite skips without a provider key, the subject suites without a subject token |
 | mirror, one scenario | a dispatch with `scenario=<name>` | that scenario |

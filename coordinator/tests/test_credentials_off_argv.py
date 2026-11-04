@@ -49,7 +49,7 @@ class Recorder:
         self.calls.append((list(argv), kw.get("input")))
         # The env write says where it staged the file, like a real bench.
         m = re.search(r"\.gentar-env-[0-9a-f]{16}", " ".join(argv)) if kw.get("input") else None
-        out = f"/home/arena/{m.group(0)}\n" if m else ""
+        out = f"/home/user/{m.group(0)}\n" if m else ""
         return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
 
     def argv_text(self):
@@ -131,7 +131,7 @@ class OtherTiersTest(Checks, unittest.TestCase):
 
     def tart(self):
         host = TartBenchHost(cfg())
-        host._vm_ips["vm1"] = "192.168.64.9"
+        host._vm_ips["vm1"] = "198.51.100.9"
         return host
 
     def daytona(self):

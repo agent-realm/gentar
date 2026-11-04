@@ -516,8 +516,8 @@ if [ "$SWEEP" = 1 ]; then
   mkdir -p "$HERE/reports"
   printf '%s' "$skipped" > "$HERE/reports/sweep-skipped.txt"
   # Said once more, loudly, at the end: a phase 2 that skipped its judged
-  # suites can finish green without having run them (claude-playbooks-ac,
-  # from Codex on cockpit's re-pin). In Actions it is a warning annotation.
+  # suites can finish green without having run them (from
+  # Codex, on an adopter's re-pin). In Actions it is a warning annotation.
   if [ -n "$judged_skipped" ]; then
     n=$(echo $judged_skipped | wc -w | tr -d ' ')
     msg="$n judged suite(s) skipped, TYPESAFE_API_KEY is not set:$judged_skipped (a green sweep did not run them)"
@@ -553,7 +553,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # suites, and committing the bump as its own change; the engine's release
 # moves the default. GENTAR_REF overrides it for one run, and `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.11.0}
+REF=${GENTAR_REF:-v0.11.1}
 
 # --review: has this repo outgrown its suites?
 #
