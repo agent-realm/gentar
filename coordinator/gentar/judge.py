@@ -6,7 +6,7 @@ probability back, instead of a regex that breaks when the wording changes.
 The verdict of a run is still reality's ([[verify.*]]); a judgment only
 decides when a turn has seen what it waits for.
 
-What may leave the arena (pilot, 2026-09-26), enforced here and in the
+What may leave the arena (2026-09-26), enforced here and in the
 coordinator's guard before any bench exists:
 
   - only scenarios that declare `[scenario] data = "synthetic"`;
@@ -69,10 +69,10 @@ def prepare_screen(screen: str, lines: int = 40) -> str:
 
 
 def egress_allowed(scenario, backend) -> bool:
-    """May this backend see this scenario's screens? The pilot's rule B
+    """May this backend see this scenario's screens? Rule B
     (2026-09-26): only a scenario declared synthetic, whatever the backend.
-    An in-house backend (egress == "in-house", e.g. a model on the pilot's
-    own router) could one day be allowed more — that is a pilot decision,
+    An in-house backend (egress == "in-house", e.g. a model on the
+    operator's own router) could one day be allowed more — that is a policy decision,
     and this function is the only place it would change."""
     return getattr(scenario, "data", "") == SYNTHETIC
 

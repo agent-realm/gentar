@@ -1,6 +1,6 @@
 """Local bench mode: GENTAR_BENCH_HOST=local, no ssh, no bench key.
 
-The pilot (2026-10-03): adopting gentar should need a runner on a VM and
+2026-10-03: adopting gentar should need a runner on a VM and
 nothing else. When that runner IS the bench host, the arena calls sbx
 directly; proven on a test bench host first (the sbx CLI in a container, with the
 host's binary, state and config mounted, created a bench, exec'd in it with
@@ -248,8 +248,7 @@ class KeyringLoginTest(unittest.TestCase):
         self.assertIn("not a directory owned by", r.stderr)
 
 class LoginSecrecyTest(unittest.TestCase):
-    """The pilot's second look at #65 (2026-10-04, Antigravity, gemini-3.8-
-    flash-high): no path may print the sbx login or its token."""
+    """A second look at #65 (2026-10-04): no path may print the sbx login or its token."""
 
     SBX_ERROR = ('ERROR: encode registry auth: registry credentials for "docker/sandbox-templates:'
                  'shell-docker": get Docker Hub access token: user is not authenticated to Docker: '

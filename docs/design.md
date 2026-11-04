@@ -175,8 +175,8 @@ gentar first, then archive the GitHub repo and move the checkout to
 Decided 2026-08-18: **bench shape** — the pilot home dir is a scenario
 decision: `pilot_user` renders as `/Users/<name>` on the macOS backend and
 `/home/<name>` on Linux (path-keyed session data stays valid; the test VM's
-convention, generalized). **macOS tier is in scope now**: tart runs on the
-pilot's Mac behind a `[gentar, macos]` runner. **First
+convention, generalized). **macOS tier is in scope now**: tart runs on a
+maintainer's Mac behind a `[gentar, macos]` runner. **First
 subjects, in order:** claude-playbooks (the installer CLI) ·
 kommander-playbook · memhouse.
 
@@ -222,12 +222,12 @@ the intermittent security-notes page is an `optional` turn (present
 on some fresh benches, absent on others — probe 5). The reply marker
 is derived from the task (filename uppercased), never quoted: a
 quoted marker self-matches the input-box echo on screen. Dispatchable
-today; nightly wiring deliberately left out (pilot's call).
+today; nightly wiring deliberately left out.
 
 ## Provenance
 
 - Forked from task `agent-gauntlet` 2026-08-17-13_29; design conversation
   logged in that task's `sessions/2026-08-17.md`.
-- Name **gentar** (aGENT ARena) coined by the pilot 2026-08-17; verified free
+- Name **gentar** (aGENT ARena) coined 2026-08-17; verified free
   in `ultimagent/TERMINOLOGY.md`; canon entry landed as the
   `components/gentar.md` card (umbrella PR #9, 2026-08-18).

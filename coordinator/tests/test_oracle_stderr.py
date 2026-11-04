@@ -50,7 +50,7 @@ class FailedStepStderrTest(unittest.TestCase):
         self.assertNotIn("warning", report.steps[0].output)
 
     def test_a_tail_window_that_starts_inside_a_secret_keeps_none_of_it(self):
-        # cockpit#31: the failure message keeps the output's LAST 600 chars;
+        # An adopter's report: the failure message keeps the output's LAST 600 chars;
         # when that window starts inside a secret, only its end survives,
         # and the prefix rule never matches an end
         from gentar.redaction import scrubber

@@ -1,6 +1,6 @@
 """The kit README documents every secret and variable the kit workflow reads.
 
-cockpit's v0.9.0 re-pin (Codex) found TYPESAFE_API_KEY, the OTLP pair and
+An adopter's v0.9.0 re-pin (Codex) found TYPESAFE_API_KEY, the OTLP pair and
 GENTAR_FLOOR read by gentar-arena.yml but missing from the README's
 "Secrets/vars the workflow reads" list. An unlisted TYPESAFE_API_KEY hid
 that phase 2 skips judged suites without it. This keeps the list complete.

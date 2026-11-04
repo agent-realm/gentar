@@ -135,7 +135,7 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
                         _ok(spans, subject, run_id, name, i,
                             f"pick /{turn['label']}/ skipped (optional)")
                         # Said in the report too: a skip that only reached a
-                        # span hid cockpit's never-matching "No" pick.
+                        # span hid an adopter's never-matching "No" pick.
                         if report is not None:
                             report.warnings.append(
                                 f"turn {i}: optional pick /{turn['label']}/ skipped: no "
@@ -212,7 +212,7 @@ def run_turns(scenario, bench: BenchHost, run_id: str, spans: Spans,
     finally:
         if failed and report is not None:
             # A stuck TUI used to leave only the transcript: no screen, no
-            # process list, and verify never ran (cockpit's first-run
+            # process list, and verify never ran (an adopter's first-run
             # scenario, parked after 3 rounds). Captured BEFORE close()
             # kills the session; never raises over the real failure.
             try:

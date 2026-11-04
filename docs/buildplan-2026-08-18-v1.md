@@ -158,7 +158,7 @@ passes.
 
 gentar ports gauntlet's telemetry substrate and driver logic **by copy** —
 gauntlet itself is untouched, stays active, and keeps serving the projects
-already using it (pilot decision 2026-08-18). No archive, no
+already using it (decided 2026-08-18). No archive, no
 `_archived/` move, no forced subject migration. A subject moves to gentar
 when its owner chooses, not on a schedule.
 

@@ -10,7 +10,7 @@ GitHub, Gitea, Jenkins, cron, or a laptop unchanged.
 
 gentar is public, so no self-hosted runner serves it: a fork's pull request
 can bring its own workflow to any runner registered to a public repository
-(the D5 decision, 2026-10-08). Since 2026-10-12 the GitHub wiring has two
+(decided 2026-10-08). Since 2026-10-12 the GitHub wiring has two
 halves:
 
 - **The public workflow** ([`.github/workflows/gentar.yml`](../../.github/workflows/gentar.yml))

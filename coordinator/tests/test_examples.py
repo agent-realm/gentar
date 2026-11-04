@@ -1,6 +1,6 @@
 """examples/ — the ladder from a one-step oracle to a full subject.
 
-The docs standard (pilot, 2026-09-26) asks for examples from the smallest
+The docs standard (2026-09-26) asks for examples from the smallest
 feature to a full usage, each with its own README.md. This holds them to
 it mechanically: every example documented, every scenario loads with the
 engine's own parser, judged ones declare synthetic data and carry the

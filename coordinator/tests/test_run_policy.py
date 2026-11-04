@@ -1,6 +1,6 @@
 """The run policy: which suites run when, decided once (subject-template/gentar/plan.py).
 
-The pilot's policy: phase 1 on every PR and main push, phase 2 (the full
+The policy: phase 1 on every PR and main push, phase 2 (the full
 regression) only on dispatch, the `arena` tag, or a release candidate; a
 release is gated on a green phase 2 of its commit. These tests pin the
 planner to that, and to its safety rules: a fork's PR never gets a bench,

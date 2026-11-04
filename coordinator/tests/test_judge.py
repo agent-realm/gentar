@@ -1,6 +1,6 @@
 """Semantic turns: what may leave the arena, and when a judged turn passes.
 
-The pilot's rule (2026-09-26): a judge sees only the current screen,
+The rule (2026-09-26): a judge sees only the current screen,
 scrubbed, and only for a scenario declared synthetic — refused before any
 bench exists otherwise. The audit keeps a hash and a length, never the
 text. A judged expect needs the same confident yes on consecutive polls

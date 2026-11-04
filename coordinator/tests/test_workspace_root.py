@@ -1,6 +1,6 @@
 """GENTAR_BENCH_WORKSPACE_ROOT reaches the coordinator in SSH mode too.
 
-2026-10-09 (D5, via agent-realm-lead): docker-compose.yml forwarded the
+2026-10-09: docker-compose.yml forwarded the
 workspace root only in local mode (compose.local-bench.yml). In SSH mode the
 coordinator always used config.py's default while bin/bench-reap followed
 the caller's shell, so an arena whose bench user has its own root made its

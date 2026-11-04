@@ -385,7 +385,7 @@ and `bash`, plus `gh` for the release gate below. **On GitHub Free, an
 organisation variable reaches public repositories only:** a private
 repository needs it set as a repository variable, or the workflow never
 sees it: `plan` falls back to `ubuntu-latest`, and `checks` to the OSes in
-`[phase1] os` (macOS too, when listed) (found by cockpit, 2026-09-30).
+`[phase1] os` (macOS too, when listed) (found by an adopter, 2026-09-30).
 Check the plan output's `runner=` line after setting it. Three things
 change with it set:
 

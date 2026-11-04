@@ -1,7 +1,6 @@
 """[secrets] route: a subject's own secrets reach its suites BY NAME.
 
-2026-10-08 (AK47 via agent-realm-lead, for cockpit's
-AGENT_KOMMANDER_READ_KEY_B64): the kit's workflow named every secret it
+2026-10-08 (for one adopter's read key): the kit's workflow named every secret it
 passes, so a subject needing one more had to edit a kit file and lose
 byte-identity. Now the adopter declares names in policy.toml; the bench
 job looks each one up by name in a fixed slot (never toJSON(secrets));

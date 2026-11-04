@@ -292,7 +292,7 @@ agent:
 
 ## Before any release
 
-The pilot's standard (2026-09-26): **no release without it.** Before
+The docs standard (2026-09-26): **no release without it.** Before
 asking for a tag, check all four, and fix what is missing first:
 
 1. **A good README:** short and precise, saying **what** gentar is, **why**
