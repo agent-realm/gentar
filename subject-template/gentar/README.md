@@ -384,7 +384,7 @@ The arena workflow is the kit's, byte for byte — `--check` compares it —
 and does what the run policy says (above). Its `plan` and `checks` jobs
 run on GitHub-hosted runners; only the `bench` job needs a self-hosted
 runner labeled `arena` with Docker + reach to the bench-host. A bench
-runner that carries another label (agentmux's is `agentmux-lab`) sets the
+runner that carries another label (`my-bench`, say) sets the
 repository variable `GENTAR_BENCH_LABEL` to it: the bench job runs there,
 and the runner guard below refuses that label too.
 
@@ -396,7 +396,7 @@ and `bash`, plus `gh` for the release gate below. **On GitHub Free, an
 organisation variable reaches public repositories only:** a private
 repository needs it set as a repository variable, or the workflow never
 sees it: `plan` falls back to `ubuntu-latest`, and `checks` to the OSes in
-`[phase1] os` (macOS too, when listed) (found by cockpit, 2026-09-30).
+`[phase1] os` (macOS too, when listed) (found by an adopter, 2026-09-30).
 Check the plan output's `runner=` line after setting it. Three things
 change with it set:
 

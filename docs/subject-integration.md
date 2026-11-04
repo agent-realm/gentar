@@ -254,8 +254,8 @@ Only the selected tier's vars are required, so an sbx-only install
 never configures tart. The runner needs
 Docker + network reachability to it — GitHub-hosted `ubuntu-latest`
 can't reach an internal bench-host, so own-arena CI runs on a
-self-hosted runner inside the network (any machine with Docker; the
-pilot's Mac qualifies).
+self-hosted runner inside the network (any machine with Docker; a
+developer's Mac qualifies).
 
 ### Engine source
 

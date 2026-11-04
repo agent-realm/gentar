@@ -1,6 +1,6 @@
 """verify-ref.sh admits only commits the public repository's own refs reach.
 
-2026-10-08 (D5, the pilot's "fix it"; root's cpb design): a private mirror
+2026-10-08: a private mirror
 runs a public repository's phase 2 on a self-hosted runner. GitHub serves
 any commit of a fork network by sha through the parent's URL, so a fetch
 that succeeds proves nothing. The fixture here is a server repository that
@@ -152,7 +152,7 @@ class VerifyRefTest(unittest.TestCase):
         self.assertEqual(out, "")
 
     def test_it_is_self_contained(self):
-        # A mirror vendors this one file (D5): nothing sourced, no kit path.
+        # A mirror vendors this one file: nothing sourced, no kit path.
         text = VERIFY.read_text()
         for word in ("source ", ". \"$", "$(dirname", "plan.py", "run.sh"):
             self.assertNotIn(word, text)

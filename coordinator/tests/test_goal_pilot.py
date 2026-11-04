@@ -233,7 +233,7 @@ class CodexReviewTest(unittest.TestCase):
             name, data = "real-scenario", ""
         with self.assertRaises(J.JudgeRefused):
             J.Judge(Real(), "", scrubber([]), mock.MagicMock(), "s", "r", backend=InHouse())
-        # a pilot decision widening rule B changes egress_allowed ONLY
+        # a policy decision widening rule B changes egress_allowed ONLY
         with mock.patch.object(J, "egress_allowed", lambda sc, b: b.egress == "in-house"):
             j = J.Judge(Real(), "", scrubber([]), mock.MagicMock(), "s", "r", backend=InHouse())
             self.assertEqual(j.noul("screen", "Q?"), 0.9)

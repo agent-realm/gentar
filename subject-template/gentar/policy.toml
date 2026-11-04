@@ -10,7 +10,7 @@ bench = "off"          # "off": PRs never reach the self-hosted runner.
                        # "declared": a same-repo PR also runs, on the bench,
                        # the floor plus the suites its body names on a
                        # `gentar: a b` line. On a PUBLIC repo that puts PR
-                       # code on your runner — the pilot's call, not a default.
+                       # code on your runner — the operator's call, not a default.
 floor = []             # suites that run on the bench for every push to the
                        # default branch (and every declared PR): the cheap,
                        # deterministic guard rails

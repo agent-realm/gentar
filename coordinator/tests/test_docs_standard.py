@@ -1,4 +1,4 @@
-"""The docs standard (pilot, 2026-09-26): no release without it.
+"""The docs standard (2026-09-26): no release without it.
 
 1) a short README — what, why, how; 2) docs with tutorials and guides;
 3) examples, smallest to full, each with its own README.md; 4) an agent

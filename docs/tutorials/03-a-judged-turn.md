@@ -21,14 +21,14 @@ The worked example is the engine's `semantic-demo`
   the key is already stored under another reference, use that reference
   wherever this tutorial says `keychain:pilot/typesafe`.
 - **python 3.11+**, for `bin/judge-eval`.
-  (`with-secret` is the pilot's own tool for lending a keychain secret to one
+  (`with-secret` is a separate tool for lending a keychain secret to one
   command; it is not part of gentar. Anything that sets `TYPESAFE_API_KEY`
   for one command without writing it down works the same way.)
 
 ## The rule you are working under
 
 A judged turn sends a screen to an external service, so gentar enforces
-the pilot's egress rule in code:
+an egress rule in code:
 
 - The scenario must declare `[scenario] data = "synthetic"`: invented
   projects, fake accounts, no real credentials or personal data on

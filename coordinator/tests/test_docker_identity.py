@@ -1,6 +1,6 @@
 """Local bench mode on rootless Docker: one daemon, and a uid it decides.
 
-2026-10-09 (D5 step 6; AK47's conditions, root's decision W2(a)):
+2026-10-09 (runner isolation, rootless accounts):
 
 - rootless Docker: the local coordinator runs as 0:0, which there IS the
   host user (the user's own uid maps to a subordinate uid owning nothing);

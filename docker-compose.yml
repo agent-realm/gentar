@@ -111,7 +111,7 @@ services:
       # Where each bench's workspace lives ON THE BENCH HOST. Forwarded so the
       # coordinator and bin/bench-reap (which reads the caller's shell) agree
       # on it in SSH mode too; it used to reach the coordinator only in
-      # local mode, so an arena whose bench user has its own root (D5: a
+      # local mode, so an arena whose bench user has its own root (a
       # 0700 /tmp/gentar-workspaces-<user>) made workspaces in the default
       # one instead. config.py's default, repeated: config._opt treats an
       # EMPTY value as set, so `:-` (unset OR empty -> the default) is what
