@@ -10,8 +10,10 @@ lines the pull request adds (`git diff base...head`, by file and new line
 number) and every line of its commits' messages (`git log base..head`). The
 tree that is already on the base branch is not scanned: only what this pull
 request brings. A file git calls binary (a NUL byte, or a `binary` or `-diff`
-attribute) is diffed as text, so its lines are scanned too. Commit messages
-are read from the commit objects, and a NUL byte in one is a finding.
+attribute) is diffed as text, so its lines are scanned too, and adding or
+changing one is also a finding, `binary`, unless the allowlist names its path
+with its exact blob id. Commit messages are read from the commit objects, and
+a NUL byte in one is a finding.
 
 Generic shapes only, so this file names nothing private:
 
@@ -31,7 +33,11 @@ The matched text and the line are never printed: a log is public too.
 
 Synthetic fixtures that must keep a credential's shape are allowlisted in
 .github/scan-allowlist.toml: a file glob, a class, a pattern the whole line
-must match, and the reason. Commit messages cannot be allowlisted.
+must match, and the reason. A reviewed binary is allowlisted with class
+`binary`, a file glob, its blob id (`git rev-parse HEAD:<path>`) in place of
+the pattern, and the reason, so new bytes under that path need a new entry,
+and the scan flags a change to the allowlist. Commit messages cannot be
+allowlisted.
 
 Exit 0 clean · 1 findings · 2 usage, a bad allowlist, or a git error.
 """
@@ -79,6 +85,8 @@ CLASSES = {
 # git itself never writes a NUL byte into a commit message; one written by
 # hand is refused rather than read around.
 NUL = "nul-byte"
+# A binary file must be allowlisted by its blob before it lands.
+BINARY = "binary"
 
 SCAN_ITSELF = ("bin/pr-scan", ".github/scan-allowlist.toml", ".github/workflows/gentar.yml")
 
@@ -95,7 +103,7 @@ def classes_of(line: str) -> list[str]:
 
 class Allowlist:
     def __init__(self, path: Path):
-        self.entries = []
+        self.entries, self.blobs = [], []
         if not path.exists():
             return
         try:
@@ -107,10 +115,16 @@ class Allowlist:
         except (OSError, ValueError) as exc:
             die(f"{path}: not valid TOML ({type(exc).__name__})")
         for i, e in enumerate(data.get("allow", []), 1):
-            missing = [k for k in ("path", "class", "line", "reason")
+            binary = e.get("class") == BINARY
+            missing = [k for k in ("path", "class", "blob" if binary else "line", "reason")
                        if not isinstance(e.get(k), str) or not e[k].strip()]
             if missing:
                 die(f"{path}: entry {i} lacks {', '.join(missing)}")
+            if binary:
+                if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", e["blob"]):
+                    die(f"{path}: entry {i}: `blob` is not a full object id")
+                self.blobs.append((e["path"], e["blob"]))
+                continue
             if e["class"] not in CLASSES:
                 die(f"{path}: entry {i}: unknown class {e['class']!r}")
             try:
@@ -124,6 +138,9 @@ class Allowlist:
         # fixture line was hidden by the fixture's own match
         return any(c == cls and fnmatch.fnmatchcase(path, p) and rx.fullmatch(line)
                    for p, c, rx in self.entries)
+
+    def allows_binary(self, path: str, blob: str) -> bool:
+        return any(fnmatch.fnmatchcase(path, p) and b == blob for p, b in self.blobs)
 
 
 def git(*args: str) -> str:
@@ -173,6 +190,23 @@ def added_lines(base: str, head: str):
             if path is not None:
                 yield path, n, line[1:]
             n += 1
+
+
+def binary_files(base: str, head: str):
+    """(path, blob id) for every file head adds or changes that git calls
+    binary: a NUL byte, or a `binary` or `-diff` attribute, which numstat
+    marks `-` instead of a line count. A deleted binary adds nothing."""
+    common = ("--no-renames", "--no-ext-diff", "--no-textconv", "--diff-filter=d", "-z",
+              f"{base}...{head}")
+    blobs = {}
+    raw = git("diff", "--raw", "--no-abbrev", *common).split("\x00")
+    for meta, path in zip(raw[0::2], raw[1::2]):
+        blobs[path] = meta.split()[3]
+    for rec in git("diff", "--numstat", *common).split("\x00"):
+        added, _, rest = rec.partition("\t")
+        if added == "-":
+            path = rest.partition("\t")[2]
+            yield path, blobs[path]
 
 
 def commit_messages(base: str, head: str):
@@ -225,12 +259,20 @@ def main(argv=None) -> int:
             if not allow.allows(path, cls, text):
                 findings.append((path, n, cls, True))
     if not a.files:
+        for path, blob in binary_files(a.base, a.head):
+            if not allow.allows_binary(path, blob):
+                findings.append((path, None, BINARY, True))
         for sha, n, text in commit_messages(a.base, a.head):
             commits.add(sha)
             for cls in ([NUL] if "\x00" in text else []) + classes_of(text):
                 findings.append((f"commit {sha[:12]} message", n, cls, False))
 
     for where, n, cls, is_file in findings:
+        if n is None:
+            print(f"{where}: {cls}")
+            if gha:
+                print(f"::error file={_prop(where)}::{cls}: allowlist it by its blob id once reviewed")
+            continue
         print(f"{where}:{n}: {cls}")
         if gha and is_file:
             print(f"::error file={_prop(where)},line={n}::{cls} (the matched text is not shown)")
@@ -244,7 +286,8 @@ def main(argv=None) -> int:
     if findings:
         print(f"pr-scan: {len(findings)} finding(s) in {what}. Use stand-ins (192.0.2.x, "
               f"example-host, /home/user, user); a synthetic credential shape goes in "
-              f".github/scan-allowlist.toml with its reason.", file=sys.stderr)
+              f".github/scan-allowlist.toml with its reason, a reviewed binary with its "
+              f"blob id.", file=sys.stderr)
         return 1
     print(f"pr-scan: clean, {what}")
     return 0
