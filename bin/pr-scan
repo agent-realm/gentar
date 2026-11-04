@@ -9,7 +9,9 @@ gentar is public, and so is everything a pull request adds. This scans the
 lines the pull request adds (`git diff base...head`, by file and new line
 number) and every line of its commits' messages (`git log base..head`). The
 tree that is already on the base branch is not scanned: only what this pull
-request brings.
+request brings. A file git calls binary (a NUL byte, or a `binary` or `-diff`
+attribute) is diffed as text, so its lines are scanned too. Commit messages
+are read from the commit objects, and a NUL byte in one is a finding.
 
 Generic shapes only, so this file names nothing private:
 
@@ -28,8 +30,8 @@ A finding prints as `path:line: class`, with a GitHub annotation in Actions.
 The matched text and the line are never printed: a log is public too.
 
 Synthetic fixtures that must keep a credential's shape are allowlisted in
-.github/scan-allowlist.toml: a file glob, a class, a pattern the line must
-match, and the reason. Commit messages cannot be allowlisted.
+.github/scan-allowlist.toml: a file glob, a class, a pattern the whole line
+must match, and the reason. Commit messages cannot be allowlisted.
 
 Exit 0 clean · 1 findings · 2 usage, a bad allowlist, or a git error.
 """
@@ -74,6 +76,10 @@ CLASSES = {
     )],
 }
 
+# git itself never writes a NUL byte into a commit message; one written by
+# hand is refused rather than read around.
+NUL = "nul-byte"
+
 SCAN_ITSELF = ("bin/pr-scan", ".github/scan-allowlist.toml", ".github/workflows/gentar.yml")
 
 
@@ -114,7 +120,9 @@ class Allowlist:
             self.entries.append((e["path"], e["class"], rx))
 
     def allows(self, path: str, cls: str, line: str) -> bool:
-        return any(c == cls and fnmatch.fnmatchcase(path, p) and rx.search(line)
+        # fullmatch: with search, a private value appended to an allowlisted
+        # fixture line was hidden by the fixture's own match
+        return any(c == cls and fnmatch.fnmatchcase(path, p) and rx.fullmatch(line)
                    for p, c, rx in self.entries)
 
 
@@ -144,12 +152,17 @@ def _unquote(path: str) -> str:
 
 def added_lines(base: str, head: str):
     """(path, new line number, text) for every line head adds since the merge base."""
-    out = git("diff", "--no-color", "--no-ext-diff", "--unified=0", "--no-renames",
-              f"{base}...{head}")
+    # --text: without it a file with a NUL byte, or one .gitattributes marks
+    # binary, diffs as "Binary files ... differ" and none of its lines is seen
+    out = git("diff", "--no-color", "--no-ext-diff", "--no-textconv", "--text",
+              "--unified=0", "--no-renames", f"{base}...{head}")
     path, n, in_hunk = None, 0, False
     for line in lines_of(out):
         if line.startswith("diff --git "):
             path, in_hunk = None, False
+        elif not in_hunk and line.startswith(("Binary files ", "GIT binary patch")):
+            # fail closed: a diff that is not lines cannot be called clean
+            die("git left a binary diff unexpanded")
         elif not in_hunk and line.startswith("+++ "):
             target = line[4:]
             path = None if target == "/dev/null" else _unquote(target)[2:]
@@ -165,14 +178,13 @@ def added_lines(base: str, head: str):
 def commit_messages(base: str, head: str):
     """(sha, line number, text) for every line of the commits head has and base has not.
 
-    Records are NUL-separated (`-z`): git refuses a NUL in a commit message,
-    while any other separator could sit inside one and hide what follows it
-    (Codex on #104)."""
-    out = git("log", "-z", "--format=%H%n%B", f"{base}..{head}")
-    for rec in out.split("\x00"):
-        sha, _, body = rec.lstrip("\n").partition("\n")
+    Read from each commit object, not `git log --format=%B`: that stops at a
+    NUL byte, and git only warns about one (fsck `nulInCommit`), so a commit
+    written by hand could carry text past it that was never scanned."""
+    for sha in lines_of(git("rev-list", f"{base}..{head}")):
         if not sha:
             continue
+        body = git("cat-file", "commit", sha).partition("\n\n")[2]
         for n, line in enumerate(lines_of(body.rstrip("\n")), 1):
             yield sha, n, line
 
@@ -215,7 +227,7 @@ def main(argv=None) -> int:
     if not a.files:
         for sha, n, text in commit_messages(a.base, a.head):
             commits.add(sha)
-            for cls in classes_of(text):
+            for cls in ([NUL] if "\x00" in text else []) + classes_of(text):
                 findings.append((f"commit {sha[:12]} message", n, cls, False))
 
     for where, n, cls, is_file in findings:
