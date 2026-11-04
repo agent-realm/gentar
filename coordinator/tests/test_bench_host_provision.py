@@ -152,6 +152,80 @@ class BenchHostProvisionTest(unittest.TestCase):
     def test_the_next_steps_name_the_sbx_wizard(self):
         self.assertIn("sbx setup, press q", SCRIPT.read_text())
 
+    def test_the_next_steps_name_the_network_policy(self):
+        # Without it every bench fails: "global network policy has not been
+        # initialized". A headless account has nothing to prompt.
+        text = SCRIPT.read_text()
+        self.assertIn("sbx policy init <preset> as $ACCOUNT", text)
+        guide = (ROOT / "docs" / "guides" / "deploy-an-arena.md").read_text()
+        self.assertIn("sbx policy init <preset>", guide)
+
+    def subids(self, call, account="second", subuid="", subgid=""):
+        """Run the script's own subordinate-id functions on fixture files."""
+        text = SCRIPT.read_text()
+        funcs = text[text.index("# --- subordinate ids"):text.index("# --- end subordinate ids")]
+        (self.tmp / "subuid").write_text(subuid)
+        (self.tmp / "subgid").write_text(subgid)
+        script = (f'ACCOUNT={account}\nSUBUID={self.tmp}/subuid\nSUBGID={self.tmp}/subgid\n'
+                  f'{funcs}\n{call}\n')
+        return subprocess.run(["/bin/bash", "-c", script], capture_output=True, text=True,
+                              check=True).stdout.strip()
+
+    def test_a_new_range_starts_past_every_range_in_both_files(self):
+        self.assertEqual(self.subids("next_sub_start"), "165536")
+        self.assertEqual(self.subids("next_sub_start", subuid="admin:100000:65536\n",
+                                     subgid="admin:100000:65536\n"), "165536")
+        self.assertEqual(self.subids("next_sub_start", subuid="admin:100000:65536\nfirst:165536:65536\n",
+                                     subgid="admin:100000:65536\n"), "231072")
+        self.assertEqual(self.subids("next_sub_start", subuid="admin:100000:65536\n",
+                                     subgid="first:231072:65536\n"), "296608")
+
+    def test_no_fixed_range_is_written(self):
+        text = SCRIPT.read_text()
+        self.assertNotIn("$ACCOUNT:165536", text)
+        self.assertIn('echo "$ACCOUNT:$sub_start:65536"', text)
+
+    def test_missing_id_files_are_no_ranges_not_a_silent_exit(self):
+        # Under pipefail a failing awk or cat ended the script with exit 2 and
+        # no message, which reads as a refusal.
+        missing = self.tmp / "absent"
+        text = SCRIPT.read_text()
+        funcs = text[text.index("# --- subordinate ids"):text.index("# --- end subordinate ids")]
+        script = (f'set -euo pipefail\nACCOUNT=second\nSUBUID={missing}\nSUBGID={missing}\n{funcs}\n'
+                  'o=$(sub_overlap "$SUBUID"); echo "overlap=[$o]"; s=$(next_sub_start); echo "start=$s"\n')
+        r = subprocess.run(["/bin/bash", "-c", script], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.split(), ["overlap=[]", "start=165536"])
+
+    def test_overlap_finds_only_another_accounts_range(self):
+        for ranges, want in (("first:165536:65536\nsecond:231072:65536\n", ""),       # adjacent
+                             ("first:165536:65536\nsecond:165536:65536\n", "first"),  # the same
+                             ("first:165536:65536\nsecond:200000:65536\n", "first"),  # partial
+                             ("first:165536:65536\nthird:200000:65536\n", ""),        # not ours
+                             ("second:165536:65536\n", "")):
+            with self.subTest(ranges=ranges):
+                self.assertEqual(self.subids('sub_overlap "$SUBUID"', subuid=ranges), want)
+
+    def test_overlapping_ranges_are_refused_first(self):
+        f = self.tmp / "overlap"
+        f.write_text("first:165536:65536\ngentarbenchx:165536:65536\n")
+        ok = self.tmp / "clean"
+        ok.write_text("")
+        for env in ({"GENTAR_SUBUID_FILE": str(f), "GENTAR_SUBGID_FILE": str(ok)},
+                    {"GENTAR_SUBUID_FILE": str(ok), "GENTAR_SUBGID_FILE": str(f)}):
+            with self.subTest(**env):
+                self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx", **env),
+                                              "overlap another account's: first")
+
+    def test_each_account_has_its_own_tmpfiles_rule(self):
+        # A fixed file meant a second account's run replaced the first's rule.
+        text = SCRIPT.read_text()
+        self.assertIn("TMPFILES=/etc/tmpfiles.d/gentar-$ACCOUNT.conf", text)
+        self.assertIn('sudo tee "$TMPFILES"', text)
+        self.assertNotIn("tee /etc/tmpfiles.d/gentar-workspaces.conf", text)
+        # Only this account's rule leaves the old file.
+        self.assertIn('grep -q " $ACCOUNT $ACCOUNT -\\$" "$OLD_TMPFILES"', text)
+
     def test_the_rootful_daemon_is_masked(self):
         self.assertIn("sudo systemctl mask docker.service docker.socket", SCRIPT.read_text())
 

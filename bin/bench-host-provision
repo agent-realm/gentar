@@ -27,10 +27,18 @@
 # Contains no secret values. The one secret it creates is the keyring
 # password: random bytes written straight to ~<account>/.keyring-pass (600),
 # never printed. NOT done here, each its own step: `sbx login` as the bench
-# account (bin/sbx-file-login); clearing sbx's one-time first-run wizard as
-# that account (`sbx setup`, then q: the first interactive sbx session
+# account (bin/sbx-file-login); sbx's network policy as that account (`sbx
+# policy init <preset>`: without one every bench fails with "global network
+# policy has not been initialized"); clearing sbx's one-time first-run wizard
+# as that account (`sbx setup`, then q: the first interactive sbx session
 # otherwise shows it and waits); the bench template; the CI runner's
 # registration; and the bench SSH key in ~<account>/.ssh/authorized_keys.
+#
+# A second bench account on one host: run it again with its own
+# GENTAR_BENCH_ACCOUNT, GENTAR_BENCH_UID, GENTAR_BENCH_WORKSPACE_ROOT and
+# GENTAR_DOCKER_POOL. Each account gets its own tmpfiles rule and its own
+# subordinate ids; ranges that overlap another account's are refused, since
+# containers of the two would then share host ids.
 #
 # Ubuntu 24.04 (noble) only: the package names, the Docker apt suite and the
 # AppArmor rule for rootlesskit are noble's. Anything else is refused before
@@ -52,6 +60,8 @@ WSROOT=${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}
 POOL=${GENTAR_DOCKER_POOL:-10.201.0.0/16}
 SBX_VERSION=${SBX_VERSION:-0.39.0-1~ubuntu.24.04~noble}
 OS_RELEASE=${GENTAR_OS_RELEASE:-/etc/os-release}   # tests point this elsewhere
+SUBUID=${GENTAR_SUBUID_FILE:-/etc/subuid}          # and these
+SUBGID=${GENTAR_SUBGID_FILE:-/etc/subgid}
 
 refuse() { echo "bench-host-provision: $*" >&2; exit 2; }
 case "$ACCOUNT" in ''|*[!a-z0-9_-]*|[!a-z]*) refuse "bad GENTAR_BENCH_ACCOUNT: $ACCOUNT" ;; esac
@@ -100,6 +110,26 @@ else
   uid_owner=$(getent passwd "$ACCOUNT_UID" 2>/dev/null | cut -d: -f1 || true)
   [ -z "$uid_owner" ] || refuse "uid $ACCOUNT_UID is taken by $uid_owner; set GENTAR_BENCH_UID"
 fi
+# --- subordinate ids
+# Accounts whose ranges overlap this account's in the file $1. A missing file
+# holds no range; `|| true` keeps pipefail from ending the script silently.
+sub_overlap() {
+  { awk -F: -v me="$ACCOUNT" 'NF == 3 { n[NR] = $1; s[NR] = $2; e[NR] = $2 + $3 }
+      END { for (i in n) if (n[i] == me) for (j in n)
+              if (n[j] != me && s[i] < e[j] && s[j] < e[i]) print n[j] }' "$1" 2>/dev/null || true; } |
+    sort -u | tr '\n' ' ' | sed 's/ *$//'
+}
+# The first start past every range in both files, so one account's uid and gid
+# ranges match.
+next_sub_start() {
+  { cat "$SUBUID" "$SUBGID" 2>/dev/null || true; } |
+    awk -F: 'BEGIN { e = 165536 } NF == 3 && $2 + $3 > e { e = $2 + $3 } END { print e }'
+}
+# --- end subordinate ids
+for f in "$SUBUID" "$SUBGID"; do
+  o=$(sub_overlap "$f")
+  [ -z "$o" ] || refuse "$ACCOUNT's subordinate ids in $f overlap another account's: $o; fix that first"
+done
 
 echo "== apt base"
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null
@@ -160,15 +190,24 @@ id "$ACCOUNT" >/dev/null 2>&1 || sudo useradd -m -u "$ACCOUNT_UID" -U -s /bin/ba
   -c "gentar CI runner + bench account (bin/bench-host-provision)" "$ACCOUNT"
 sudo passwd -l "$ACCOUNT" >/dev/null
 sudo chmod 750 "/home/$ACCOUNT"
-grep -q "^$ACCOUNT:" /etc/subuid || echo "$ACCOUNT:165536:65536" | sudo tee -a /etc/subuid >/dev/null
-grep -q "^$ACCOUNT:" /etc/subgid || echo "$ACCOUNT:165536:65536" | sudo tee -a /etc/subgid >/dev/null
+# useradd normally allocates these. If it did not, never a fixed range: a second
+# account would get the first's.
+sub_start=$(next_sub_start)
+grep -q "^$ACCOUNT:" "$SUBUID" || echo "$ACCOUNT:$sub_start:65536" | sudo tee -a "$SUBUID" >/dev/null
+grep -q "^$ACCOUNT:" "$SUBGID" || echo "$ACCOUNT:$sub_start:65536" | sudo tee -a "$SUBGID" >/dev/null
 sudo loginctl enable-linger "$ACCOUNT"
 for _ in $(seq 1 20); do sudo test -S "$RUN/bus" && break; sleep 1; done
 sudo ls -ld "$RUN" "$RUN/bus"
 
 echo "== bench workspace root"
-echo "d $WSROOT 0700 $ACCOUNT $ACCOUNT -" | sudo tee /etc/tmpfiles.d/gentar-workspaces.conf >/dev/null
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/gentar-workspaces.conf
+# One file per account: a second bench account must not replace the first's
+# rule. Earlier versions wrote one fixed file; this account's rule leaves it,
+# and another account's stays until that account's own re-run.
+TMPFILES=/etc/tmpfiles.d/gentar-$ACCOUNT.conf
+OLD_TMPFILES=/etc/tmpfiles.d/gentar-workspaces.conf
+echo "d $WSROOT 0700 $ACCOUNT $ACCOUNT -" | sudo tee "$TMPFILES" >/dev/null
+if [ -f "$OLD_TMPFILES" ] && grep -q " $ACCOUNT $ACCOUNT -\$" "$OLD_TMPFILES"; then sudo rm -f "$OLD_TMPFILES"; fi
+sudo systemd-tmpfiles --create "$TMPFILES"
 stat -c '%n %U %a' "$WSROOT"
 
 echo "== $ACCOUNT's user units"
@@ -274,9 +313,13 @@ if "${A[@]}" docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep
 else echo "FAIL: $ACCOUNT's docker is not rootless"; fails=$((fails + 1)); fi
 "${A[@]}" docker run --rm alpine:3 sh -c 'ip -4 route | head -1' || { echo "FAIL: rootless docker cannot run a container"; fails=$((fails + 1)); }
 "${A[@]}" sbx version || { echo "FAIL: sbx does not run as $ACCOUNT"; fails=$((fails + 1)); }
+for f in "$SUBUID" "$SUBGID"; do
+  o=$(sub_overlap "$f")
+  if [ -n "$o" ]; then echo "FAIL (subordinate ids in $f overlap): $o"; fails=$((fails + 1)); fi
+done
 id "$ACCOUNT"
 if [ "$fails" -gt 0 ]; then
   echo "bench-host-provision: $fails proof(s) failed (see FAIL / INCONCLUSIVE above); the host is not ready" >&2
   exit 1
 fi
-echo "next, each its own step: sbx login as $ACCOUNT (bin/sbx-file-login), then clear sbx's one-time first-run wizard as $ACCOUNT (sbx setup, press q), the bench template, the runner (as $ACCOUNT, with DOCKER_HOST=unix://$RUN/docker.sock and XDG_RUNTIME_DIR=$RUN in its .env), and the bench key in ~$ACCOUNT/.ssh/authorized_keys"
+echo "next, each its own step: sbx login as $ACCOUNT (bin/sbx-file-login), sbx policy init <preset> as $ACCOUNT, then clear sbx's one-time first-run wizard as $ACCOUNT (sbx setup, press q), the bench template, the runner (as $ACCOUNT, with DOCKER_HOST=unix://$RUN/docker.sock and XDG_RUNTIME_DIR=$RUN in its .env), and the bench key in ~$ACCOUNT/.ssh/authorized_keys"
