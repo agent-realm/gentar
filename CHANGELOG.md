@@ -22,6 +22,51 @@ Adopters pin a release tag, not a branch.
 
 ## Unreleased
 
+## 0.11.1 — 2026-11-05
+
+Release notes: [docs/releases/v0.11.1.md](docs/releases/v0.11.1.md) (what changed and why, upgrade for adopters, verification).
+
+### Security
+- **gentar's own pull requests are scanned for environment data and
+  credentials.** A required job in `gentar.yml`, `scan (added lines)`, runs
+  `bin/pr-scan` over the lines a pull request adds and its commit messages. A
+  finding prints as `path:line: class`, never the matched text. A file git
+  calls binary is diffed as text, so its lines are scanned too, and it must
+  also be allowlisted by its blob id before it lands. Synthetic fixtures that
+  keep a credential's shape are allowlisted in `.github/scan-allowlist.toml`,
+  each entry matching the whole fixture line, with its reason. This is this
+  repository's CI; no kit file changes.
+
+### Fixed
+- **`bin/sbx-file-login` works on rootless Docker.** It ran the login
+  container as `--user $(id -u):$(id -g)`. Under rootless Docker that uid
+  maps to a subordinate uid, so the login files were written as a stranger,
+  the final `chmod` failed, and local-mode benches failed at PREPARE IMAGE.
+  It now takes the daemon and the uid from `bin/docker-identity --local`: 0:0
+  on rootless Docker (there, the calling user), the user's own uid on rootful
+  Docker. A daemon that script cannot identify is refused before anything is
+  written, and so is running it as root on rootful Docker.
+- **A forwarded provider key no longer makes the bench-host check refuse
+  every suite.** The check for stored sbx secrets ran `sbx secret ls` with the
+  caller's whole environment, and on the local tier that is the coordinator's,
+  forwarded provider keys included. With `ANTHROPIC_API_KEY` set, sbx 0.39
+  prints a note where it would print "No secrets found", and the check counted
+  that line as a stored secret. It now runs under `env -i` with only what sbx
+  reads to find its config, state and keyring. v0.10.1 carried this fix;
+  v0.11.0 did not. Engine only (`coordinator/gentar/benchhost.py`).
+- **`verify-ref.sh`'s cleanup no longer fails an admitted commit.** `git fetch`
+  starts a detached `git maintenance run --auto` that can still be writing into
+  the temporary clone while `rm` removes it, and under `set -e` the failing
+  `rm` in the EXIT trap became the script's status. Its git runs with automatic
+  maintenance off now, the cleanup retries for up to 2 s and runs without `-e`,
+  and a clone that will not go is left behind with a warning while the verdict
+  stands. Mirrors re-vendor the file
+  (`subject-template/mirror/arena/verify-ref.sh`).
+
+### Changed
+- Comments, docs and test fixtures use synthetic stand-in values. No behaviour
+  changes.
+
 ## 0.11.0 — 2026-10-23
 
 Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what changed and why, the breaking schema change, upgrade for adopters, what is not live-proven, known limits, verification).
