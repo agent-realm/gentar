@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""pr-scan — refuse a pull request that adds environment data or a credential.
+
+    bin/pr-scan --base <sha> --head <sha>    the lines a pull request adds,
+                                             and its commit messages
+    bin/pr-scan --files PATH...              whole files (local use)
+
+gentar is public, and so is everything a pull request adds. This scans the
+lines the pull request adds (`git diff base...head`, by file and new line
+number) and every line of its commits' messages (`git log base..head`). The
+tree that is already on the base branch is not scanned: only what this pull
+request brings.
+
+Generic shapes only, so this file names nothing private:
+
+  private-ip    an RFC 1918 address (10/8, 172.16/12, 192.168/16)
+  home-path     /Users/<name> or /home/<name>, other than a stand-in
+                (user, runner, example, ...)
+  key-shape     a cloud or API credential: AWS, GitHub, Anthropic, OpenAI,
+                Slack, Google, Docker, GitLab, a private key block
+  model-route   a model id served through a private model route (GLM,
+                DeepSeek and Qwen ids), or that router's name or port
+
+Use stand-ins in fixtures and docs: 192.0.2.x or 198.51.100.x (TEST-NET),
+example-host, /home/user, `user`.
+
+A finding prints as `path:line: class`, with a GitHub annotation in Actions.
+The matched text and the line are never printed: a log is public too.
+
+Synthetic fixtures that must keep a credential's shape are allowlisted in
+.github/scan-allowlist.toml: a file glob, a class, a pattern the line must
+match, and the reason. Commit messages cannot be allowlisted.
+
+Exit 0 clean · 1 findings · 2 usage, a bad allowlist, or a git error.
+"""
+import argparse
+import fnmatch
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+_OCTET = r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
+# A stand-in's name may follow /home/ or /Users/: generic accounts, never a
+# person's. Widening this list is a deliberate edit.
+_STAND_INS = r"(?:user|u|runner|example|linuxbrew|Shared)"
+
+CLASSES = {
+    "private-ip": [re.compile(
+        rf"(?<![\w.])(?:10\.{_OCTET}\.{_OCTET}\.{_OCTET}"
+        rf"|172\.(?:1[6-9]|2\d|3[01])\.{_OCTET}\.{_OCTET}"
+        rf"|192\.168\.{_OCTET}\.{_OCTET})(?!\.?\d)")],
+    "home-path": [re.compile(
+        rf"(?<![\w.~-])/(?:Users|home)/(?!{_STAND_INS}(?![\w.-]))[A-Za-z0-9][\w.-]*")],
+    "key-shape": [re.compile(p) for p in (
+        r"\bAKIA[0-9A-Z]{16}\b",
+        r"\bgh[pousr]_[A-Za-z0-9]{36,}",
+        r"\bgithub_pat_[A-Za-z0-9_]{22,}",
+        r"\bsk-ant-[A-Za-z0-9_-]{20,}",
+        r"\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}",
+        r"\bxox[abposr]-[A-Za-z0-9-]{10,}",
+        r"\bAIza[0-9A-Za-z_-]{35}",
+        r"\bdckr_(?:pat|oat)_[A-Za-z0-9_-]{20,}",
+        r"\bglpat-[A-Za-z0-9_-]{20,}",
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+    )],
+    "model-route": [re.compile(p, re.I) for p in (
+        r"\bglm-\d",
+        r"\bdeepseek-(?:v\d|r\d|chat|coder|reasoner|flash|pro)",
+        r"\bqwen(?:\d[\w.]*)?-|\bqwen\d",
+        r"\b9route[r]\b",       # [r]: this file must not match itself
+        r"(?<![\w.])2012[8](?![\w.])",  # [8]: as above
+    )],
+}
+
+SCAN_ITSELF = ("bin/pr-scan", ".github/scan-allowlist.toml", ".github/workflows/gentar.yml")
+
+
+def die(msg: str):
+    """A usage, allowlist or git error: exit 2, never 1 (1 is findings)."""
+    print(f"pr-scan: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def classes_of(line: str) -> list[str]:
+    return [c for c, rxs in CLASSES.items() if any(rx.search(line) for rx in rxs)]
+
+
+class Allowlist:
+    def __init__(self, path: Path):
+        self.entries = []
+        if not path.exists():
+            return
+        try:
+            import tomllib
+        except ImportError:
+            die("reading the allowlist needs Python 3.11 or newer")
+        try:
+            data = tomllib.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            die(f"{path}: not valid TOML ({type(exc).__name__})")
+        for i, e in enumerate(data.get("allow", []), 1):
+            missing = [k for k in ("path", "class", "line", "reason")
+                       if not isinstance(e.get(k), str) or not e[k].strip()]
+            if missing:
+                die(f"{path}: entry {i} lacks {', '.join(missing)}")
+            if e["class"] not in CLASSES:
+                die(f"{path}: entry {i}: unknown class {e['class']!r}")
+            try:
+                rx = re.compile(e["line"])
+            except re.error:
+                die(f"{path}: entry {i}: `line` is not a regular expression")
+            self.entries.append((e["path"], e["class"], rx))
+
+    def allows(self, path: str, cls: str, line: str) -> bool:
+        return any(c == cls and fnmatch.fnmatchcase(path, p) and rx.search(line)
+                   for p, c, rx in self.entries)
+
+
+def git(*args: str) -> str:
+    # Bytes, decoded here: text mode would turn a lone \r inside a line into
+    # a line break, and the rest of that line would never be scanned.
+    proc = subprocess.run(["git", "-c", "core.quotepath=false", *args], capture_output=True)
+    if proc.returncode != 0:
+        # git's own message names refs, never file content
+        die(f"git {args[0]} failed: {proc.stderr.decode(errors='replace').strip()[:300]}")
+    return proc.stdout.decode("utf-8", errors="replace")
+
+
+def lines_of(text: str) -> list[str]:
+    """Split on \n only. str.splitlines() also breaks at \v, \f, \x1c-\x1e
+    and U+2028, which git does not: a finding after one of them in an added
+    line would land on a "line" that is not part of the diff (Codex on #104)."""
+    return text.split("\n")
+
+
+def _unquote(path: str) -> str:
+    if path.startswith('"') and path.endswith('"'):
+        raw = path[1:-1].encode("latin-1", "backslashreplace")
+        return raw.decode("unicode_escape").encode("latin-1").decode("utf-8", "replace")
+    return path
+
+
+def added_lines(base: str, head: str):
+    """(path, new line number, text) for every line head adds since the merge base."""
+    out = git("diff", "--no-color", "--no-ext-diff", "--unified=0", "--no-renames",
+              f"{base}...{head}")
+    path, n, in_hunk = None, 0, False
+    for line in lines_of(out):
+        if line.startswith("diff --git "):
+            path, in_hunk = None, False
+        elif not in_hunk and line.startswith("+++ "):
+            target = line[4:]
+            path = None if target == "/dev/null" else _unquote(target)[2:]
+        elif line.startswith("@@"):
+            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+            n, in_hunk = (int(m.group(1)) if m else 0), True
+        elif in_hunk and line.startswith("+"):
+            if path is not None:
+                yield path, n, line[1:]
+            n += 1
+
+
+def commit_messages(base: str, head: str):
+    """(sha, line number, text) for every line of the commits head has and base has not.
+
+    Records are NUL-separated (`-z`): git refuses a NUL in a commit message,
+    while any other separator could sit inside one and hide what follows it
+    (Codex on #104)."""
+    out = git("log", "-z", "--format=%H%n%B", f"{base}..{head}")
+    for rec in out.split("\x00"):
+        sha, _, body = rec.lstrip("\n").partition("\n")
+        if not sha:
+            continue
+        for n, line in enumerate(lines_of(body.rstrip("\n")), 1):
+            yield sha, n, line
+
+
+def changed_files(base: str, head: str) -> set[str]:
+    """Every path the pull request adds, changes, deletes or renames."""
+    return set(lines_of(git("diff", "--name-only", "--no-renames", f"{base}...{head}"))) - {""}
+
+
+def _prop(s: str) -> str:
+    return (s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            .replace(":", "%3A").replace(",", "%2C"))
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="pr-scan", add_help=True)
+    ap.add_argument("--base")
+    ap.add_argument("--head")
+    ap.add_argument("--files", nargs="+")
+    ap.add_argument("--allowlist", help="default: <repository>/.github/scan-allowlist.toml")
+    a = ap.parse_args(argv)
+    if (a.files and (a.base or a.head)) or (not a.files and not (a.base and a.head)):
+        ap.print_usage(sys.stderr)
+        return 2
+    top = Path(git("rev-parse", "--show-toplevel").strip()) if not a.files else Path.cwd()
+    allow = Allowlist(Path(a.allowlist) if a.allowlist else top / ".github" / "scan-allowlist.toml")
+    gha = os.environ.get("GITHUB_ACTIONS") == "true"
+
+    findings, lines_seen, commits = [], 0, set()
+    if a.files:
+        source = ((p, n, l) for p in a.files
+                  for n, l in enumerate(lines_of(Path(p).read_bytes().decode("utf-8", "replace")), 1))
+    else:
+        source = added_lines(a.base, a.head)
+    for path, n, text in source:
+        lines_seen += 1
+        for cls in classes_of(text):
+            if not allow.allows(path, cls, text):
+                findings.append((path, n, cls, True))
+    if not a.files:
+        for sha, n, text in commit_messages(a.base, a.head):
+            commits.add(sha)
+            for cls in classes_of(text):
+                findings.append((f"commit {sha[:12]} message", n, cls, False))
+
+    for where, n, cls, is_file in findings:
+        print(f"{where}:{n}: {cls}")
+        if gha and is_file:
+            print(f"::error file={_prop(where)},line={n}::{cls} (the matched text is not shown)")
+    # From the changed paths, not the added lines: a pull request that only
+    # deletes a pattern or an allowlist line adds nothing (Codex on #104).
+    changed_scan = [] if a.files else sorted(changed_files(a.base, a.head) & set(SCAN_ITSELF))
+    if changed_scan:
+        note = f"this pull request changes the scan itself ({', '.join(changed_scan)}): review that change"
+        print(f"::warning::{note}" if gha else f"pr-scan: {note}", file=sys.stdout if gha else sys.stderr)
+    what = f"{lines_seen} line(s)" + ("" if a.files else f" and {len(commits)} commit message(s)")
+    if findings:
+        print(f"pr-scan: {len(findings)} finding(s) in {what}. Use stand-ins (192.0.2.x, "
+              f"example-host, /home/user, user); a synthetic credential shape goes in "
+              f".github/scan-allowlist.toml with its reason.", file=sys.stderr)
+        return 1
+    print(f"pr-scan: clean, {what}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
