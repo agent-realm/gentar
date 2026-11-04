@@ -1,7 +1,7 @@
 # gentar CI on the PUBLIC repository: GitHub-hosted jobs only.
 #
 # gentar is public, so no self-hosted runner serves it: a fork's pull request
-# can bring its own workflow to any runner registered here (D5, 2026-10-08;
+# can bring its own workflow to any runner registered here (decided 2026-10-08;
 # the move to a new bench host, 2026-10-12). Nothing in this file names a
 # self-hosted label, a bench secret or a bench variable.
 #
