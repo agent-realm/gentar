@@ -97,6 +97,16 @@ Adopters pin a release tag, not a branch.
   `jq` now fails them, so a checkout run cannot pass with none of them run.
 
 ### Fixed
+- **`bin/bench-host-provision` can build a second bench account on one host.**
+  It wrote every account's workspace rule to one fixed tmpfiles file, so a
+  second account's run replaced the first's, and the first's directory would
+  not come back after `/tmp` was cleared. Each account now has its own file,
+  and a re-run moves its rule out of the old one. When `useradd` allocates no
+  subordinate ids, it wrote a fixed range, which a second account would share;
+  it now takes the next free range, and refuses (exit 2, before any change)
+  ranges that overlap another account's. Its next steps and the deploy guide
+  now name `sbx policy init`, without which every bench fails with "global
+  network policy has not been initialized".
 - **`bin/sbx-file-login` works on rootless Docker.** It ran the login
   container as `--user $(id -u):$(id -g)`. Under rootless Docker that uid
   maps to a subordinate uid, so the login files were written as a stranger,

@@ -40,8 +40,15 @@ It ends with proofs. Each escalation attempt must be refused for the
 expected reason. Docker must be rootless, and sbx must run. If any proof
 fails it exits 1, so a run that exits 0 has proven the layout.
 
-Five things are each a step of their own:
+Six things are each a step of their own:
 - `sbx login` as the bench account (step 1 below, or `bin/sbx-file-login`);
+- sbx's network policy, once, as the bench account:
+  `sbx policy init <preset>`, then `sbx policy ls` to read it back. Without
+  it every bench fails with "global network policy has not been
+  initialized", because a headless account has nothing to prompt. The
+  presets are `allow-all`, `balanced` (package managers, code hosts and model
+  APIs) and `deny-all`. Choose what your suites need: one that downloads from
+  elsewhere needs `allow-all`, or a rule from `sbx policy allow network`;
 - sbx's one-time first-run wizard, cleared as the bench account: run
   `sbx setup` once and press `q` (continue without importing). On a fresh
   account the FIRST interactive sbx session shows that screen and waits
@@ -52,6 +59,16 @@ Five things are each a step of their own:
   in an announced window (section 5);
 - the runner (section 2);
 - the bench key in that account's `~/.ssh/authorized_keys` (step 2).
+
+**A second bench account on one host**, one per repository so that one
+repository's jobs cannot reach another's files and logins: run the script
+again with its own `GENTAR_BENCH_ACCOUNT`, `GENTAR_BENCH_UID`,
+`GENTAR_BENCH_WORKSPACE_ROOT` and `GENTAR_DOCKER_POOL`. Each account gets its
+own tmpfiles rule and its own subordinate ids. Ranges that overlap another
+account's are refused, because containers of the two would then share host
+ids. Then do the six steps above as that account, and give its runner its own
+`GENTAR_BENCH_WORKSPACE_ROOT` and `GENTAR_LOCK_DIR` in the runner's `.env`
+(section 5).
 
 Without the script, or on another OS, do the steps by hand:
 
