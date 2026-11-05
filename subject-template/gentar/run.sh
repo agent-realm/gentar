@@ -179,20 +179,68 @@ esac
 # phase 2 runs were silently dropped behind main pushes. Here a later run
 # WAITS, and says for whom. flock where it exists (Linux runners); a
 # mkdir lock with a pid and stale-holder detection where it does not
-# (stock macOS). /tmp, not TMPDIR: two runner users on one host share one
-# Docker daemon, so they must share the lock.
+# (stock macOS). /tmp, not TMPDIR: runner users who share one Docker daemon
+# must share the lock.
 #
-# The locks live in their own world-writable, NON-sticky directory: in
-# sticky /tmp, a lock left by one runner user's dead run could not be
-# removed by another's, and one unclean exit blocked the host.
+# A shared root is a world-writable, NON-sticky directory: in sticky /tmp, a
+# lock left by one runner user's dead run could not be removed by another's,
+# and one unclean exit blocked the host.
 #
 # Shared and world-writable makes the lock advisory between local users —
 # fine on a single-tenant runner host — but it must not become a way to make
 # this user write somewhere else: a symlinked root or lock file is refused,
 # and notes are written to a fresh temp file and renamed into place, which
 # replaces a planted symlink instead of following it (claude-playbooks).
-LOCK_ROOT="${GENTAR_LOCK_DIR:-/tmp}/gentar-locks"
-[ -e "$LOCK_ROOT" ] || [ -L "$LOCK_ROOT" ] || (umask 000; mkdir "$LOCK_ROOT") 2>/dev/null || true
+# --- lock root
+# Who shares a lock is who shares a Docker daemon. On rootless Docker each
+# account has a daemon of its own, so its lock is private: /tmp/gentar-locks-<user>,
+# 0700, and no other account can hold or remove it. On rootful Docker, or when
+# this cannot tell, accounts may share the daemon and must share the lock:
+# /tmp/gentar-locks. Only a clear answer goes private, since a wrong one would
+# split a shared daemon's locks and let two arenas collide. An explicit
+# GENTAR_LOCK_DIR wins. Same text in bin/arena and the kit's run.sh (a test
+# holds them equal): the kit decides before any engine is staged.
+lock_daemon_rootless() {
+  local tmo info
+  tmo=()
+  command -v docker >/dev/null 2>&1 || return 1
+  command -v timeout >/dev/null 2>&1 && tmo=(timeout -k 2 5)
+  info=$(${tmo[@]+"${tmo[@]}"} docker info --format '{{json .SecurityOptions}}' 2>/dev/null) || return 1
+  # A JSON array with an entry whose name field is exactly name=rootless, as
+  # bin/docker-identity reads it.
+  case "$info" in
+    \[*\"name=rootless\"*\]|\[*\"name=rootless,*\]) return 0 ;;
+  esac
+  return 1
+}
+lock_root_choose() {
+  LOCK_PRIVATE=0
+  if [ -n "${GENTAR_LOCK_DIR:-}" ]; then
+    LOCK_ROOT="$GENTAR_LOCK_DIR/gentar-locks"
+  elif lock_daemon_rootless; then
+    LOCK_ROOT="/tmp/gentar-locks-$(id -un)"
+    LOCK_PRIVATE=1
+  else
+    LOCK_ROOT=/tmp/gentar-locks
+  fi
+}
+lock_root_make() {
+  [ ! -e "$LOCK_ROOT" ] && [ ! -L "$LOCK_ROOT" ] || return 0
+  if [ "$LOCK_PRIVATE" = 1 ]; then
+    (umask 077; mkdir "$LOCK_ROOT") 2>/dev/null || true
+  else
+    (umask 000; mkdir "$LOCK_ROOT") 2>/dev/null || true
+  fi
+}
+# /tmp is anyone's: a private root another account made first is not private.
+lock_root_is_mine() {
+  [ "$LOCK_PRIVATE" = 1 ] || return 0
+  [ -O "$LOCK_ROOT" ] || return 1
+  chmod 700 "$LOCK_ROOT"
+}
+# --- end lock root
+lock_root_choose
+lock_root_make
 LOCK_BASE="$LOCK_ROOT/gentar-arena-$SUBJECT"
 _lock_mode=""
 _lock_holder() {
@@ -211,6 +259,10 @@ arena_lock() {            # wait|try -> 0 held · 1 held by another · 2 refused
   local lock="$LOCK_BASE.lock" d="$LOCK_BASE.lock.d" pid said=0
   if [ -L "$LOCK_ROOT" ] || [ ! -d "$LOCK_ROOT" ] || [ -L "$lock" ] || [ -L "$d" ]; then
     echo "arena lock refused: $LOCK_ROOT (or a lock in it) is a symlink or not a directory — remove it, or set GENTAR_LOCK_DIR" >&2
+    return 2
+  fi
+  if ! lock_root_is_mine; then
+    echo "arena lock refused: $LOCK_ROOT belongs to another user — remove it, or set GENTAR_LOCK_DIR" >&2
     return 2
   fi
   if command -v flock >/dev/null 2>&1; then

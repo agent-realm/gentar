@@ -67,8 +67,9 @@ again with its own `GENTAR_BENCH_ACCOUNT`, `GENTAR_BENCH_UID`,
 own tmpfiles rule and its own subordinate ids. Ranges that overlap another
 account's are refused, because containers of the two would then share host
 ids. Then do the six steps above as that account, and give its runner its own
-`GENTAR_BENCH_WORKSPACE_ROOT` and `GENTAR_LOCK_DIR` in the runner's `.env`
-(section 5).
+`GENTAR_BENCH_WORKSPACE_ROOT` in the runner's `.env`. Its locks need no
+setting: on rootless Docker they are already private to the account (section
+5).
 
 Without the script, or on another OS, do the steps by hand:
 
@@ -253,9 +254,14 @@ needs its own pair, set as repository variables, for example
 - **Per subject:** `run.sh` takes a lock named after the subject, so a
   second run of the same repository **waits**, and prints who holds the
   lock. It waits before staging the engine or the subject, so a running
-  arena's files never change under it. Locks live under
-  `/tmp/gentar-locks`, or under `$GENTAR_LOCK_DIR/gentar-locks` if you set
-  `GENTAR_LOCK_DIR`.
+  arena's files never change under it. The lock belongs to the Docker
+  daemon. On rootless Docker each account has its own daemon, so its locks
+  live in a private `/tmp/gentar-locks-<user>`. On rootful Docker, or when
+  `docker info` gives no clear answer, accounts may share the daemon, so they
+  share `/tmp/gentar-locks`. If you set `GENTAR_LOCK_DIR`, locks live under
+  `$GENTAR_LOCK_DIR/gentar-locks` instead, and that directory must exist. One
+  repository should use one account on a host: two accounts on two rootless
+  daemons do not exclude each other, and would collide on its host ports.
 - **Per compose project, for gentar's own `bin/arena`:** `run`,
   `dashboard` and `ls` take the same kind of lock, named after the compose
   project, so two calls in one checkout no longer tear each other down;
