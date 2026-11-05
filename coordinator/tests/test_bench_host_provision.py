@@ -214,7 +214,9 @@ class BenchHostProvisionTest(unittest.TestCase):
         for env in ({"GENTAR_SUBUID_FILE": str(f), "GENTAR_SUBGID_FILE": str(ok)},
                     {"GENTAR_SUBUID_FILE": str(ok), "GENTAR_SUBGID_FILE": str(f)}):
             with self.subTest(**env):
-                self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx", **env),
+                # A uid no machine running this holds: uid 1001 is taken on some.
+                self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx",
+                                                              GENTAR_BENCH_UID="64999", **env),
                                               "overlap another account's: first")
 
     def test_each_account_has_its_own_tmpfiles_rule(self):
