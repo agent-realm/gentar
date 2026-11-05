@@ -67,7 +67,8 @@ class WorkflowTest(unittest.TestCase):
 
     def test_the_arena_lock_and_bench_root_stay_fixed_paths(self):
         run = (KIT / "run.sh").read_text()
-        self.assertIn('LOCK_ROOT="${GENTAR_LOCK_DIR:-/tmp}/gentar-locks"', run)
+        self.assertIn('LOCK_ROOT="$GENTAR_LOCK_DIR/gentar-locks"', run)
+        self.assertIn("LOCK_ROOT=/tmp/gentar-locks", run)
         self.assertIn("GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces", run)
 
 

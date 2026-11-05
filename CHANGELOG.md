@@ -185,6 +185,17 @@ Adopters pin a release tag, not a branch.
   it cannot check the lock.
 
 ### Changed
+- **On rootless Docker, the arena lock is private to the account.** `run.sh`
+  and `bin/arena` kept every lock in a world-writable `/tmp/gentar-locks`, so
+  that accounts sharing a Docker daemon would exclude each other. Accounts on
+  rootless Docker share no daemon, and any of them could hold or remove
+  another's lock. On rootless Docker the root is now `/tmp/gentar-locks-<user>`,
+  0700, and one that another account made first is refused (exit 2). On rootful
+  Docker, or when `docker info` gives no clear answer, it stays
+  `/tmp/gentar-locks`. An explicit `GENTAR_LOCK_DIR` still wins. **Upgrade
+  note:** on a rootless host, a run on an older pin and a run on this one no
+  longer exclude each other, so do not run one subject on both at once. Kit
+  file changed: `gentar/run.sh`.
 - `gentar/run.sh --down` reads the scenarios with `plan.py` too, so it
   needs what every other mode already needed: python 3.11+, or tomli. A
   suite that does not parse is refused (exit 2) by every mode that uses
