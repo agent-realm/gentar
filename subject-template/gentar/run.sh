@@ -832,6 +832,32 @@ python3 "$HERE/plan.py" stage-git "$REPO" "subjects/$SUBJECT"
 # until the trap's `down -v`.
 ARENA_FILES=(-f docker-compose.yml)
 [ -f "$ARENA/compose.rm.yml" ] && ARENA_FILES+=(-f compose.rm.yml)
+# --- workspace root
+# In local mode each bench's workspace, the subject's code with it, lives
+# under GENTAR_BENCH_WORKSPACE_ROOT (default /tmp/gentar-workspaces), and
+# compose binds that root into the arena. /tmp is anyone's, so the root must
+# be this account's own: a symlink, or a directory another user owns, is
+# refused (another account could read the benches, or hand the arena a
+# directory of its own). A new root is made 0700, and one of ours is kept at
+# 0700. On a host with several accounts give each runner its own root. Same
+# text in bin/arena and the kit's run.sh (a test holds them equal).
+workspace_root_own() {
+  local root=$1
+  case "$root" in
+    /*) ;;
+    *) echo "workspace root refused: $root is not an absolute path (GENTAR_BENCH_WORKSPACE_ROOT)" >&2; return 2 ;;
+  esac
+  if [ ! -e "$root" ] && [ ! -L "$root" ]; then
+    mkdir -p "$(dirname "$root")"
+    (umask 077; mkdir "$root") 2>/dev/null || true   # lost a race: the check below decides
+  fi
+  if [ -L "$root" ] || [ ! -d "$root" ] || [ ! -O "$root" ]; then
+    echo "workspace root refused: $root is a symlink, not a directory, or not $(id -un)'s — remove it, or set GENTAR_BENCH_WORKSPACE_ROOT to a directory of this account's" >&2
+    return 2
+  fi
+  chmod 700 "$root"
+}
+# --- end workspace root
 # Local bench mode (GENTAR_BENCH_HOST=local): the arena runs on the bench
 # host itself (a runner on that VM) and calls sbx directly, so there is no
 # ssh and no bench key. The engine's overlay mounts the host's sbx into the
@@ -888,7 +914,7 @@ if [ "$LOCAL_BENCH" = 1 ]; then
   # missing bind source is created by Docker as root, and the coordinator
   # (this user) could then not make a bench's workspace in it.
   export GENTAR_BENCH_WORKSPACE_ROOT="${GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces}"
-  mkdir -p "$GENTAR_BENCH_WORKSPACE_ROOT"
+  workspace_root_own "$GENTAR_BENCH_WORKSPACE_ROOT" || exit 2
 fi
 # One Docker daemon for the whole run (the engine's bin/docker-identity):
 # every docker call below, the socket a container mounts (GENTAR_DOCKER_SOCK),
