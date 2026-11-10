@@ -247,16 +247,24 @@ lock_root_is_mine() {
 # the note under it, and removes the directory only if the note is still the
 # one judged dead; a directory with no note only if it is still over a minute
 # old. A reap mutex is held for milliseconds; one left by a waiter killed
-# inside it is cleared once it is a minute old. Waiters on an older pin take
-# no mutex, so the fix holds between waiters that have it. Same text in
-# bin/arena and the kit's run.sh (a test holds them equal).
+# inside it is cleared once it is a minute old. (That clearing is itself
+# check-then-remove: it can misfire only after a waiter was killed inside the
+# reap, with three more reaping within milliseconds.) A lock root this user
+# cannot write holds nothing it can reclaim: that is said, never waited on.
+# Waiters on an older pin take no mutex, so the fix holds between waiters
+# that have it. Same text in bin/arena and the kit's run.sh (a test holds
+# them equal).
 _lock_reap() {           # dir, note judged dead -> 0 removed · 1 busy or changed · 2 cannot remove
   local d=$1 seen=$2 m="$1.reap" now rc=0
   if ! (umask 000; mkdir "$m") 2>/dev/null; then
-    [ -z "$(find "$m" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rm -rf "$m" 2>/dev/null || true
+    [ -w "${m%/*}" ] && [ -x "${m%/*}" ] || return 2
+    if [ -n "$(find "$m" -maxdepth 0 -mmin +1 2>/dev/null)" ] && ! rm -rf "$m" 2>/dev/null; then
+      echo "stale reap mutex $m cannot be removed by $(id -un 2>/dev/null || echo this user); remove it: rm -rf '$m'" >&2
+      return 2
+    fi
     return 1
   fi
-  now=$(head -1 "$d/holder" 2>/dev/null || true)
+  now=$(head -n 1 "$d/holder" 2>/dev/null || true)
   if [ "$now" != "$seen" ]; then
     rc=1
   elif [ -z "$seen" ] && [ -z "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
@@ -313,8 +321,8 @@ arena_lock() {            # wait|try -> 0 held · 1 held by another · 2 refused
     if (umask 000; mkdir "$d") 2>/dev/null; then
       _lock_mode=mkdir; _lock_note "$d/holder"; return 0
     fi
-    note=$(head -1 "$d/holder" 2>/dev/null || true)
-    pid=$(printf '%s\n' "$note" | awk '{print $2; exit}')
+    note=$(head -n 1 "$d/holder" 2>/dev/null || true)
+    pid=""; read -r _ pid _ <<< "$note" || true
     case "$pid" in *[!0-9]*) pid="" ;; esac
     # Stale: a holder pid that no longer exists. kill -0 also fails for a
     # live process of ANOTHER user, so ask ps before deciding it is gone.

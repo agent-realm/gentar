@@ -207,7 +207,9 @@ Adopters pin a release tag, not a branch.
   mutex (`<lock>.d.reap`, held for milliseconds, cleared when a minute old),
   re-reads the note under it, and removes the directory only if the note is
   still the one judged dead, or, with no note, if the directory is still over
-  a minute old. The same block in `run.sh` and `bin/arena`, held equal by a
+  a minute old. A lock root this user cannot write, and a stale mutex it
+  cannot remove, are named with the command to remove them (exit 2), never
+  waited on. The same block in `run.sh` and `bin/arena`, held equal by a
   test. Linux hosts take the `flock` path, which never had this race.
   **Upgrade note:** a waiter on an older pin takes no mutex, so the race
   stays open between it and one on this version. Kit file changed:
