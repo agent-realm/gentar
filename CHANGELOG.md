@@ -176,6 +176,18 @@ Adopters pin a release tag, not a branch.
   `--check` wait for a running arena of the subject too; `--check` holds
   the lock through its lint and dry-run, which read the engine it staged.
   Kit file changed: `gentar/run.sh`.
+- **The template builder's workspace is the account's own.**
+  `bench-template/build.sh` mounted a shared `/tmp/gentar-template-build` into
+  its builder sandbox, after `rm -rf "$WS" && mkdir -p "$WS"`, where a failed
+  `rm` does not stop a `set -e` script. On a host with several bench accounts,
+  another account could make that directory first, or a symlink there, and the
+  template was built from that account's directory (a failed `rm` could also
+  empty a world-writable one of theirs). The default is now
+  `${TMPDIR:-/tmp}/gentar-template-build-<user>`, made 0700 without `-p` and
+  removed on exit, failures included. A symlink, or a directory another user
+  owns, is refused (exit 2) before any `sbx` call, also for an explicit
+  `GENTAR_TEMPLATE_WS`. **Upgrade note:** a `/tmp/gentar-template-build` left
+  by an older build is no longer used; remove it by hand.
 - **Two `bin/arena run` calls in one checkout no longer tear each other
   down** (review B3, S2-2). They shared a compose project, and the second's
   teardown stopped the first's coordinator. `run`, `dashboard` and `ls`
