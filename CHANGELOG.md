@@ -200,7 +200,10 @@ Adopters pin a release tag, not a branch.
   `${TMPDIR:-/tmp}/gentar-template-build-<user>`, made 0700 without `-p` and
   removed on exit, failures included. A symlink, or a directory another user
   owns, is refused (exit 2) before any `sbx` call, also for an explicit
-  `GENTAR_TEMPLATE_WS`. **Upgrade note:** a `/tmp/gentar-template-build` left
+  `GENTAR_TEMPLATE_WS`, and a path that was absent at that check is not
+  removed before it is made. An explicit `GENTAR_TEMPLATE_WS` must sit in a
+  directory only this account can write to, or in a sticky one such as
+  `/tmp`: its parents are not checked. **Upgrade note:** a `/tmp/gentar-template-build` left
   by an older build is no longer used; remove it by hand.
 - **Two `bin/arena run` calls in one checkout no longer tear each other
   down** (review B3, S2-2). They shared a compose project, and the second's
