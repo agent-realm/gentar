@@ -33,6 +33,18 @@ printf 'rm %s\\n' "$*" >> "$SBX_LOG"
 exit 1
 """
 
+# An rm that reports success and removes nothing: only `mkdir` without -p can
+# then stop a build from using a workspace that is still there.
+RM_NOOP_STUB = """#!/bin/sh
+exit 0
+"""
+
+# The host's rm, logged under its own tag (sbx's own `rm` subcommand is logged too).
+RM_LOGGING_STUB = """#!/bin/sh
+printf 'host-rm %s\\n' "$*" >> "$SBX_LOG"
+exec /bin/rm "$@"
+"""
+
 
 @unittest.skipUnless(BUILD.exists(), "bench-template/ is not in the image build context")
 class BenchTemplateBuildTest(unittest.TestCase):
@@ -157,6 +169,31 @@ class BuilderWorkspaceIsTheAccountsOwnTest(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("builder workspace refused", r.stderr)
         self.assertEqual(self.calls(), "")
+
+    def test_a_workspace_still_there_after_rm_stops_the_build_before_any_sbx_call(self):
+        # The workspace is made without -p: if it is still there after rm (here an
+        # rm that removes nothing; on a host, a path re-made in between), the
+        # build stops instead of mounting it.
+        (self.bindir / "rm").write_text(RM_NOOP_STUB)
+        (self.bindir / "rm").chmod(0o755)
+        self.default_ws.mkdir()
+        (self.default_ws / "planted").write_text("not cleared")
+        r = self.build()
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.calls(), "")
+
+    def test_an_absent_workspace_is_not_removed_before_it_is_made(self):
+        # Absent at the check, so there is nothing of ours to clear: no rm runs
+        # before the build makes it (rm on a path another account made in
+        # between would empty what it could inside it).
+        (self.bindir / "rm").write_text(RM_LOGGING_STUB)
+        (self.bindir / "rm").chmod(0o755)
+        r = self.build()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        first = self.calls().splitlines()[0]
+        self.assertFalse(first.startswith("host-rm "), self.calls())
+        self.assertIn(f"host-rm -rf {self.default_ws}", self.calls())   # the EXIT trap's
+        self.assertFalse(self.default_ws.exists())
 
     def test_a_failed_build_still_removes_the_workspace(self):
         r = self.build(SBX_FAIL="exec")

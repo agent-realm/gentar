@@ -35,7 +35,9 @@ esac
 # template would be built from that account's directory. The default is per
 # user, and a symlink or a directory another user owns is refused before any
 # sbx call. It is made 0700, without -p, so a path someone else creates in
-# between stops the build instead of being used.
+# between stops the build instead of being used. An explicit
+# GENTAR_TEMPLATE_WS must sit in a directory only this account can write to,
+# or in a sticky one such as /tmp: its parents are not checked.
 WS=${GENTAR_TEMPLATE_WS:-${TMPDIR:-/tmp}/gentar-template-build-$(id -un)}
 
 command -v sbx >/dev/null || { echo "sbx not installed"; exit 1; }
@@ -45,7 +47,7 @@ if [ -L "$WS" ] || { [ -e "$WS" ] && [ ! -O "$WS" ]; }; then
   echo "builder workspace refused: $WS is a symlink or belongs to another user — remove it, or set GENTAR_TEMPLATE_WS" >&2
   exit 2
 fi
-rm -rf "$WS"
+[ ! -e "$WS" ] || rm -rf "$WS"     # absent at the check: nothing of ours to clear
 mkdir -p "$(dirname "$WS")"
 (umask 077; mkdir "$WS")
 trap 'rm -rf "$WS"' EXIT
