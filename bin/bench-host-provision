@@ -21,6 +21,10 @@
 #     benches only);
 #   - the bench workspace root (GENTAR_BENCH_WORKSPACE_ROOT, default
 #     /tmp/gentar-workspaces) owned by the bench account, 0700;
+#   - the arena lock root /tmp/gentar-locks-<account>, owned by the bench
+#     account, 0700: on rootless Docker the kit keeps the account's locks
+#     there, and refuses its runs if another account made it first, so it is
+#     claimed here, in the same tmpfiles file as the workspace root;
 #   - Docker's networks in GENTAR_DOCKER_POOL (default 10.201.0.0/16): keep it
 #     off every range the host's own networks use.
 #
@@ -36,9 +40,10 @@
 #
 # A second bench account on one host: run it again with its own
 # GENTAR_BENCH_ACCOUNT, GENTAR_BENCH_UID, GENTAR_BENCH_WORKSPACE_ROOT and
-# GENTAR_DOCKER_POOL. Each account gets its own tmpfiles rule and its own
-# subordinate ids; ranges that overlap another account's are refused, since
-# containers of the two would then share host ids.
+# GENTAR_DOCKER_POOL. Each account gets its own tmpfiles file (its workspace
+# root and its lock root) and its own subordinate ids; ranges that overlap
+# another account's are refused, since containers of the two would then share
+# host ids.
 #
 # Ubuntu 24.04 (noble) only: the package names, the Docker apt suite and the
 # AppArmor rule for rootlesskit are noble's. Anything else is refused before
@@ -86,6 +91,17 @@ done
 if [ -e "$WSROOT" ]; then
   ws_owner=$(stat -c %U "$WSROOT" 2>/dev/null || stat -f %Su "$WSROOT" 2>/dev/null || echo '?')
   [ "$ws_owner" = "$ACCOUNT" ] || refuse "$WSROOT exists and belongs to $ws_owner, not $ACCOUNT; choose another workspace root"
+fi
+# The arena lock root the kit picks on rootless Docker: /tmp/gentar-locks-<user>.
+# Its path is fixed by the kit, so one that exists already must be this
+# account's directory (a re-run); anything else is refused, never re-owned.
+LOCKROOT=${GENTAR_PROVISION_TMP:-/tmp}/gentar-locks-$ACCOUNT   # tests point the parent elsewhere
+[ "$LOCKROOT" != "$WSROOT" ] || refuse "GENTAR_BENCH_WORKSPACE_ROOT must not be the lock root $LOCKROOT"
+[ ! -L "$LOCKROOT" ] || refuse "the lock root $LOCKROOT is a symlink; remove it first"
+if [ -e "$LOCKROOT" ]; then
+  lr_owner=$(stat -c %U "$LOCKROOT" 2>/dev/null || stat -f %Su "$LOCKROOT" 2>/dev/null || echo '?')
+  [ "$lr_owner" = "$ACCOUNT" ] || refuse "the lock root $LOCKROOT exists and belongs to $lr_owner, not $ACCOUNT; remove it first (the kit would refuse $ACCOUNT's runs)"
+  [ -d "$LOCKROOT" ] || refuse "the lock root $LOCKROOT exists and is not a directory; remove it first"
 fi
 case "$POOL" in *[!0-9./]*|'') refuse "bad GENTAR_DOCKER_POOL: $POOL" ;; esac
 case "$SBX_VERSION" in *[!A-Za-z0-9.~:+-]*|'') refuse "bad SBX_VERSION: $SBX_VERSION" ;; esac
@@ -199,16 +215,17 @@ sudo loginctl enable-linger "$ACCOUNT"
 for _ in $(seq 1 20); do sudo test -S "$RUN/bus" && break; sleep 1; done
 sudo ls -ld "$RUN" "$RUN/bus"
 
-echo "== bench workspace root"
+echo "== bench workspace root and arena lock root"
 # One file per account: a second bench account must not replace the first's
-# rule. Earlier versions wrote one fixed file; this account's rule leaves it,
+# rules. Earlier versions wrote one fixed file; this account's rule leaves it,
 # and another account's stays until that account's own re-run.
 TMPFILES=/etc/tmpfiles.d/gentar-$ACCOUNT.conf
 OLD_TMPFILES=/etc/tmpfiles.d/gentar-workspaces.conf
-echo "d $WSROOT 0700 $ACCOUNT $ACCOUNT -" | sudo tee "$TMPFILES" >/dev/null
+{ echo "d $WSROOT 0700 $ACCOUNT $ACCOUNT -"
+  echo "d $LOCKROOT 0700 $ACCOUNT $ACCOUNT -"; } | sudo tee "$TMPFILES" >/dev/null
 if [ -f "$OLD_TMPFILES" ] && grep -q " $ACCOUNT $ACCOUNT -\$" "$OLD_TMPFILES"; then sudo rm -f "$OLD_TMPFILES"; fi
 sudo systemd-tmpfiles --create "$TMPFILES"
-stat -c '%n %U %a' "$WSROOT"
+stat -c '%n %U %a' "$WSROOT" "$LOCKROOT"
 
 echo "== $ACCOUNT's user units"
 sudo -u "$ACCOUNT" -H env ACCOUNT="$ACCOUNT" RUN="$RUN" POOL="$POOL" bash -euo pipefail <<'IN'
@@ -296,6 +313,15 @@ p() {  # $1 label, $2 expected-reason regex, rest = command run as the bench acc
     echo "INCONCLUSIVE: $label failed for another reason: ${err%%$'\n'*}"; fails=$((fails + 1))
   fi
 }
+lock_root_proof() {  # the lock root is the account's own directory, 0700
+  local lr
+  lr=$(stat -c '%F %U %a' "$LOCKROOT" 2>/dev/null || echo missing)
+  if [ "$lr" = "directory $ACCOUNT 700" ]; then
+    echo "ok: the lock root $LOCKROOT is $ACCOUNT's, 0700"
+  else
+    echo "FAIL: the lock root $LOCKROOT is '$lr', not a directory of $ACCOUNT's at 0700"; fails=$((fails + 1))
+  fi
+}
 # --- end proofs
 ADMIN_HOME=$(getent passwd "$ADMIN" | cut -d: -f6)
 p "ls $ADMIN_HOME"                  "permission denied"  ls "$ADMIN_HOME"
@@ -307,6 +333,7 @@ extra=$(extra_groups)
 if [ -n "$extra" ]; then
   echo "FAIL (groups other than $ACCOUNT and kvm): $extra"; fails=$((fails + 1))
 else echo "REFUSED: no group other than its own and kvm ($(id -nG "$ACCOUNT"))"; fi
+lock_root_proof
 A=(sudo -u "$ACCOUNT" -H env XDG_RUNTIME_DIR="$RUN" DOCKER_HOST="unix://$RUN/docker.sock")
 if "${A[@]}" docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q '"name=rootless'; then
   echo "ok: rootless docker"
