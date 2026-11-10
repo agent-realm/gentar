@@ -67,7 +67,9 @@ again with its own `GENTAR_BENCH_ACCOUNT`, `GENTAR_BENCH_UID`,
 own tmpfiles rule and its own subordinate ids. Ranges that overlap another
 account's are refused, because containers of the two would then share host
 ids. Then do the six steps above as that account, and give its runner its own
-`GENTAR_BENCH_WORKSPACE_ROOT` in the runner's `.env`. Its locks need no
+`GENTAR_BENCH_WORKSPACE_ROOT` in the runner's `.env`: the default
+`/tmp/gentar-workspaces` is shared, and a run refuses a root that is a symlink
+or another account's, so the second account would stop there. Its locks need no
 setting: on rootless Docker they are already private to the account (section
 5).
 
