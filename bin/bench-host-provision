@@ -41,8 +41,9 @@
 # A second bench account on one host: run it again with its own
 # GENTAR_BENCH_ACCOUNT, GENTAR_BENCH_UID, GENTAR_BENCH_WORKSPACE_ROOT and
 # GENTAR_DOCKER_POOL. Each account gets its own tmpfiles file (its workspace
-# root and its lock root) and its own subordinate ids; ranges that overlap another account's are refused, since
-# containers of the two would then share host ids.
+# root and its lock root) and its own subordinate ids; ranges that overlap
+# another account's are refused, since containers of the two would then share
+# host ids.
 #
 # Ubuntu 24.04 (noble) only: the package names, the Docker apt suite and the
 # AppArmor rule for rootlesskit are noble's. Anything else is refused before
