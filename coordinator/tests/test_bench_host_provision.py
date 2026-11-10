@@ -40,9 +40,11 @@ class BenchHostProvisionTest(unittest.TestCase):
         # the script's own default (/tmp/gentar-workspaces) may exist on the
         # machine running the tests (a bench host does) and decide the case
         # before the check under test.
+        # The lock root's parent, likewise: a bench host has /tmp/gentar-locks-<user>.
         e.update(PATH=f"{self.bin}:{os.environ['PATH']}",
                  GENTAR_OS_RELEASE=str(os_release or self.noble),
-                 GENTAR_BENCH_WORKSPACE_ROOT=str(self.tmp / "ws-root" / "gentar-workspaces"))
+                 GENTAR_BENCH_WORKSPACE_ROOT=str(self.tmp / "ws-root" / "gentar-workspaces"),
+                 GENTAR_PROVISION_TMP=str(self.tmp / "tmp"))
         e.update(env)
         return subprocess.run(["/bin/bash", str(SCRIPT)], env=e, capture_output=True, text=True,
                               timeout=60)
@@ -105,6 +107,71 @@ class BenchHostProvisionTest(unittest.TestCase):
         if re.fullmatch(r"[a-z][a-z0-9_-]*", me):
             r = self.run_script(GENTAR_BENCH_WORKSPACE_ROOT=str(mine), GENTAR_BENCH_ACCOUNT=me)
             self.assert_refused_untouched(r, "not as " + me)
+
+    def test_an_existing_lock_root_must_already_be_the_accounts(self):
+        # The kit keeps a rootless account's locks in /tmp/gentar-locks-<user>
+        # and refuses its runs if another account made it first. The path is
+        # fixed, so the script claims it, and refuses one it cannot claim.
+        parent = self.tmp / "tmp"
+        parent.mkdir()
+        theirs = parent / "gentar-locks-gentarbenchx"
+        theirs.mkdir()                                  # made first by someone else (us, here)
+        self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx"),
+                                      "not gentarbenchx; remove it first")
+        theirs.rmdir()
+        theirs.symlink_to(self.tmp)
+        self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT="gentarbenchx"),
+                                      "is a symlink; remove it first")
+        theirs.unlink()
+        me = subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()
+        if re.fullmatch(r"[a-z][a-z0-9_-]*", me):
+            mine = parent / f"gentar-locks-{me}"
+            mine.write_text("not a directory")
+            self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT=me), "is not a directory")
+            mine.unlink()
+            mine.mkdir(mode=0o700)                      # the account's own (a re-run): passes
+            self.assert_refused_untouched(self.run_script(GENTAR_BENCH_ACCOUNT=me), "not as " + me)
+
+    def test_the_workspace_root_is_not_the_lock_root(self):
+        root = self.tmp / "tmp" / "gentar-locks-arena"
+        self.assert_refused_untouched(self.run_script(GENTAR_BENCH_WORKSPACE_ROOT=str(root)),
+                                      "must not be the lock root")
+
+    def test_the_lock_root_is_claimed_beside_the_workspace_root_and_proved(self):
+        text = SCRIPT.read_text()
+        # the kit's path, /tmp unless a test points it elsewhere
+        self.assertIn('LOCKROOT=${GENTAR_PROVISION_TMP:-/tmp}/gentar-locks-$ACCOUNT', text)
+        # both rules in the account's one tmpfiles file, made by one --create
+        write = text[text.index('TMPFILES=/etc/tmpfiles.d/gentar-$ACCOUNT.conf'):]
+        write = write[:write.index('sudo systemd-tmpfiles --create "$TMPFILES"')]
+        self.assertIn('echo "d $WSROOT 0700 $ACCOUNT $ACCOUNT -"', write)
+        self.assertIn('echo "d $LOCKROOT 0700 $ACCOUNT $ACCOUNT -"', write)
+        self.assertIn('| sudo tee "$TMPFILES"', write)
+        # the proof runs with the others
+        self.assertIn("\nlock_root_proof\n", text[text.index("# --- end proofs"):])
+
+    @unittest.skipUnless(subprocess.run(["stat", "-c", "%U", "/"], capture_output=True).returncode == 0,
+                         "the proof reads GNU stat, as on the script's Ubuntu")
+    def test_the_lock_root_proof_counts(self):
+        text = SCRIPT.read_text()
+        block = text[text.index("# --- proofs"):text.index("# --- end proofs")]
+        me = subprocess.run(["id", "-un"], capture_output=True, text=True).stdout.strip()
+        root = self.tmp / "gentar-locks-x"
+
+        def proof():
+            code = block + f'\nfails=0\nACCOUNT={me}\nLOCKROOT={root}\nlock_root_proof\necho "fails=$fails"\n'
+            return subprocess.run(["/bin/bash", "-c", code], capture_output=True, text=True).stdout
+
+        out = proof()                                    # missing
+        self.assertIn("FAIL: the lock root", out)
+        self.assertIn("fails=1", out)
+        root.mkdir()
+        os.chmod(root, 0o755)                            # ours, too open
+        self.assertIn("fails=1", proof())
+        os.chmod(root, 0o700)                            # ours, 0700
+        out = proof()
+        self.assertIn("ok: the lock root", out)
+        self.assertIn("fails=0", out)
 
     def proof(self, *cmd_and_want):
         """Run the script's own p() with a sudo that just runs the command."""

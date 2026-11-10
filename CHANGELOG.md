@@ -234,6 +234,15 @@ Adopters pin a release tag, not a branch.
   `gentar/run.sh`.
 
 ### Changed
+- **`bin/bench-host-provision` claims the account's arena lock root.** On
+  rootless Docker the kit keeps an account's locks in
+  `/tmp/gentar-locks-<account>`, and refuses that account's runs if another
+  account made the directory first. The script now writes
+  `d /tmp/gentar-locks-<account> 0700 <account> <account> -` into the
+  account's tmpfiles file, beside its workspace root rule, and proves the
+  directory is the account's, 0700. One that already exists and is not the
+  account's directory (a symlink, a file, or another account's) is refused
+  before any change, never re-owned. Host tool, no kit file.
 - **On rootless Docker, the arena lock is private to the account.** `run.sh`
   and `bin/arena` kept every lock in a world-writable `/tmp/gentar-locks`, so
   that accounts sharing a Docker daemon would exclude each other. Accounts on

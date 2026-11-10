@@ -22,6 +22,11 @@ Running it again is safe. It sets up:
 - **sbx**, pinned (`SBX_VERSION`) and held.
 - **The headless keyring** described below, all three pieces.
 - **The workspace root**, owned by that account with mode 0700.
+- **The arena lock root** `/tmp/gentar-locks-<account>`, owned by that
+  account with mode 0700. On rootless Docker the kit keeps the account's
+  locks there and refuses its runs if another account made the directory
+  first, so the script claims it, in the same tmpfiles file as the workspace
+  root.
 - **Docker's address pool**, kept off the host's own networks
   (`GENTAR_DOCKER_POOL`).
 
@@ -30,6 +35,8 @@ It refuses before it changes anything when:
 - a parameter is bad;
 - the workspace root is not a dedicated directory (at least two levels
   deep, no `..`, and if it exists, already the bench account's);
+- `/tmp/gentar-locks-<account>` exists and is not already the bench
+  account's directory (a symlink, a file, or another account's);
 - the bench account already exists with another uid, or in another group
   than its own and kvm, or its uid belongs to another account.
 
@@ -64,14 +71,15 @@ Six things are each a step of their own:
 repository's jobs cannot reach another's files and logins: run the script
 again with its own `GENTAR_BENCH_ACCOUNT`, `GENTAR_BENCH_UID`,
 `GENTAR_BENCH_WORKSPACE_ROOT` and `GENTAR_DOCKER_POOL`. Each account gets its
-own tmpfiles rule and its own subordinate ids. Ranges that overlap another
+own tmpfiles file, with its workspace root and its lock root, and its own
+subordinate ids. Ranges that overlap another
 account's are refused, because containers of the two would then share host
 ids. Then do the six steps above as that account, and give its runner its own
 `GENTAR_BENCH_WORKSPACE_ROOT` in the runner's `.env`: the default
 `/tmp/gentar-workspaces` is shared, and a run refuses a root that is a symlink
 or another account's, so the second account would stop there. Its locks need no
-setting: on rootless Docker they are already private to the account (section
-5).
+setting: on rootless Docker they are already private to the account, in the
+`/tmp/gentar-locks-<account>` the script claimed for it (section 5).
 
 Without the script, or on another OS, do the steps by hand:
 
