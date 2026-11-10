@@ -239,6 +239,35 @@ lock_root_is_mine() {
   chmod 700 "$LOCK_ROOT"
 }
 # --- end lock root
+# --- lock reap
+# Reclaiming a dead holder's lock directory, in the no-flock fallback. Two
+# waiters can read the same dead holder's note; if both then removed the
+# directory, the second would remove the lock the first had just taken, and
+# both would run (#100). So a reclaim takes a reap mutex, "$d.reap", re-reads
+# the note under it, and removes the directory only if the note is still the
+# one judged dead; a directory with no note only if it is still over a minute
+# old. A reap mutex is held for milliseconds; one left by a waiter killed
+# inside it is cleared once it is a minute old. Waiters on an older pin take
+# no mutex, so the fix holds between waiters that have it. Same text in
+# bin/arena and the kit's run.sh (a test holds them equal).
+_lock_reap() {           # dir, note judged dead -> 0 removed · 1 busy or changed · 2 cannot remove
+  local d=$1 seen=$2 m="$1.reap" now rc=0
+  if ! (umask 000; mkdir "$m") 2>/dev/null; then
+    [ -z "$(find "$m" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rm -rf "$m" 2>/dev/null || true
+    return 1
+  fi
+  now=$(head -1 "$d/holder" 2>/dev/null || true)
+  if [ "$now" != "$seen" ]; then
+    rc=1
+  elif [ -z "$seen" ] && [ -z "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+    rc=1
+  elif ! rm -rf "$d" 2>/dev/null; then
+    rc=2
+  fi
+  rmdir "$m" 2>/dev/null || rm -rf "$m" 2>/dev/null || true
+  return "$rc"
+}
+# --- end lock reap
 lock_root_choose
 lock_root_make
 LOCK_BASE="$LOCK_ROOT/gentar-arena-$SUBJECT"
@@ -256,7 +285,7 @@ _lock_note() {           # write a holder note via temp + rename, never through 
   mv -f "$tmp" "$1" 2>/dev/null || rm -f "$tmp"
 }
 arena_lock() {            # wait|try -> 0 held · 1 held by another · 2 refused
-  local lock="$LOCK_BASE.lock" d="$LOCK_BASE.lock.d" pid said=0
+  local lock="$LOCK_BASE.lock" d="$LOCK_BASE.lock.d" pid note rrc said=0
   if [ -L "$LOCK_ROOT" ] || [ ! -d "$LOCK_ROOT" ] || [ -L "$lock" ] || [ -L "$d" ]; then
     echo "arena lock refused: $LOCK_ROOT (or a lock in it) is a symlink or not a directory — remove it, or set GENTAR_LOCK_DIR" >&2
     return 2
@@ -284,7 +313,8 @@ arena_lock() {            # wait|try -> 0 held · 1 held by another · 2 refused
     if (umask 000; mkdir "$d") 2>/dev/null; then
       _lock_mode=mkdir; _lock_note "$d/holder"; return 0
     fi
-    pid=$(awk '{print $2; exit}' "$d/holder" 2>/dev/null || true)
+    note=$(head -1 "$d/holder" 2>/dev/null || true)
+    pid=$(printf '%s\n' "$note" | awk '{print $2; exit}')
     case "$pid" in *[!0-9]*) pid="" ;; esac
     # Stale: a holder pid that no longer exists. kill -0 also fails for a
     # live process of ANOTHER user, so ask ps before deciding it is gone.
@@ -293,7 +323,12 @@ arena_lock() {            # wait|try -> 0 held · 1 held by another · 2 refused
     # in milliseconds) — without this, every later run waited forever.
     if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null && ! ps -p "$pid" >/dev/null 2>&1; } \
        || { [ -z "$pid" ] && [ -n "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
-      rm -rf "$d" 2>/dev/null && continue
+      rrc=0; _lock_reap "$d" "$note" || rrc=$?
+      [ "$rrc" = 0 ] && continue
+      if [ "$rrc" = 1 ]; then       # another waiter is reaping, or took it first
+        [ "$1" = try ] && return 1
+        sleep 1; continue
+      fi
       # Not ours to remove (a lock from before 0.4.0's shared directory, or
       # permissions changed by hand). Say exactly what to do rather than
       # hang or die on `set -e`.

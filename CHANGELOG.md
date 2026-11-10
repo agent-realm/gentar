@@ -198,6 +198,20 @@ Adopters pin a release tag, not a branch.
   (flock where available, else a lock directory, as the kit's), and
   `bin/arena down` leaves a live run's arena alone, refusing (exit 2) when
   it cannot check the lock.
+- **A dead holder's lock is reclaimed by one waiter only** (#100). On a host
+  without `flock` (stock macOS), the lock is a directory, and a waiter that
+  finds its holder dead removes it and takes the lock. Two waiters could both
+  read the dead holder's note before either removed it; the second then
+  removed the lock the first had just taken, and two arenas of one subject,
+  or two runs of one compose project, ran at once. Now a reclaim takes a reap
+  mutex (`<lock>.d.reap`, held for milliseconds, cleared when a minute old),
+  re-reads the note under it, and removes the directory only if the note is
+  still the one judged dead, or, with no note, if the directory is still over
+  a minute old. The same block in `run.sh` and `bin/arena`, held equal by a
+  test. Linux hosts take the `flock` path, which never had this race.
+  **Upgrade note:** a waiter on an older pin takes no mutex, so the race
+  stays open between it and one on this version. Kit file changed:
+  `gentar/run.sh`.
 
 ### Changed
 - **On rootless Docker, the arena lock is private to the account.** `run.sh`
