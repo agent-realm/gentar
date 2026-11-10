@@ -321,8 +321,14 @@ arena_lock() {            # wait|try -> 0 held · 1 held by another · 2 refused
     if (umask 000; mkdir "$d") 2>/dev/null; then
       _lock_mode=mkdir; _lock_note "$d/holder"; return 0
     fi
+    # No lock there, yet none could be made: a root this user cannot write.
+    # Say so; waiting would never end.
+    if [ ! -e "$d" ] && [ ! -L "$d" ] && { [ ! -w "$LOCK_ROOT" ] || [ ! -x "$LOCK_ROOT" ]; }; then
+      echo "arena lock refused: cannot create a lock in $LOCK_ROOT as $(id -un 2>/dev/null || echo this user) — fix its permissions, or set GENTAR_LOCK_DIR" >&2
+      return 2
+    fi
     note=$(head -n 1 "$d/holder" 2>/dev/null || true)
-    pid=""; read -r _ pid _ <<< "$note" || true
+    pid=${note#pid }; pid=${pid%% *}
     case "$pid" in *[!0-9]*) pid="" ;; esac
     # Stale: a holder pid that no longer exists. kill -0 also fails for a
     # live process of ANOTHER user, so ask ps before deciding it is gone.
@@ -617,7 +623,7 @@ ARENA=${GENTAR_DIR:-$HERE/.arena}
 # suites, and committing the bump as its own change; the engine's release
 # moves the default. GENTAR_REF overrides it for one run, and `main` stays
 # available for anyone tracking the engine on purpose.
-REF=${GENTAR_REF:-v0.11.0}
+REF=${GENTAR_REF:-v0.12.0}
 
 # --review: has this repo outgrown its suites?
 #
