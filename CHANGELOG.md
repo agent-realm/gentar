@@ -183,8 +183,9 @@ Adopters pin a release tag, not a branch.
   `mkdir -p`: on a host with several accounts the first one to run made it
   0755, readable by the others, and an account that made the path first, or a
   symlink there, had the arena use its directory. Now a symlink, a
-  non-directory, a directory another user owns, or a relative path is refused
-  (exit 2); a new root is made 0700 under `umask 077`, and one of ours is kept
+  non-directory, a directory another user owns, a relative path, or a path
+  ending in `/` or holding a `.` or `..` component (through which `[ -L ]`
+  would read a symlink's target) is refused (exit 2); a new root is made 0700 under `umask 077`, and one of ours is kept
   at 0700. The default path is unchanged, so a host's existing 0700 tmpfiles
   rule passes as it is. The same block in both scripts, held equal by a test.
   **Upgrade note:** on a host with more than one account, give each runner its
@@ -203,7 +204,10 @@ Adopters pin a release tag, not a branch.
   `GENTAR_TEMPLATE_WS`, and a path that was absent at that check is not
   removed before it is made. An explicit `GENTAR_TEMPLATE_WS` must sit in a
   directory only this account can write to, or in a sticky one such as
-  `/tmp`: its parents are not checked. **Upgrade note:** a `/tmp/gentar-template-build` left
+  `/tmp`: its parents are not checked. A path ending in `/` or holding a `.`
+  or `..` component is refused first: `[ -L "link/" ]` reads through the link,
+  and `rm -rf "link/"` removed the directory a symlink given that way pointed
+  to (the old `rm -rf && mkdir -p` had the same hole). **Upgrade note:** a `/tmp/gentar-template-build` left
   by an older build is no longer used; remove it by hand.
 - **Two `bin/arena run` calls in one checkout no longer tear each other
   down** (review B3, S2-2). They shared a compose project, and the second's

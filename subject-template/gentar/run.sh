@@ -839,10 +839,19 @@ ARENA_FILES=(-f docker-compose.yml)
 # be this account's own: a symlink, or a directory another user owns, is
 # refused (another account could read the benches, or hand the arena a
 # directory of its own). A new root is made 0700, and one of ours is kept at
-# 0700. On a host with several accounts give each runner its own root. Same
-# text in bin/arena and the kit's run.sh (a test holds them equal).
+# 0700. A path ending in / or holding a . or .. component is refused too:
+# a test on `link/` reads through the link. An explicit root must sit in a
+# directory only this account can write to, or a sticky one such as /tmp: its
+# parents are not checked. On a host with several accounts give each runner
+# its own root. Same text in bin/arena and the kit's run.sh (a test holds them
+# equal).
 workspace_root_own() {
   local root=$1
+  case "$root" in
+    */|*/.|*/..|*/./*|*/../*)
+      echo "workspace root refused: $root ends in / or holds a . or .. component, so a symlink in it would be followed — give it as a plain path (GENTAR_BENCH_WORKSPACE_ROOT)" >&2
+      return 2 ;;
+  esac
   case "$root" in
     /*) ;;
     *) echo "workspace root refused: $root is not an absolute path (GENTAR_BENCH_WORKSPACE_ROOT)" >&2; return 2 ;;

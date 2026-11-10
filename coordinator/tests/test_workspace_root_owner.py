@@ -117,6 +117,24 @@ class WorkspaceRootOwnerTest(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertFalse(target.exists())
 
+    def test_a_symlink_given_with_a_trailing_slash_or_a_dot_is_refused_and_left_alone(self):
+        # `[ -L "link/" ]` reads through the link, and -d/-O then test its
+        # target: a root given that way passed and was bound through the link.
+        theirs = self.tmp / "theirs"
+        theirs.mkdir(mode=0o755)
+        os.chmod(theirs, 0o755)
+        link = self.tmp / "ws"
+        link.symlink_to(theirs)
+        for script in (RUN, ARENA):
+            for given in (f"{link}/", f"{link}//", f"{link}/.", f"{self.tmp}/./ws",
+                          f"{self.tmp}/sub/../ws", "/"):
+                with self.subTest(script=script.name, given=given):
+                    r = self.own(given, script)
+                    self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                    self.assertIn("ends in / or holds a . or .. component", r.stderr)
+                    self.assertTrue(link.is_symlink())
+                    self.assertEqual(self.mode(theirs), 0o755)
+
     @unittest.skipIf(os.geteuid() == 0, "root owns nothing it cannot take")
     def test_a_directory_another_user_owns_is_refused(self):
         # /usr stands in for a directory someone else owns. The refusal comes
