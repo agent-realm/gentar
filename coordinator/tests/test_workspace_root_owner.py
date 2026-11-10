@@ -39,11 +39,13 @@ class WorkspaceRootOwnerTest(unittest.TestCase):
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
 
-    def own(self, root, script=RUN, path=None):
-        """Run the script's own function on ROOT; returns the process."""
-        code = f'set -euo pipefail\n{block(script)}\nworkspace_root_own "$1"\n'
+    def own(self, root, script=RUN, path=None, cwd=None):
+        """Run the script's own function on ROOT the way both scripts call it:
+        on the left of `|| exit 2`, so errexit is off inside it, as in
+        production; under umask 022, so a mode it leaves is its own doing."""
+        code = f'set -euo pipefail\numask 022\n{block(script)}\n{CALL.replace("$GENTAR_BENCH_WORKSPACE_ROOT", "$1")}\n'
         env = {"PATH": path or "/usr/bin:/bin"}
-        return subprocess.run(["/bin/bash", "-c", code, "own", str(root)], env=env,
+        return subprocess.run(["/bin/bash", "-c", code, "own", str(root)], env=env, cwd=cwd,
                               capture_output=True, text=True)
 
     def mode(self, p):
@@ -59,6 +61,12 @@ class WorkspaceRootOwnerTest(unittest.TestCase):
                 self.assertIn(CALL, text)
                 self.assertNotIn('mkdir -p "$GENTAR_BENCH_WORKSPACE_ROOT"', text)
                 self.assertIn('GENTAR_BENCH_WORKSPACE_ROOT:-/tmp/gentar-workspaces', text)
+
+    def test_both_scripts_define_it_before_they_call_it(self):
+        for script in (RUN, ARENA):
+            with self.subTest(script=script.name):
+                text = script.read_text()
+                self.assertLess(text.index("workspace_root_own() {"), text.index(CALL))
 
     def test_a_new_root_is_made_owner_only(self):
         for script in (RUN, ARENA):
@@ -126,8 +134,8 @@ class WorkspaceRootOwnerTest(unittest.TestCase):
         link = self.tmp / "ws"
         link.symlink_to(theirs)
         for script in (RUN, ARENA):
-            for given in (f"{link}/", f"{link}//", f"{link}/.", f"{self.tmp}/./ws",
-                          f"{self.tmp}/sub/../ws", "/"):
+            for given in (f"{link}/", f"{link}//", f"{link}/.", f"{link}/..",
+                          f"{self.tmp}/./ws", f"{self.tmp}/sub/../ws", "/"):
                 with self.subTest(script=script.name, given=given):
                     r = self.own(given, script)
                     self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
@@ -150,9 +158,7 @@ class WorkspaceRootOwnerTest(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
 
     def test_a_relative_path_is_refused_and_nothing_is_made(self):
-        code = f'set -euo pipefail\n{block(RUN)}\nworkspace_root_own "$1"\n'
-        r = subprocess.run(["/bin/bash", "-c", code, "own", "rel/ws"], cwd=self.tmp,
-                           env={"PATH": "/usr/bin:/bin"}, capture_output=True, text=True)
+        r = self.own("rel/ws", cwd=self.tmp)
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("not an absolute path", r.stderr)
         self.assertFalse((self.tmp / "rel").exists())
@@ -166,6 +172,59 @@ class WorkspaceRootOwnerTest(unittest.TestCase):
         r = self.own(root, path=f"{self.bin}:/usr/bin:/bin")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.mode(root), 0o700)
+
+    def stub_mkdir(self, body):
+        # `mkdir -p <parent>` goes to the real mkdir; the root's own mkdir runs BODY.
+        (self.bin / "mkdir").write_text('#!/bin/sh\n[ "$1" = -p ] && exec /bin/mkdir "$@"\n' + body)
+        (self.bin / "mkdir").chmod(0o755)
+        return f"{self.bin}:/usr/bin:/bin"
+
+    def test_a_race_lost_to_a_symlink_is_refused_and_its_target_left_alone(self):
+        # Another account makes the path, as a symlink, between the check and
+        # our mkdir, which then fails as it would on a host.
+        theirs = self.tmp / "theirs"
+        theirs.mkdir(mode=0o755)
+        os.chmod(theirs, 0o755)
+        root = self.tmp / "ws"
+        path = self.stub_mkdir(f'ln -s "{theirs}" "$1"; exit 1\n')
+        for script in (RUN, ARENA):
+            with self.subTest(script=script.name):
+                if root.is_symlink():
+                    root.unlink()
+                r = self.own(root, script, path=path)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertIn("workspace root refused", r.stderr)
+                self.assertTrue(root.is_symlink())
+                self.assertEqual(self.mode(theirs), 0o755)
+
+    def test_a_race_lost_to_a_directory_of_ours_passes(self):
+        # The same account made it in between (a second run of ours): mkdir
+        # fails, and the check after it accepts our own 0700 directory.
+        root = self.tmp / "ws"
+        r = self.own(root, path=self.stub_mkdir('/bin/mkdir -m 700 "$1"; exit 1\n'))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+        self.assertEqual(self.mode(root), 0o700)
+
+    def test_a_file_as_the_parent_is_refused_and_left_alone(self):
+        f = self.tmp / "file"
+        f.write_text("x")
+        for script in (RUN, ARENA):
+            with self.subTest(script=script.name):
+                r = self.own(f / "ws", script)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertIn("workspace root refused", r.stderr)
+                self.assertEqual(f.read_text(), "x")
+
+    def test_a_root_of_ours_missing_owner_bits_is_set_to_0700(self):
+        root = self.tmp / "ws"
+        root.mkdir()
+        os.chmod(root, 0o500)
+        ino = root.stat().st_ino
+        r = self.own(root)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.mode(root), 0o700)
+        self.assertEqual(root.stat().st_ino, ino)
 
     def test_a_root_that_is_still_missing_after_mkdir_is_refused(self):
         # A mkdir that makes nothing (on a host: a race lost to another account):
