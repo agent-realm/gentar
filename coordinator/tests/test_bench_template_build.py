@@ -206,7 +206,8 @@ class BuilderWorkspaceIsTheAccountsOwnTest(unittest.TestCase):
         (ours / "keep").write_text("not the builder's")
         link = self.tmp / "ws"
         link.symlink_to(ours)
-        for given in (f"{link}/", f"{link}/.", f"{self.tmp}/./ws", f"{self.tmp}/x/../ws"):
+        for given in (f"{link}/", f"{link}/.", f"{link}/..", f"{self.tmp}/./ws",
+                      f"{self.tmp}/x/../ws", ".", ".."):
             with self.subTest(given=given):
                 r = self.build(GENTAR_TEMPLATE_WS=given)
                 self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
