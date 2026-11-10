@@ -195,6 +195,26 @@ class BuilderWorkspaceIsTheAccountsOwnTest(unittest.TestCase):
         self.assertIn(f"host-rm -rf {self.default_ws}", self.calls())   # the EXIT trap's
         self.assertFalse(self.default_ws.exists())
 
+    def test_a_symlink_given_with_a_trailing_slash_is_refused_and_its_target_kept(self):
+        # `rm -rf "link/"` goes through the link: a build given a symlink to a
+        # directory of ours as `<link>/` removed that directory. rm is a stub
+        # here, so a broken check deletes nothing.
+        (self.bindir / "rm").write_text(RM_STUB)
+        (self.bindir / "rm").chmod(0o755)
+        ours = self.tmp / "ours"
+        ours.mkdir()
+        (ours / "keep").write_text("not the builder's")
+        link = self.tmp / "ws"
+        link.symlink_to(ours)
+        for given in (f"{link}/", f"{link}/.", f"{self.tmp}/./ws", f"{self.tmp}/x/../ws"):
+            with self.subTest(given=given):
+                r = self.build(GENTAR_TEMPLATE_WS=given)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertIn("ends in / or holds a . or .. component", r.stderr)
+                self.assertEqual(self.calls(), "")          # no sbx call, no rm
+                self.assertTrue(link.is_symlink())
+                self.assertTrue((ours / "keep").exists())
+
     def test_a_failed_build_still_removes_the_workspace(self):
         r = self.build(SBX_FAIL="exec")
         self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)

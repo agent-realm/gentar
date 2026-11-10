@@ -176,6 +176,21 @@ Adopters pin a release tag, not a branch.
   `--check` wait for a running arena of the subject too; `--check` holds
   the lock through its lint and dry-run, which read the engine it staged.
   Kit file changed: `gentar/run.sh`.
+- **In local mode the bench workspace root is the account's own.** Each
+  bench's workspace, the subject's code with it, lives under
+  `GENTAR_BENCH_WORKSPACE_ROOT` (default `/tmp/gentar-workspaces`), and compose
+  binds that root into the arena. `run.sh` and `bin/arena` made it with a bare
+  `mkdir -p`: on a host with several accounts the first one to run made it
+  0755, readable by the others, and an account that made the path first, or a
+  symlink there, had the arena use its directory. Now a symlink, a
+  non-directory, a directory another user owns, a relative path, or a path
+  ending in `/` or holding a `.` or `..` component (through which `[ -L ]`
+  would read a symlink's target) is refused (exit 2); a new root is made 0700 under `umask 077`, and one of ours is kept
+  at 0700. The default path is unchanged, so a host's existing 0700 tmpfiles
+  rule passes as it is. The same block in both scripts, held equal by a test.
+  **Upgrade note:** on a host with more than one account, give each runner its
+  own `GENTAR_BENCH_WORKSPACE_ROOT`, a 0700 directory it owns, from its own
+  tmpfiles rule; the default is shared. Kit file changed: `gentar/run.sh`.
 - **The template builder's workspace is the account's own.**
   `bench-template/build.sh` mounted a shared `/tmp/gentar-template-build` into
   its builder sandbox, after `rm -rf "$WS" && mkdir -p "$WS"`, where a failed
@@ -189,7 +204,10 @@ Adopters pin a release tag, not a branch.
   `GENTAR_TEMPLATE_WS`, and a path that was absent at that check is not
   removed before it is made. An explicit `GENTAR_TEMPLATE_WS` must sit in a
   directory only this account can write to, or in a sticky one such as
-  `/tmp`: its parents are not checked. **Upgrade note:** a `/tmp/gentar-template-build` left
+  `/tmp`: its parents are not checked. A path ending in `/` or holding a `.`
+  or `..` component is refused first: `[ -L "link/" ]` reads through the link,
+  and `rm -rf "link/"` removed the directory a symlink given that way pointed
+  to (the old `rm -rf && mkdir -p` had the same hole). **Upgrade note:** a `/tmp/gentar-template-build` left
   by an older build is no longer used; remove it by hand.
 - **Two `bin/arena run` calls in one checkout no longer tear each other
   down** (review B3, S2-2). They shared a compose project, and the second's

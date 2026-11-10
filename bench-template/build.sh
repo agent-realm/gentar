@@ -37,8 +37,15 @@ esac
 # sbx call. It is made 0700, without -p, so a path someone else creates in
 # between stops the build instead of being used. An explicit
 # GENTAR_TEMPLATE_WS must sit in a directory only this account can write to,
-# or in a sticky one such as /tmp: its parents are not checked.
+# or in a sticky one such as /tmp: its parents are not checked. A path ending
+# in / or holding a . or .. component is refused before anything else: a test
+# or an rm on `link/` goes through the link.
 WS=${GENTAR_TEMPLATE_WS:-${TMPDIR:-/tmp}/gentar-template-build-$(id -un)}
+case "$WS" in
+  .|..|*/|*/.|*/..|*/./*|*/../*)
+    echo "builder workspace refused: $WS ends in / or holds a . or .. component, so a symlink in it would be followed — give it as a plain path (GENTAR_TEMPLATE_WS)" >&2
+    exit 2 ;;
+esac
 
 command -v sbx >/dev/null || { echo "sbx not installed"; exit 1; }
 
