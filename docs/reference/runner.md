@@ -53,8 +53,10 @@ arena's collector, best-effort. A suite whose point is that path sets
 `[verify] self_report = true`: the relay then happens before the verdict,
 and the run fails unless the span lands in ClickHouse and joins the run's
 harness spans on `gentar.run_id` within 30 seconds (one assertion,
-`otlp-join run_id`). `otlp-selfreport` is that suite. The kit's dry-run has
-no ClickHouse, so such a suite reads UNVERIFIED there.
+`otlp-join run_id`). `otlp-selfreport` is that suite, and
+[example 10](../../examples/10-self-report/README.md) is a small one to
+copy. The kit's dry-run has no ClickHouse, so such a suite reads UNVERIFIED
+there.
 
 **Exit code is the verdict**, and it is the whole contract:
 
