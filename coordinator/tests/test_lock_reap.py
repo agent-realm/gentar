@@ -314,6 +314,24 @@ class TwoWaitersOnOneDeadHolderTest(unittest.TestCase):
                 self.assertIn("cannot be removed by", err)
                 self.assertTrue(d.is_dir())
 
+    @unittest.skipIf(os.geteuid() == 0, "root can write anywhere")
+    def test_a_lock_root_we_cannot_write_with_no_lock_in_it_is_named(self):
+        # Nothing there to judge stale, and nothing can be made: waiting
+        # would never end (it did, before 0.12.0, after one empty "in use").
+        for script, base in ((RUN, "gentar-arena-reap"), (ARENA, "gentar-project-reap")):
+            with self.subTest(script=script.name):
+                root, d = self.dead_lock_in(base)
+                shutil.rmtree(d)
+                os.chmod(root, 0o555)
+                try:
+                    c = self.waiter(script, "C", "", mode="wait")
+                    out, err = self.finish(c)
+                finally:
+                    os.chmod(root, 0o755)
+                self.assertEqual((self.tmp / "C-rc").read_text().strip(), "2", err)
+                self.assertIn("cannot create a lock in", err)
+                self.assertNotIn("in use", err)
+
     @unittest.skipIf(os.geteuid() == 0, "root can remove anything")
     def test_an_unremovable_stale_lock_is_named_by_the_loop(self):
         for script, base in ((RUN, "gentar-arena-reap"), (ARENA, "gentar-project-reap")):
