@@ -1,0 +1,29 @@
+# Software in the bench reports its own telemetry, and the arena proves the
+# report landed: not that a file was written, but that its span reached
+# ClickHouse and joined this run's harness spans on the run id.
+[scenario]
+name = "example-self-report"
+subject = "example"
+agent = "shell"
+
+[oracle]
+steps = [
+    # A stand-in for your tool's OTLP exporter: one span in OTLP/HTTP-JSON,
+    # written to the drop file. The coordinator gives every step
+    # GENTAR_RUN_ID; the span carries it as the resource attribute
+    # gentar.run_id, which is what the join reads.
+    '''trace=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+span=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+now="$(date +%s)000000000"
+printf '{"resourceSpans":[{"resource":{"attributes":[{"key":"gentar.run_id","value":{"stringValue":"%s"}}]},"scopeSpans":[{"spans":[{"traceId":"%s","spanId":"%s","name":"example-tool.run","kind":1,"startTimeUnixNano":"%s","endTimeUnixNano":"%s","status":{"code":1}}]}]}]}' "$GENTAR_RUN_ID" "$trace" "$span" "$now" "$now" > "$WORKSPACE_DIR/gentar-otlp.json"''',
+]
+
+# The proof: the coordinator relays the drop file to the arena's collector
+# before the verdict, and the run fails unless the span joins the run's
+# harness spans within 30 seconds (assertion `otlp-join run_id`).
+[verify]
+self_report = true
+
+# A file check alone would pass even if the collector rejected the body.
+[[verify.commands]]
+command = 'test -s "$WORKSPACE_DIR/gentar-otlp.json"'

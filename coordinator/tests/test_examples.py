@@ -68,6 +68,12 @@ class ExamplesTest(unittest.TestCase):
                 self.assertLessEqual(set(picks), offered, f"{f.name}: fixture for an unknown action")
         self.assertGreaterEqual(judged, 3)
 
+    def test_self_report_has_an_example(self):
+        # A new feature gets an example (the docs standard). `[verify]
+        # self_report` had none until example 10.
+        users = [f.name for f in self.scenarios() if TomlScenario(f).self_report]
+        self.assertTrue(users, "no example sets [verify] self_report")
+
     def test_every_relative_link_resolves(self):
         for readme in EXAMPLES.rglob("README.md"):
             for target in LINK.findall(readme.read_text()):

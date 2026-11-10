@@ -218,6 +218,12 @@ Adopters pin a release tag, not a branch.
   on, and `--check` reports each broken suite through lint and the
   dry-run.
 
+### Docs
+- **Example 10, self-report.** `examples/10-self-report/` shows the drop
+  file, `GENTAR_RUN_ID` and `[verify] self_report = true` in a shell-only
+  suite, with what passing and failing look like. `[verify] self_report`
+  had no example; a test now requires one.
+
 ## 0.11.0 — 2026-10-23
 
 Release notes: [docs/releases/v0.11.0.md](docs/releases/v0.11.0.md) (what changed and why, the breaking schema change, upgrade for adopters, what is not live-proven, known limits, verification).
